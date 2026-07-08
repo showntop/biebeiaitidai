@@ -1,0 +1,16 @@
+{
+  "id": "level-6",
+  "title": "入职第6天",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 42,
+  "whiteDistribution": {
+    "early":  { "routine": 0.50, "report": 0.30, "key": 0.13, "proposal": 0.07, "urgent": 0.00 },
+    "mid":    { "routine": 0.30, "report": 0.25, "key": 0.22, "proposal": 0.17, "urgent": 0.06 },
+    "crisis": { "routine": 0.20, "report": 0.20, "key": 0.22, "proposal": 0.25, "urgent": 0.13 }
+  },
+  "idleCardRatio": 0.13,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot"],
+  "challengeHint": "丢锅熟练关：白卡堆积时连炸清场"
+}

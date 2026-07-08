@@ -14,6 +14,11 @@ import level2Json from '../../config/levels/level-2.json';
 import level3Json from '../../config/levels/level-3.json';
 import level4Json from '../../config/levels/level-4.json';
 import level5Json from '../../config/levels/level-5.json';
+import level6Json from '../../config/levels/level-6.json';
+import level7Json from '../../config/levels/level-7.json';
+import level8Json from '../../config/levels/level-8.json';
+import level9Json from '../../config/levels/level-9.json';
+import level10Json from '../../config/levels/level-10.json';
 import type { CardCategory, PropType, GamePhase, ApprovalZone } from './types';
 
 export interface CardDef {
@@ -119,6 +124,11 @@ export const LevelSequence: LevelDef[] = [
   level3Json as unknown as LevelDef,
   level4Json as unknown as LevelDef,
   level5Json as unknown as LevelDef,
+  level6Json as unknown as LevelDef,
+  level7Json as unknown as LevelDef,
+  level8Json as unknown as LevelDef,
+  level9Json as unknown as LevelDef,
+  level10Json as unknown as LevelDef,
 ];
 
 /** §1.2 当前已解锁的道具（累积，关卡序列驱动）。 */

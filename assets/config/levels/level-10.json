@@ -1,0 +1,15 @@
+{
+  "id": "level-10",
+  "title": "入职第10天·Boss临检关",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 45,
+  "whiteDistribution": {
+    "early":  { "routine": 0.46, "report": 0.28, "key": 0.16, "proposal": 0.10, "urgent": 0.00 },
+    "mid":    { "routine": 0.26, "report": 0.24, "key": 0.22, "proposal": 0.20, "urgent": 0.08 },
+    "crisis": { "routine": 0.18, "report": 0.20, "key": 0.22, "proposal": 0.27, "urgent": 0.16 }
+  },
+  "idleCardRatio": 0.12,
+  "boss": { "enabled": true, "minSpawnSec": 20 },
+  "challengeHint": "Boss临检！及时用丢锅炸/拍马屁冻 Boss 卡，别让它走到处理区"
+}

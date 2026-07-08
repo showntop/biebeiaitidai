@@ -40,17 +40,19 @@ describe('Game · 全局模拟', () => {
 describe('Game · 道具生效接线（CardHit → Conveyor 变更）', () => {
   it('改需求经 Game 释放后，传送带对应卡变返工卡', () => {
     const g = new Game(DefaultLevel, new SeededRng(5));
-    // 在 slot0 放一张活跃白卡
+    // 在 slot0 放一张活跃白卡：固定槽位模型下 generate→入口(slot5)，需 step 把它走到 slot0
+    const N = DefaultLevel.slots;
     g.conveyor.reset();
     let guard = 0;
-    while (g.conveyor.slotAt(0)?.state !== 'active-white' && guard++ < 20) {
+    while (g.conveyor.slotAt(0)?.state !== 'active-white' && guard++ < 40) {
       g.conveyor.reset();
-      g.conveyor.generate('early');
+      g.conveyor.generate('early'); // 入口 slot(N-1)
+      for (let i = 0; i < N - 1; i++) g.conveyor.step(); // 走到 slot0
     }
     expect(g.conveyor.slotAt(0)!.state).toBe('active-white');
 
     g.beginCharge(PT.ChangeDemand);
-    g.tick(0.05); // 扫描推进到 slot0（不触发生成/位移：0.05 < 1.2/3.5）
+    g.tick(0.05); // 扫描推进到 slot0（不触发位移：0.05 < slotPeriod）
     g.release(PT.ChangeDemand);
 
     expect(g.conveyor.slotAt(0)!.state).toBe('rework'); // 经事件接线被污染

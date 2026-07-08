@@ -1,0 +1,16 @@
+{
+  "id": "level-7",
+  "title": "入职第7天·解锁拍马屁",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 44,
+  "whiteDistribution": {
+    "early":  { "routine": 0.48, "report": 0.30, "key": 0.15, "proposal": 0.07, "urgent": 0.00 },
+    "mid":    { "routine": 0.28, "report": 0.25, "key": 0.22, "proposal": 0.18, "urgent": 0.07 },
+    "crisis": { "routine": 0.20, "report": 0.20, "key": 0.22, "proposal": 0.26, "urgent": 0.14 }
+  },
+  "idleCardRatio": 0.12,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["kiss-up"],
+  "challengeHint": "解锁拍马屁！冻结传送带，危急时刻一键救场"
+}

@@ -1,120 +1,233 @@
-import { _decorator, Component, Node, Label, Color } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, input, Input, EventKeyboard } from 'cc';
 import { Game } from '../core/Game';
-import { DefaultLevel } from '../core/config';
+import { getLevel, BalanceConfig } from '../core/config';
 import { SeededRng } from '../core/rng';
+import { Session } from '../core/Session';
+import type { Storage } from '../core/Session';
+import { summarizeReport } from '../core/RunReport';
+import { buildReportText } from '../core/profile';
+import type { PlayerProfile } from '../core/profile';
 import { PropType as PT } from '../core/types';
-import type { Card, GameResult, PropType } from '../core/types';
+import type { Card, PropType } from '../core/types';
 
 const { ccclass, property } = _decorator;
 
 /**
- * 最小可玩版本入口（M2第一步）：
- * 挂在场景根节点上，持有 Game 实例，驱动 tick + 接收输入 + 渲染。
+ * Cocos 表现层薄壳 —— 持有 core.Session + core.Game，只做：驱动 tick、转发输入、按 Session 状态渲染。
  *
- * 不追求美术表现，先验证"Cocos表现层能正确订阅core事件并反映到画面"。
- * 后续美术资源接入后替换占位渲染即可。
+ * 关卡流（继续进度 / 选关 / 结算 / 解锁 / 段位 / 战报 / 下一关 / 重试）的可测逻辑全在 core/Session，
+ * 这里只把按钮事件翻译成 Session/Game 调用、把 Session 状态反映到节点。
+ *
+ * 【需在编辑器验证的节点接线】新增节点（相对旧版）：
+ *   - LevelLabel (Label)  顶部：当前关标题 + 段位 + 入职第N天
+ *   - ReportLabel (Label) 居中：局结束显示战报（结果/星级/峰值/连击 + 战报梗文案）；默认隐藏
+ *   - NextBtn (Node)      结算时显示，点按进入下一关（hasNext=false 时隐藏）
+ *   - RetryBtn (Node)     结算时显示，点按重试本关
+ * 旧节点沿用：Belt(6格)/Approval/Zone/Timer/ScanIndicator/Props(4按钮)/Result。
  */
 @ccclass('GameRunner')
 export class GameRunner extends Component {
-  @property(Node)
-  beltNode: Node | null = null; // 传送带容器（6个子节点=6格）
+  @property(Node) beltNode: Node | null = null;
+  @property(Label) approvalLabel: Label | null = null;
+  @property(Label) zoneLabel: Label | null = null;
+  @property(Label) timerLabel: Label | null = null;
+  @property(Node) propButtons: Node | null = null;
+  @property(Node) scanIndicator: Node | null = null;
+  @property(Label) levelLabel: Label | null = null; // 新增：关卡标题/段位/天数
+  @property(Label) reportLabel: Label | null = null; // 新增：战报
+  @property(Node) nextBtn: Node | null = null; // 新增：下一关
+  @property(Node) retryBtn: Node | null = null; // 新增：重试
 
-  @property(Label)
-  approvalLabel: Label | null = null;
-
-  @property(Label)
-  zoneLabel: Label | null = null;
-
-  @property(Label)
-  timerLabel: Label | null = null;
-
-  @property(Label)
-  resultLabel: Label | null = null;
-
-  @property(Node)
-  propButtons: Node | null = null; // 4个道具按钮容器
-
-  @property(Node)
-  scanIndicator: Node | null = null; // 蓄力扫描指示器
-
+  private session!: Session;
   private game!: Game;
-  private dt = 0.05; // 逻辑步进
+  private readonly dt = 0.05; // 逻辑固定步进
   private accumulator = 0;
   private slotNodes: Node[] = [];
   private scanPos = 0;
+  private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
+
+  private static readonly PROP_LABELS = ['加需求', '改需求', '丢锅', '拍马屁'];
+  private static readonly PROP_TYPES: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
 
   onLoad(): void {
-    this.game = new Game(DefaultLevel, new SeededRng(Date.now() % 100000));
+    this.session = new Session(new CocosStorage());
+    this.session.continueProgress(); // 继续"最高解锁关"进度
 
-    // 收集传送带子节点
-    if (this.beltNode) {
-      this.beltNode.children.forEach((child: Node) => this.slotNodes.push(child));
+    if (this.beltNode) this.beltNode.children.forEach((c: Node) => this.slotNodes.push(c));
+    // eslint-disable-next-line no-console
+    console.log(`[GameRunner] beltNode wired=${!!this.beltNode} slotNodes=${this.slotNodes.length}`);
+    this.slotNodes.forEach((n: Node, i: number) => {
+      if (!n.getComponent(Label)) {
+        // eslint-disable-next-line no-console
+        console.warn(`[GameRunner] Slot${i} 没有 Label 组件 → 卡牌渲染不出来。每个 Slot 子节点要挂 Label。`);
+      }
+    });
+    this.bindPropButtons();
+    this.bindFlowButtons();
+    this.startGame();
+
+    // 桌面预览键盘兜底（绕过按钮命中区问题，先验证游戏逻辑）
+    input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+    input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
+  }
+
+  onDestroy(): void {
+    input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+    input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
+  }
+
+  /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关。 */
+  private onKeyDown(e: EventKeyboard): void {
+    if (this.game.over) {
+      if (e.keyCode === 82) this.onRetry(); // R
+      else if (e.keyCode === 78) this.onNext(); // N
+      return;
     }
+    // 仅在未蓄力时开始（防键盘自动连按重置扫描）
+    if (this.game.prop.chargingProp === null) {
+      switch (e.keyCode) {
+        case 49: this.game.beginCharge(PT.AddDemand); return; // '1'
+        case 50: this.game.beginCharge(PT.ChangeDemand); return; // '2'
+        case 51: this.game.beginCharge(PT.ThrowPot); return; // '3'
+      }
+    }
+    if (e.keyCode === 52) this.game.useKissUp(); // '4'
+  }
 
-    // 绑定道具按钮
-    if (this.propButtons) {
-      const labels = ['加需求', '改需求', '丢锅', '拍马屁'];
-      const types = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
-      this.propButtons.children.forEach((btn: Node, i: number) => {
-        const label = btn.getComponent(Label);
-        if (label) label.string = labels[i] ?? '';
-        btn.on(Node.EventType.TOUCH_START, () => this.onPropDown(types[i]));
-        btn.on(Node.EventType.TOUCH_END, () => this.onPropUp(types[i]));
-        btn.on(Node.EventType.TOUCH_CANCEL, () => this.onPropCancel(types[i]));
-      });
+  private onKeyUp(e: EventKeyboard): void {
+    switch (e.keyCode) {
+      case 49: this.game.release(PT.AddDemand); break; // '1'
+      case 50: this.game.release(PT.ChangeDemand); break; // '2'
+      case 51: this.game.release(PT.ThrowPot); break; // '3'
     }
   }
 
-  start(): void {
-    this.render();
+  /* ---------- 关卡流 ---------- */
+
+  /** 用 Session 当前关开新一局。 */
+  private startGame(): void {
+    const idx = this.session.currentIndex;
+    const seed = (Date.now() % 100000) ^ ((idx + 1) * 2654435761); // 每关/每次尝试不同
+    this.game = new Game(getLevel(idx), new SeededRng(seed >>> 0), this.session.allowedPropsFor(idx));
+    this.accumulator = 0;
+    this.scanPos = 0;
+    this.reported = false;
+    this.hideReport();
+    this.refreshLockState();
   }
+
+  private onNext(): void {
+    if (this.session.startNext()) this.startGame();
+  }
+  private onRetry(): void {
+    this.startGame();
+  }
+
+  /** 局结束：写战报、解锁/段位/存档、展示结算。 */
+  private finishAndShowReport(): void {
+    if (this.reported) return;
+    this.reported = true;
+    const idx = this.session.currentIndex;
+    const report = this.game.buildReport(idx);
+    this.session.finishLevel(report); // applyRunResult + 存档 + phase=finished
+
+    if (this.reportLabel) {
+      const head = summarizeReport(report);
+      const meme = buildReportText(this.session.profile, report, idx);
+      const rank = this.session.rankLabel;
+      const day = this.session.daysEmployed;
+      this.reportLabel.string = `${meme}\n\n${head}\n段位：${rank} · 入职第${day}天`;
+      this.reportLabel.node.active = true;
+    }
+    if (this.nextBtn) this.nextBtn.active = this.session.hasNext;
+    if (this.retryBtn) this.retryBtn.active = true;
+  }
+
+  private hideReport(): void {
+    if (this.reportLabel) this.reportLabel.node.active = false;
+    if (this.nextBtn) this.nextBtn.active = false;
+    if (this.retryBtn) this.retryBtn.active = false;
+  }
+
+  /* ---------- 主循环 ---------- */
 
   update(dt: number): void {
     if (this.game.over) {
-      this.showResult();
+      if (!this.reported) this.finishAndShowReport();
       return;
     }
 
-    // 输入扫描进度推进（视觉反馈）
-    const chargingProp = this.game.prop.chargingProp;
-    if (chargingProp !== null) {
-      this.scanPos += dt / 1.0; // scanSec=1.0
-      if (this.scanPos > 1) this.scanPos = 1;
+    // 蓄力扫描视觉进度（时长读配置，避免与逻辑脱节）
+    const charging = this.game.prop.chargingProp;
+    if (charging !== null) {
+      this.scanPos = Math.min(1, this.scanPos + dt / BalanceConfig.control.scanSec);
     } else {
       this.scanPos = 0;
     }
 
-    // 逻辑步进（固定dt）
+    // 逻辑固定步进
     this.accumulator += dt;
-    while (this.accumulator >= this.dt) {
+    let guard = 0;
+    while (this.accumulator >= this.dt && guard++ < 100) {
       this.accumulator -= this.dt;
       this.game.tick(this.dt);
       if (this.game.over) break;
     }
-
     this.render();
   }
 
   /* ---------- 输入 ---------- */
 
+  private bindPropButtons(): void {
+    if (!this.propButtons) {
+      // eslint-disable-next-line no-console
+      console.warn('[GameRunner] propButtons 未接线：底部4个道具按钮点不到。把 Props 节点拖进 propButtons 槽。');
+      return;
+    }
+    this.propButtons.children.forEach((btn: Node, i: number) => {
+      const label = btn.getComponent(Label);
+      if (label) label.string = GameRunner.PROP_LABELS[i] ?? '';
+      // 诊断：Cocos 3.x 触摸命中需要 UITransform 包围盒；纯 Node/小 Label 点不到
+      const ut = btn.getComponent(UITransform);
+      if (!ut) {
+        // eslint-disable-next-line no-console
+        console.warn(`[GameRunner] 道具按钮[${GameRunner.PROP_LABELS[i]}] 没有 UITransform，触摸命中区为 0 → 点不到。给该节点加 UITransform 并设 Width/Height（如 160×80），建议再加 Sprite 背景 + Button 组件。`);
+      } else if (ut.width <= 1 || ut.height <= 1) {
+        // eslint-disable-next-line no-console
+        console.warn(`[GameRunner] 道具按钮[${GameRunner.PROP_LABELS[i]}] UITransform 尺寸 ${ut.width}×${ut.height} 过小，几乎点不到。设成 160×80 左右。`);
+      }
+      const type = GameRunner.PROP_TYPES[i];
+      btn.on(Node.EventType.TOUCH_START, () => this.onPropDown(type));
+      btn.on(Node.EventType.TOUCH_END, () => this.onPropUp(type));
+      btn.on(Node.EventType.TOUCH_CANCEL, () => this.onPropCancel(type));
+    });
+  }
+
+  private bindFlowButtons(): void {
+    this.nextBtn?.on(Node.EventType.TOUCH_END, () => this.onNext());
+    this.retryBtn?.on(Node.EventType.TOUCH_END, () => this.onRetry());
+  }
+
   private onPropDown(prop: PropType): void {
-    if (prop === PT.KissUp) {
-      this.game.useKissUp();
-    } else {
-      this.game.beginCharge(prop);
-    }
+    if (prop === PT.KissUp) this.game.useKissUp();
+    else this.game.beginCharge(prop);
   }
-
   private onPropUp(prop: PropType): void {
-    if (prop !== PT.KissUp) {
-      this.game.release(prop);
-    }
+    if (prop !== PT.KissUp) this.game.release(prop);
+  }
+  private onPropCancel(prop: PropType): void {
+    if (prop !== PT.KissUp) this.game.cancel(prop);
   }
 
-  private onPropCancel(prop: PropType): void {
-    if (prop !== PT.KissUp) {
-      this.game.cancel(prop);
-    }
+  /** 按 §1.2 解锁状态置灰未解锁道具按钮（锁定道具 beginCharge 也会被 core 拒绝，这里是视觉提示）。 */
+  private refreshLockState(): void {
+    if (!this.propButtons) return;
+    this.propButtons.children.forEach((btn: Node, i: number) => {
+      const type = GameRunner.PROP_TYPES[i];
+      const unlocked = this.game.prop.isUnlocked(type);
+      const label = btn.getComponent(Label);
+      if (label) label.color = unlocked ? Color.WHITE : new Color(120, 120, 120, 160);
+    });
   }
 
   /* ---------- 渲染 ---------- */
@@ -122,10 +235,12 @@ export class GameRunner extends Component {
   private render(): void {
     const snap = this.game.getSnapshot();
 
-    // 认可度
-    if (this.approvalLabel) {
-      this.approvalLabel.string = `认可度: ${Math.round(snap.approval)}`;
+    if (this.levelLabel) {
+      const remain = Math.max(0, snap.duration - snap.elapsed);
+      // 暂留调试行：用于排查"画面不动/按钮没反应"。确认正常后可删掉 \n 及之后内容。
+      this.levelLabel.string = `${this.session.currentTitle()} | ${this.session.rankLabel} | 入职第${this.session.daysEmployed}天\n[debug] 剩${remain.toFixed(1)}s over=${this.game.over} ${this.game.result}`;
     }
+    if (this.approvalLabel) this.approvalLabel.string = `认可度: ${Math.round(snap.approval)}`;
     if (this.zoneLabel) {
       this.zoneLabel.string = snap.zone.toUpperCase();
       const colors: Record<string, Color> = {
@@ -136,46 +251,36 @@ export class GameRunner extends Component {
       };
       this.zoneLabel.color = colors[snap.zone] ?? Color.WHITE;
     }
-
-    // 倒计时
     if (this.timerLabel) {
       const remain = Math.max(0, snap.duration - snap.elapsed);
-      this.timerLabel.string = `${remain.toFixed(1)}s`;
+      this.timerLabel.string = this.game.over
+        ? `${remain.toFixed(1)}s | ${this.game.result}`
+        : `${remain.toFixed(1)}s`;
     }
 
-    // 传送带
     const cards = this.game.conveyor.cards;
-    for (let i = 0; i < this.slotNodes.length; i++) {
-      const node = this.slotNodes[i];
-      const card = cards[i];
-      this.renderSlot(node, card);
-    }
+    for (let i = 0; i < this.slotNodes.length; i++) this.renderSlot(this.slotNodes[i], cards[i] ?? null);
 
-    // 扫描指示器
-    if (this.scanIndicator && chargingPropCheck(this.game)) {
-      this.scanIndicator.active = true;
-      const slots = this.slotNodes.length;
-      const idx = Math.min(slots - 1, Math.floor(this.scanPos * slots));
-      if (this.slotNodes[idx]) {
-        const pos = this.slotNodes[idx].position;
-        this.scanIndicator.setPosition(pos.x, pos.y, 0);
+    if (this.scanIndicator) {
+      const charging = this.game.prop.chargingProp !== null;
+      this.scanIndicator.active = charging;
+      if (charging) {
+        const idx = Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
+        const target = this.slotNodes[idx];
+        if (target) this.scanIndicator.setPosition(target.position.x, target.position.y, 0);
       }
-    } else if (this.scanIndicator) {
-      this.scanIndicator.active = false;
     }
   }
 
   private renderSlot(node: Node, card: Card | null): void {
-    if (!card) {
-      node.getComponent(Label)!.string = '---';
-      return;
-    }
     const label = node.getComponent(Label);
     if (!label) return;
-
+    if (!card) {
+      label.string = '---';
+      return;
+    }
     let text = '';
     let color = Color.WHITE;
-
     switch (card.state) {
       case 'active-white':
         text = `${card.category}\n+${card.weight}`;
@@ -201,21 +306,77 @@ export class GameRunner extends Component {
     label.string = text;
     label.color = color;
   }
+}
 
-  private showResult(): void {
-    if (!this.resultLabel) return;
-    const r = this.game.result;
-    const texts: Record<string, string> = {
-      'win-hunt': 'AI摸鱼被劝退！猎杀通关！',
-      'win-survive': '今天AI还替代不了你',
-      lose: 'AI已能替代你！你被优化了',
-      ongoing: '',
-    };
-    this.resultLabel.string = texts[r] ?? '';
-    this.resultLabel.node.active = true;
+/**
+ * 平台存档适配：微信小游戏 wx 优先，浏览器 localStorage 兜底，都没有则不持久化。
+ * 只存 3 个数据字段（daysEmployed 是 getter，由 core/Session.hydrateProfile 在读档时重建）。
+ */
+class CocosStorage implements Storage {
+  private readonly KEY = 'braatn_profile_v1';
+
+  loadProfile(): PlayerProfile | null {
+    const raw = this.read();
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PlayerProfile;
+    } catch {
+      return null;
+    }
+  }
+
+  saveProfile(p: PlayerProfile): void {
+    const data = JSON.stringify({
+      highestUnlockedLevel: p.highestUnlockedLevel,
+      huntWinCount: p.huntWinCount,
+      star3Levels: p.star3Levels,
+    });
+    this.write(data);
+  }
+
+  private read(): string | null {
+    const w = (globalThis as { wx?: { getStorageSync?: (k: string) => unknown } }).wx;
+    if (w?.getStorageSync) {
+      try {
+        const v = w.getStorageSync(this.KEY);
+        return v && typeof v === 'string' ? v : null;
+      } catch {
+        /* fall through */
+      }
+    }
+    const ls = (globalThis as { localStorage?: StorageLike }).localStorage;
+    if (ls) {
+      try {
+        return ls.getItem(this.KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  private write(data: string): void {
+    const w = (globalThis as { wx?: { setStorageSync?: (k: string, v: string) => void } }).wx;
+    if (w?.setStorageSync) {
+      try {
+        w.setStorageSync(this.KEY, data);
+        return;
+      } catch {
+        /* fall through */
+      }
+    }
+    const ls = (globalThis as { localStorage?: StorageLike }).localStorage;
+    if (ls) {
+      try {
+        ls.setItem(this.KEY, data);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
-function chargingPropCheck(g: Game): boolean {
-  return g.prop.chargingProp !== null;
+interface StorageLike {
+  getItem(k: string): string | null;
+  setItem(k: string, v: string): void;
 }

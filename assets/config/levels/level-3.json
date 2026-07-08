@@ -1,16 +1,16 @@
 {
   "id": "level-3",
   "title": "入职第3天·小高峰",
-  "durationSec": 65,
+  "durationSec": 60,
   "slots": 6,
-  "approvalInit": 50,
+  "approvalInit": 44,
   "whiteDistribution": {
-    "early":  { "routine": 0.45, "report": 0.30, "key": 0.18, "proposal": 0.07, "urgent": 0.00 },
-    "mid":    { "routine": 0.25, "report": 0.25, "key": 0.25, "proposal": 0.18, "urgent": 0.07 },
-    "crisis": { "routine": 0.18, "report": 0.18, "key": 0.24, "proposal": 0.27, "urgent": 0.15 }
+    "early":  { "routine": 0.48, "report": 0.30, "key": 0.16, "proposal": 0.06, "urgent": 0.00 },
+    "mid":    { "routine": 0.28, "report": 0.25, "key": 0.23, "proposal": 0.16, "urgent": 0.08 },
+    "crisis": { "routine": 0.20, "report": 0.20, "key": 0.22, "proposal": 0.26, "urgent": 0.12 }
   },
-  "idleCardRatio": 0.10,
+  "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand"],
-  "challengeHint": "小高峰关：白卡生成节奏更快，建议猎杀式通关"
+  "challengeHint": "小高峰关：白卡生成更快，建议尝试猎杀式通关"
 }

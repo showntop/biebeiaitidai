@@ -2,15 +2,23 @@
   "add-demand": {
     "label": "加需求",
     "acquisition": "cd",
-    "cd": { "early": 3.0, "mid": 3.0, "crisis": 3.0 },
+    "cd": {
+      "early": 3.0,
+      "mid": 3.0,
+      "crisis": 3.0
+    },
     "totalCap": 5,
     "effect": "insert"
   },
   "change-demand": {
     "label": "改需求",
     "acquisition": "cd",
-    "cd": { "early": 4.5, "mid": 5.0, "crisis": 6.5 },
-    "totalCap": 7,
+    "cd": {
+      "early": 5.0,
+      "mid": 5.5,
+      "crisis": 7.0
+    },
+    "totalCap": 6,
     "effect": "rework"
   },
   "throw-pot": {
@@ -27,12 +35,24 @@
     "energyFillRateRatio": 0.3333,
     "energyPerSec": 0.02,
     "totalCap": 1,
-    "freezeSec": { "min": 1.5, "max": 2.0 },
+    "freezeSec": {
+      "min": 1.5,
+      "max": 2.0
+    },
     "effect": "freeze"
   },
   "perfectRewards": [
-    { "p": 0.8, "type": "cd-refill-10" },
-    { "p": 0.15, "type": "extra-use" },
-    { "p": 0.05, "type": "energy-full" }
+    {
+      "p": 0.8,
+      "type": "cd-refill-10"
+    },
+    {
+      "p": 0.15,
+      "type": "extra-use"
+    },
+    {
+      "p": 0.05,
+      "type": "energy-full"
+    }
   ]
 }

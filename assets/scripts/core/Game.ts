@@ -51,11 +51,11 @@ export class Game {
   private freezeRemaining = 0;
   private rng: Rng;
 
-  constructor(level: LevelDef = DefaultLevel, rng: Rng = defaultRng) {
+  constructor(level: LevelDef = DefaultLevel, rng: Rng = defaultRng, allowedProps?: PropType[]) {
     this.rng = rng;
     this.conveyor = new ConveyorSystem(BalanceConfig, level, this.bus, rng);
     this.approval = new ApprovalSystem(BalanceConfig, this.bus, level.approvalInit);
-    this.prop = new PropSystem(BalanceConfig, this.bus, rng, this.conveyor, level.slots);
+    this.prop = new PropSystem(BalanceConfig, this.bus, rng, this.conveyor, level.slots, allowedProps);
     this.ai = new AIActorSystem(this.bus, BalanceConfig);
     this.level = new LevelSystem(BalanceConfig, level);
     this.peakApproval = level.approvalInit;

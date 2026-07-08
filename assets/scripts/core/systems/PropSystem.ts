@@ -36,6 +36,8 @@ export class PropSystem {
   private lastHit = -Infinity;
   private clock = 0;
   private phase: GamePhase = 'early';
+  /** §1.2 本关已解锁的道具集合（错峰解锁）。未解锁的道具 canUse 恒为 false。 */
+  private allowed: Set<PropType>;
 
   constructor(
     private cfg: BalanceConfigT,
@@ -43,6 +45,7 @@ export class PropSystem {
     private rng: Rng,
     private belt: BeltView,
     private slots: number,
+    allowedProps?: readonly PropType[],
   ) {
     this.rt = {
       [PT.AddDemand]: this.freshRuntime(PT.AddDemand),
@@ -50,6 +53,7 @@ export class PropSystem {
       [PT.ThrowPot]: this.freshRuntime(PT.ThrowPot),
       [PT.KissUp]: this.freshRuntime(PT.KissUp),
     };
+    this.allowed = new Set(allowedProps ?? ALL_PROPS);
   }
 
   private freshRuntime(prop: PropType): PropRuntime {
@@ -135,7 +139,18 @@ export class PropSystem {
 
   /* ---------- 状态查询（供表现层/UI） ---------- */
 
+  /** §1.2 本关是否解锁该道具（错峰解锁）。 */
+  isUnlocked(prop: PropType): boolean {
+    return this.allowed.has(prop);
+  }
+
+  /** 本关已解锁道具（供 UI 置灰锁定按钮）。 */
+  get allowedProps(): PropType[] {
+    return Array.from(this.allowed);
+  }
+
   canUse(prop: PropType): boolean {
+    if (!this.allowed.has(prop)) return false; // §1.2 未解锁不可用
     const r = this.rt[prop];
     const def = PropsConfig[prop];
     if (def.acquisition === 'cd') return r.cdRemaining <= 0 && r.uses > 0;
@@ -281,3 +296,6 @@ export class PropSystem {
 interface ConveyorLike extends BeltView {
   hasCardsInRange(slot: number, radius: number): boolean;
 }
+
+/** 全部道具（未指定解锁集合时的默认值，如 DefaultLevel / sim）。 */
+const ALL_PROPS: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
