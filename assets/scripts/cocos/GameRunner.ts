@@ -45,6 +45,8 @@ export class GameRunner extends Component {
   private slotNodes: Node[] = [];
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
+  private uiState: 'select' | 'playing' | 'result' = 'select';
+  private levelSelectRoot: Node | null = null;
 
   private static readonly PROP_LABELS = ['加需求', '改需求', '丢锅', '拍马屁'];
   private static readonly PROP_TYPES: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
@@ -64,7 +66,7 @@ export class GameRunner extends Component {
     });
     this.bindPropButtons();
     this.bindFlowButtons();
-    this.startGame();
+    this.showLevelSelect(); // M3: 先进选关页，不直接开打
 
     // 桌面预览键盘兜底（绕过按钮命中区问题，先验证游戏逻辑）
     input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
@@ -76,13 +78,23 @@ export class GameRunner extends Component {
     input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
   }
 
-  /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关。 */
+  /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关、B/Escape 返回选关。 */
   private onKeyDown(e: EventKeyboard): void {
+    // 选关页：数字键直接选关
+    if (this.uiState === 'select') {
+      const num = e.keyCode - 48; // '0'=48
+      if (num >= 1 && num <= this.session.levelCount) this.onLevelSelected(num - 1);
+      return;
+    }
+    // 结算页：R 重试 / N 下一关 / B 返回选关
     if (this.game.over) {
       if (e.keyCode === 82) this.onRetry(); // R
       else if (e.keyCode === 78) this.onNext(); // N
+      else if (e.keyCode === 66 || e.keyCode === 27) this.onBackToSelect(); // B / Escape
       return;
     }
+    // 游玩中：B/Escape 返回选关
+    if (e.keyCode === 66 || e.keyCode === 27) { this.onBackToSelect(); return; }
     // 仅在未蓄力时开始（防键盘自动连按重置扫描）
     if (this.game.prop.chargingProp === null) {
       switch (e.keyCode) {
@@ -95,6 +107,7 @@ export class GameRunner extends Component {
   }
 
   private onKeyUp(e: EventKeyboard): void {
+    if (this.uiState !== 'playing') return;
     switch (e.keyCode) {
       case 49: this.game.release(PT.AddDemand); break; // '1'
       case 50: this.game.release(PT.ChangeDemand); break; // '2'
@@ -112,7 +125,10 @@ export class GameRunner extends Component {
     this.accumulator = 0;
     this.scanPos = 0;
     this.reported = false;
+    this.uiState = 'playing';
     this.hideReport();
+    this.hideLevelSelect();
+    this.setGameUIVisible(true);
     this.refreshLockState();
   }
 
@@ -122,21 +138,142 @@ export class GameRunner extends Component {
   private onRetry(): void {
     this.startGame();
   }
+  private onBackToSelect(): void {
+    this.showLevelSelect();
+  }
+
+  /* ---------- M3: 关卡选择页 ---------- */
+
+  /** 显示选关页：隐藏游戏 UI，创建/显示选关覆盖层。 */
+  private showLevelSelect(): void {
+    this.uiState = 'select';
+    this.setGameUIVisible(false);
+    this.hideReport();
+    if (!this.levelSelectRoot) {
+      this.levelSelectRoot = this.createLevelSelectUI();
+    }
+    this.levelSelectRoot.active = true;
+    this.updateLevelSelectContent();
+  }
+
+  private hideLevelSelect(): void {
+    if (this.levelSelectRoot) this.levelSelectRoot.active = false;
+  }
+
+  /** 动态创建选关覆盖层（纯代码，不依赖场景节点）。 */
+  private createLevelSelectUI(): Node {
+    const root = new Node('LevelSelectUI');
+    root.layer = 33554432; // UI_2D
+    this.node.addChild(root);
+
+    // 标题
+    const title = this.mkLabel(root, 'Title', 0, 270, '别让AI替代你', 40, 600, 50);
+
+    // 段位信息行
+    this.mkLabel(root, 'RankInfo', 0, 220, '', 24, 700, 35);
+
+    // 关卡列表（10关，每关一行）
+    for (let i = 0; i < 10; i++) {
+      const y = 160 - i * 42;
+      const btn = new Node(`LevelBtn${i}`);
+      btn.layer = 33554432;
+      const ut = btn.addComponent(UITransform);
+      ut.setContentSize(500, 36);
+      const label = btn.addComponent(Label);
+      label.fontSize = 22;
+      label.lineHeight = 30;
+      label.horizontalAlign = 1;
+      label.verticalAlign = 1;
+      label.color = Color.WHITE;
+      btn.setPosition(0, y, 0);
+      root.addChild(btn);
+      // 触摸选关
+      btn.on(Node.EventType.TOUCH_END, () => this.onLevelSelected(i));
+    }
+
+    // 底部提示
+    this.mkLabel(root, 'Hint', 0, -270, '按数字键 1~10 选关 · 或点击列表', 16, 500, 25);
+
+    return root;
+  }
+
+  /** 刷新选关页内容（段位/关卡解锁/星级）。 */
+  private updateLevelSelectContent(): void {
+    if (!this.levelSelectRoot) return;
+    const rankInfo = this.levelSelectRoot.getChildByName('RankInfo');
+    if (rankInfo) {
+      const label = rankInfo.getComponent(Label);
+      if (label) {
+        label.string = `${this.session.rankLabel} · 入职第${this.session.daysEmployed}天 · 最高解锁：第${this.session.profile.highestUnlockedLevel + 1}关`;
+      }
+    }
+    for (let i = 0; i < 10; i++) {
+      const btn = this.levelSelectRoot.getChildByName(`LevelBtn${i}`);
+      if (!btn) continue;
+      const label = btn.getComponent(Label);
+      if (!label) continue;
+      const def = getLevel(i);
+      const unlocked = this.session.isLevelUnlocked(i);
+      const has3 = this.session.profile.star3Levels.includes(i);
+      const stars = has3 ? '★★★' : '☆☆☆';
+      const lockText = unlocked ? '' : ' [锁]';
+      label.string = `第${i + 1}关 ${def.title ?? def.id} ${stars}${lockText}`;
+      label.color = unlocked ? Color.WHITE : new Color(100, 100, 100, 160);
+    }
+  }
+
+  /** 选关回调。 */
+  private onLevelSelected(idx: number): void {
+    if (!this.session.isLevelUnlocked(idx)) return;
+    this.session.startLevel(idx);
+    this.startGame();
+  }
+
+  /** 切换游戏 UI（传送带/道具/扫描指示器/顶部标签）的可见性。 */
+  private setGameUIVisible(v: boolean): void {
+    if (this.beltNode) this.beltNode.active = v;
+    if (this.propButtons) this.propButtons.active = v;
+    if (this.scanIndicator) this.scanIndicator.active = v;
+    if (this.approvalLabel) this.approvalLabel.node.active = v;
+    if (this.zoneLabel) this.zoneLabel.node.active = v;
+    if (this.timerLabel) this.timerLabel.node.active = v;
+    if (this.levelLabel) this.levelLabel.node.active = v;
+  }
+
+  /** 工具：在 parent 下创建一个带 Label 的 Node。 */
+  private mkLabel(parent: Node, name: string, x: number, y: number, text: string, fontSize: number, w: number, h: number): Node {
+    const node = new Node(name);
+    node.layer = 33554432;
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(w, h);
+    const label = node.addComponent(Label);
+    label.string = text;
+    label.fontSize = fontSize;
+    label.lineHeight = fontSize + 8;
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+    label.color = Color.WHITE;
+    node.setPosition(x, y, 0);
+    parent.addChild(node);
+    return node;
+  }
 
   /** 局结束：写战报、解锁/段位/存档、展示结算。 */
   private finishAndShowReport(): void {
     if (this.reported) return;
     this.reported = true;
+    this.uiState = 'result';
     const idx = this.session.currentIndex;
     const report = this.game.buildReport(idx);
     this.session.finishLevel(report); // applyRunResult + 存档 + phase=finished
 
     if (this.reportLabel) {
+      const stars = '★'.repeat(report.stars) + '☆'.repeat(Math.max(0, 3 - report.stars));
       const head = summarizeReport(report);
       const meme = buildReportText(this.session.profile, report, idx);
       const rank = this.session.rankLabel;
       const day = this.session.daysEmployed;
-      this.reportLabel.string = `${meme}\n\n${head}\n段位：${rank} · 入职第${day}天`;
+      this.reportLabel.string = `${stars}\n${meme}\n\n${head}\n段位：${rank} · 入职第${day}天\n[N]下一关 [R]重试 [B]返回选关`;
       this.reportLabel.node.active = true;
     }
     if (this.nextBtn) this.nextBtn.active = this.session.hasNext;
@@ -152,6 +289,9 @@ export class GameRunner extends Component {
   /* ---------- 主循环 ---------- */
 
   update(dt: number): void {
+    // 选关页：不驱动游戏逻辑
+    if (this.uiState === 'select') return;
+
     if (this.game.over) {
       if (!this.reported) this.finishAndShowReport();
       return;
