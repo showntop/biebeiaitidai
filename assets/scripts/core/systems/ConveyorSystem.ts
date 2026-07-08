@@ -181,6 +181,21 @@ export class ConveyorSystem implements BeltView {
     this.bossOnBelt = false;
     this.lastBossTier = null;
   }
+
+  /**
+   * §2.1 复活辅助：清除场上所有 Boss 卡（避免复活后立刻二次死亡）。
+   * 返回移除的 Boss 卡数量。
+   */
+  clearBoss(): number {
+    const before = this.cards.length;
+    this.cards = this.cards.filter((c) => c.state !== CS.Boss);
+    const removed = before - this.cards.length;
+    if (removed > 0) {
+      this.bossOnBelt = false;
+      this.lastBossTier = null;
+    }
+    return removed;
+  }
 }
 
 function clamp(v: number, min: number, max: number): number {

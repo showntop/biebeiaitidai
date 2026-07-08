@@ -106,6 +106,19 @@ export class ApprovalSystem {
     this.frozen = false;
   }
 
+  /**
+   * §2.1 复活：把认可度强制回滚到指定值（默认为危险区下限69），
+   * 并把局结果从 lose 重置为 ongoing，给玩家一次翻盘机会。
+   */
+  revive(targetApproval: number): void {
+    this.approval = targetApproval;
+    this.zone = zoneFor(this.cfg, this.approval);
+    this.huntHoldAccum = 0;
+    this.result = GR.Ongoing;
+    this.frozen = false;
+    this.events.emit('ApprovalChanged', { from: 100, to: targetApproval, delta: targetApproval - 100 });
+  }
+
   private apply(delta: number): void {
     const from = this.approval;
     const { min, max } = this.cfg.approval;

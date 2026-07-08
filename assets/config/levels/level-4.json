@@ -1,0 +1,16 @@
+{
+  "id": "level-4",
+  "title": "入职第4天·甜点关",
+  "durationSec": 55,
+  "slots": 6,
+  "approvalInit": 35,
+  "whiteDistribution": {
+    "early":  { "routine": 0.60, "report": 0.25, "key": 0.10, "proposal": 0.05, "urgent": 0.00 },
+    "mid":    { "routine": 0.40, "report": 0.30, "key": 0.15, "proposal": 0.10, "urgent": 0.05 },
+    "crisis": { "routine": 0.28, "report": 0.22, "key": 0.18, "proposal": 0.20, "urgent": 0.12 }
+  },
+  "idleCardRatio": 0.20,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["add-demand", "change-demand"],
+  "challengeHint": "甜点关：认可度起手低、时长短，轻松通关刷正反馈"
+}

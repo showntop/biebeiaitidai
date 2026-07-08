@@ -9,6 +9,11 @@ import cardsJson from '../../config/cards.json';
 import propsJson from '../../config/props.json';
 import balanceJson from '../../config/balance.json';
 import levelJson from '../../config/level-default.json';
+import level1Json from '../../config/levels/level-1.json';
+import level2Json from '../../config/levels/level-2.json';
+import level3Json from '../../config/levels/level-3.json';
+import level4Json from '../../config/levels/level-4.json';
+import level5Json from '../../config/levels/level-5.json';
 import type { CardCategory, PropType, GamePhase, ApprovalZone } from './types';
 
 export interface CardDef {
@@ -76,12 +81,18 @@ export interface WhiteDist {
 
 export interface LevelDef {
   id: string;
+  /** §1.3 主题叙事标题（如"入职第1天"）。 */
+  title?: string;
   durationSec: number;
   slots: number;
   approvalInit: number;
   whiteDistribution: { early: WhiteDist; mid: WhiteDist; crisis: WhiteDist };
   idleCardRatio: number;
   boss: { enabled: boolean; minSpawnSec: number };
+  /** §1.2 本关解锁的道具类型（首次出现的道具）。 */
+  unlockedProps?: PropType[];
+  /** §6.2 三星挑战提示文案（关卡可覆写）。 */
+  challengeHint?: string;
 }
 
 /** 卡片定义表（按类别查权重/颜色/是否威胁）。 */
@@ -97,6 +108,35 @@ export const BalanceConfig = balanceJson as unknown as BalanceConfigT;
 
 /** 默认 60 秒标准关（策划文档§8 单局节奏模拟）。 */
 export const DefaultLevel = levelJson as unknown as LevelDef;
+
+/**
+ * M2 验证批次关卡序列（§1.1 锯齿难度曲线 3难+1甜点+1检查点）。
+ * 索引 0 即第1关。完成 N 关解锁 N+1 关。
+ */
+export const LevelSequence: LevelDef[] = [
+  level1Json as unknown as LevelDef,
+  level2Json as unknown as LevelDef,
+  level3Json as unknown as LevelDef,
+  level4Json as unknown as LevelDef,
+  level5Json as unknown as LevelDef,
+];
+
+/** §1.2 当前已解锁的道具（累积，关卡序列驱动）。 */
+export function unlockedPropsUpTo(levelIndex: number): PropType[] {
+  const acc = new Set<PropType>();
+  for (let i = 0; i <= levelIndex && i < LevelSequence.length; i++) {
+    const def = LevelSequence[i];
+    if (def.unlockedProps) for (const p of def.unlockedProps) acc.add(p);
+  }
+  return Array.from(acc);
+}
+
+/** 按关卡序号取 LevelDef（越界返回最后一关，便于"无限模式"兜底）。 */
+export function getLevel(index: number): LevelDef {
+  if (index < 0) return LevelSequence[0];
+  if (index >= LevelSequence.length) return LevelSequence[LevelSequence.length - 1];
+  return LevelSequence[index];
+}
 
 export function getCardDef(cat: CardCategory): CardDef {
   return CardsConfig[cat];

@@ -1,0 +1,16 @@
+{
+  "id": "level-1",
+  "title": "入职第1天",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 40,
+  "whiteDistribution": {
+    "early":  { "routine": 0.55, "report": 0.30, "key": 0.10, "proposal": 0.05, "urgent": 0.00 },
+    "mid":    { "routine": 0.35, "report": 0.25, "key": 0.20, "proposal": 0.15, "urgent": 0.05 },
+    "crisis": { "routine": 0.23, "report": 0.20, "key": 0.20, "proposal": 0.22, "urgent": 0.10 }
+  },
+  "idleCardRatio": 0.15,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["add-demand", "change-demand"],
+  "challengeHint": "用改需求把白卡变红卡，原样抵达会加分"
+}

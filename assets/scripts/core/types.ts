@@ -130,6 +130,8 @@ export interface GameEvents {
   AIExpression: { expression: ExpressionId; durationSec: number; priority: number };
   /** 局结束 */
   GameOver: { result: GameResult };
+  /** §2.1 复活生效（认可度回滚+加时+清Boss临检）。供 UI 弹窗/演出层订阅。 */
+  Revived: { approval: number; bonusSec: number };
 }
 
 /** AI 表情标识（对应策划文档§7 表情触发表，纯演出层用） */

@@ -33,12 +33,18 @@ export class Game {
   readonly prop: PropSystem;
   readonly ai: AIActorSystem;
   readonly level: LevelSystem;
+  private readonly cfg = BalanceConfig;
 
   elapsed = 0;
   peakApproval: number;
   bossInspectionsFired = 0;
   result: GameResult = 'ongoing';
   stars = 0;
+  maxCombo = 0;
+  /** §2.1 是否使用过复活（每关限1次，RunReport 采集）。 */
+  revived = false;
+  /** §2.1 复活后额外时长（秒）。 */
+  private bonusDuration = 0;
 
   private shiftAcc = 0;
   private genAcc = 0;
@@ -66,6 +72,9 @@ export class Game {
     this.bus.on('CardHit', ({ prop, slot }) => this.applyPropEffect(prop, slot));
     this.bus.on('ApprovalChanged', ({ to }) => {
       if (to > this.peakApproval) this.peakApproval = to;
+    });
+    this.bus.on('ComboUpdated', ({ combo }) => {
+      if (combo > this.maxCombo) this.maxCombo = combo;
     });
     this.bus.on('GameOver', ({ result }) => {
       this.result = result;
@@ -126,7 +135,7 @@ export class Game {
       if (this.over) return;
     }
 
-    if (this.elapsed >= this.level.def.durationSec && !this.over) {
+    if (this.elapsed >= this.level.def.durationSec + this.bonusDuration && !this.over) {
       this.approval.declareSurviveOnTimeout();
     }
   }
@@ -145,11 +154,31 @@ export class Game {
     return this.prop.useKissUp();
   }
 
+  /**
+   * §2.1 复活：仅在 lose 状态下可用，每关限1次。
+   * - 认可度回滚到危险区下限（69）
+   * - 倒计时额外 +8 秒
+   * - 清除场上 Boss 卡（防二次死亡）
+   * - 标记 revived=true，结算时进入 RunReport
+   * @returns 是否成功复活
+   */
+  revive(): boolean {
+    if (this.result !== 'lose') return false;
+    if (this.revived) return false; // 每关限1次
+    this.revived = true;
+    this.result = 'ongoing';
+    this.bonusDuration += 8;
+    this.approval.revive(this.cfg.zones.danger.lo); // 危险区下限 69
+    this.conveyor.clearBoss();
+    this.bus.emit('Revived', { approval: this.approval.value, bonusSec: 8 });
+    return true;
+  }
+
   /* ---------- 表现层快照 ---------- */
   getSnapshot() {
     return {
       elapsed: this.elapsed,
-      duration: this.level.def.durationSec,
+      duration: this.level.def.durationSec + this.bonusDuration,
       approval: this.approval.value,
       zone: this.approval.currentZone,
       phase: this.phase,
@@ -159,6 +188,8 @@ export class Game {
       combo: this.prop.currentCombo,
       frozen: this.isFrozen,
       beltSize: this.conveyor.size,
+      revived: this.revived,
+      bonusDuration: this.bonusDuration,
     };
   }
 
@@ -192,5 +223,24 @@ export class Game {
       bossInspectionsFired: this.bossInspectionsFired,
     };
     this.stars = this.level.starRating(this.result, stats);
+  }
+
+  /** 生成 §3.3 战报（Game 结束后调用，给 PlayerProfile 累加 / UI 渲染用）。 */
+  buildReport(levelIndex: number): import('./RunReport').RunReport {
+    const def = this.level.def;
+    return {
+      result: this.result,
+      stars: this.stars,
+      levelIndex,
+      levelId: def.id,
+      levelTitle: def.title ?? def.id,
+      peakApproval: this.peakApproval,
+      finalApproval: this.approval.value,
+      timeUsedSec: this.elapsed,
+      durationSec: def.durationSec + this.bonusDuration,
+      bossInspectionsFired: this.bossInspectionsFired,
+      maxCombo: this.maxCombo,
+      revived: this.revived,
+    };
   }
 }
