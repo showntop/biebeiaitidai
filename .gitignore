@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Cocos Creator generated local caches
+library/
+temp/
+local/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+
+# Build output
+dist/
+build/
+
+# Cocos Creator user-specific settings (optional, keep if team-shared)
+# profiles/

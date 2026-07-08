@@ -1,0 +1,38 @@
+{
+  "add-demand": {
+    "label": "加需求",
+    "acquisition": "cd",
+    "cd": { "early": 3.0, "mid": 3.0, "crisis": 3.0 },
+    "totalCap": 5,
+    "effect": "insert"
+  },
+  "change-demand": {
+    "label": "改需求",
+    "acquisition": "cd",
+    "cd": { "early": 4.5, "mid": 5.0, "crisis": 6.5 },
+    "totalCap": 7,
+    "effect": "rework"
+  },
+  "throw-pot": {
+    "label": "丢锅",
+    "acquisition": "energy",
+    "energyPerEffectiveHit": 0.25,
+    "totalCap": 2,
+    "clearRadius": 1,
+    "effect": "clear"
+  },
+  "kiss-up": {
+    "label": "拍马屁",
+    "acquisition": "energy",
+    "energyFillRateRatio": 0.3333,
+    "energyPerSec": 0.02,
+    "totalCap": 1,
+    "freezeSec": { "min": 1.5, "max": 2.0 },
+    "effect": "freeze"
+  },
+  "perfectRewards": [
+    { "p": 0.8, "type": "cd-refill-10" },
+    { "p": 0.15, "type": "extra-use" },
+    { "p": 0.05, "type": "energy-full" }
+  ]
+}

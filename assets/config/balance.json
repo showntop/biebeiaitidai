@@ -1,0 +1,27 @@
+{
+  "approval": { "init": 40, "min": 0, "max": 100 },
+  "zones": {
+    "hunt":   { "lo": 0,  "hi": 25,  "genBonus": 0.0,    "holdSec": 2.0 },
+    "good":   { "lo": 16, "hi": 49,  "genBonus": 0.0 },
+    "ok":     { "lo": 50, "hi": 69,  "genBonus": 0.10 },
+    "danger": { "lo": 70, "hi": 100, "genBonus": 0.22 }
+  },
+  "phases": {
+    "early":  { "fromSec": 0,  "toSec": 20, "genIntervalSec": 3.5, "slotPeriodSec": 1.2 },
+    "mid":    { "fromSec": 20, "toSec": 45, "genIntervalSec": 2.5, "slotPeriodSec": 1.0 },
+    "crisis": { "fromSec": 45, "toSec": 60, "genIntervalSec": 1.6, "slotPeriodSec": 0.8 }
+  },
+  "boss": {
+    "tellSlots": 4,
+    "guaranteeEnergyThreshold": 0.5,
+    "guaranteeFillTo": 0.5
+  },
+  "combo": {
+    "windowSec": 3.0,
+    "tierExpressions": 3
+  },
+  "control": {
+    "scanSec": 1.0,
+    "perfectWindowRatio": 0.3
+  }
+}

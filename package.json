@@ -1,0 +1,20 @@
+{
+  "name": "bie-rang-ai-tidai-ni",
+  "version": "0.1.0",
+  "private": true,
+  "description": "《别让AI替代你》核心规则层（纯TS，零Cocos依赖）+ 数据驱动配置 + 规则测试",
+  "scripts": {
+    "test": "vitest run --exclude tests/sim.bot.test.ts",
+    "test:watch": "vitest",
+    "sim": "vitest run tests/sim.bot.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.8"
+  },
+  "creator": {
+    "version": "3.8.8"
+  },
+  "uuid": "b8b9a762-697e-4e9e-b1ba-10adc306a2fc"
+}

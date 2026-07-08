@@ -1,0 +1,10 @@
+{
+  "routine":  { "weight": 2,  "color": "blue",   "threat": true,  "label": "常规" },
+  "report":   { "weight": 4,  "color": "orange", "threat": true,  "label": "汇报" },
+  "key":      { "weight": 5,  "color": "purple", "threat": true,  "label": "关键" },
+  "proposal": { "weight": 7,  "color": "cyan",   "threat": true,  "label": "提案" },
+  "urgent":   { "weight": 10, "color": "amber",  "threat": true,  "label": "紧急" },
+  "meeting":  { "weight": 0,  "color": "gray",   "threat": false, "label": "会议" },
+  "document": { "weight": 0,  "color": "gray",   "threat": false, "label": "文档" },
+  "boss":     { "weight": 0,  "color": "black",  "threat": false, "label": "Boss临检" }
+}
