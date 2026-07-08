@@ -145,9 +145,9 @@ describe('关卡序列与解锁节奏', () => {
     expect(LevelSequence[3].durationSec).toBeLessThan(LevelSequence[0].durationSec); // L4 甜点 < L1 标准
   });
 
-  it('初始认可度：甜点关(L4)最低、第二小高峰(L9)最高', () => {
+  it('初始认可度：甜点关(L4)最低、第二小高峰(L9)较高', () => {
     expect(LevelSequence[3].approvalInit).toBe(35); // L4 甜点最低
-    expect(LevelSequence[8].approvalInit).toBe(47); // L9 第二小高峰最高
+    expect(LevelSequence[8].approvalInit).toBe(44); // L9 第二小高峰（调优后从47降到44）
   });
 
   it('错峰解锁：L1-4 加/改需求、L5 丢锅、L7 拍马屁、L8+ 全道具', () => {

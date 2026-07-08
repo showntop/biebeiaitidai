@@ -3,11 +3,11 @@
   "title": "入职第9天·小高峰",
   "durationSec": 60,
   "slots": 6,
-  "approvalInit": 47,
+  "approvalInit": 44,
   "whiteDistribution": {
     "early":  { "routine": 0.44, "report": 0.30, "key": 0.18, "proposal": 0.08, "urgent": 0.00 },
     "mid":    { "routine": 0.25, "report": 0.24, "key": 0.24, "proposal": 0.19, "urgent": 0.08 },
-    "crisis": { "routine": 0.18, "report": 0.19, "key": 0.23, "proposal": 0.27, "urgent": 0.13 }
+    "crisis": { "routine": 0.18, "report": 0.19, "key": 0.23, "proposal": 0.30, "urgent": 0.10 }
   },
   "idleCardRatio": 0.09,
   "boss": { "enabled": false, "minSpawnSec": 999 },
