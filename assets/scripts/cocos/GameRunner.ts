@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Sprite, UITransform, Vec3, Color, instantiate, Prefab, Button, ProgressBar, math } from 'cc';
+import { _decorator, Component, Node, Label, Color } from 'cc';
 import { Game } from '../core/Game';
 import { DefaultLevel } from '../core/config';
 import { SeededRng } from '../core/rng';
