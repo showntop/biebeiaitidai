@@ -42,5 +42,18 @@
   "rect-snap-configs": {
     "enableSnapping": true,
     "snapThreshold": 4
+  },
+  "float-window": {
+    "position": {
+      "cc": {
+        "Camera": {
+          "dock": false,
+          "top": null,
+          "bottom": 10,
+          "left": null,
+          "right": 10
+        }
+      }
+    }
   }
 }
