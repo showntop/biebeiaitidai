@@ -134,11 +134,12 @@ describe('PlayerProfile 段位与累加', () => {
 });
 
 describe('关卡序列与解锁节奏', () => {
-  it('LevelSequence 有10关', () => {
-    expect(LevelSequence).toHaveLength(10);
+  it('LevelSequence 有20关', () => {
+    expect(LevelSequence).toHaveLength(20);
     expect(LevelSequence[0].id).toBe('level-1');
     expect(LevelSequence[4].id).toBe('level-5');
     expect(LevelSequence[9].id).toBe('level-10');
+    expect(LevelSequence[19].id).toBe('level-20');
   });
 
   it('锯齿曲线：甜点关(L4)时长最短', () => {
@@ -148,6 +149,10 @@ describe('关卡序列与解锁节奏', () => {
   it('初始认可度：甜点关(L4)最低、第二小高峰(L9)较高', () => {
     expect(LevelSequence[3].approvalInit).toBe(35); // L4 甜点最低
     expect(LevelSequence[8].approvalInit).toBe(44); // L9 第二小高峰（调优后从47降到44）
+    // L2/L3/L8 调优后降低
+    expect(LevelSequence[1].approvalInit).toBe(40); // L2
+    expect(LevelSequence[2].approvalInit).toBe(42); // L3
+    expect(LevelSequence[7].approvalInit).toBe(44); // L8
   });
 
   it('错峰解锁：L1-4 加/改需求、L5 丢锅、L7 拍马屁、L8+ 全道具', () => {
@@ -161,13 +166,19 @@ describe('关卡序列与解锁节奏', () => {
 
   it('getLevel 越界返回最后一关(无限模式兜底)', () => {
     expect(getLevel(-1).id).toBe('level-1');
-    expect(getLevel(99).id).toBe('level-10');
+    expect(getLevel(99).id).toBe('level-20');
   });
 
-  it('Boss 仅第10关启用（检查点），前9关禁用', () => {
+  it('Boss 仅第10关及L16+启用，前9关及L11-15禁用', () => {
     for (let i = 0; i < 9; i++) {
       expect(LevelSequence[i].boss.enabled).toBe(false);
     }
-    expect(LevelSequence[9].boss.enabled).toBe(true);
+    expect(LevelSequence[9].boss.enabled).toBe(true); // L10
+    for (let i = 10; i < 15; i++) {
+      expect(LevelSequence[i].boss.enabled).toBe(false); // L11-15
+    }
+    for (let i = 15; i < 20; i++) {
+      expect(LevelSequence[i].boss.enabled).toBe(true); // L16-20
+    }
   });
 });

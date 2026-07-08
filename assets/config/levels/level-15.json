@@ -1,0 +1,16 @@
+{
+  "id": "level-15",
+  "title": "入职第15天·检查点关",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 42,
+  "whiteDistribution": {
+    "early":  { "routine": 0.48, "report": 0.28, "key": 0.15, "proposal": 0.09, "urgent": 0.00 },
+    "mid":    { "routine": 0.26, "report": 0.24, "key": 0.22, "proposal": 0.20, "urgent": 0.08 },
+    "crisis": { "routine": 0.18, "report": 0.19, "key": 0.23, "proposal": 0.27, "urgent": 0.13 }
+  },
+  "idleCardRatio": 0.12,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "challengeHint": "检查点：综合难度中等，四道具配合流畅"
+}

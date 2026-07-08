@@ -1,0 +1,16 @@
+{
+  "id": "level-19",
+  "title": "入职第19天·甜点关",
+  "durationSec": 55,
+  "slots": 6,
+  "approvalInit": 36,
+  "whiteDistribution": {
+    "early":  { "routine": 0.52, "report": 0.28, "key": 0.13, "proposal": 0.07, "urgent": 0.00 },
+    "mid":    { "routine": 0.33, "report": 0.27, "key": 0.18, "proposal": 0.14, "urgent": 0.08 },
+    "crisis": { "routine": 0.22, "report": 0.20, "key": 0.21, "proposal": 0.24, "urgent": 0.13 }
+  },
+  "idleCardRatio": 0.16,
+  "boss": { "enabled": true, "minSpawnSec": 25 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "challengeHint": "甜点关：Boss仍会出但白卡密度放松"
+}

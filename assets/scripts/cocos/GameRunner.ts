@@ -80,10 +80,11 @@ export class GameRunner extends Component {
 
   /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关、B/Escape 返回选关。 */
   private onKeyDown(e: EventKeyboard): void {
-    // 选关页：数字键直接选关
+    // 选关页：数字键1-9选关，0=10
     if (this.uiState === 'select') {
       const num = e.keyCode - 48; // '0'=48
-      if (num >= 1 && num <= this.session.levelCount) this.onLevelSelected(num - 1);
+      if (num >= 1 && num <= 9) this.onLevelSelected(num - 1);
+      else if (num === 0) this.onLevelSelected(9); // '0' = L10
       return;
     }
     // 结算页：R 重试 / N 下一关 / B 返回选关
@@ -172,9 +173,9 @@ export class GameRunner extends Component {
     // 段位信息行
     this.mkLabel(root, 'RankInfo', 0, 220, '', 24, 700, 35);
 
-    // 关卡列表（10关，每关一行）
-    for (let i = 0; i < 10; i++) {
-      const y = 160 - i * 42;
+    // 关卡列表（20关，每关一行）
+    for (let i = 0; i < 20; i++) {
+      const y = 180 - i * 32;
       const btn = new Node(`LevelBtn${i}`);
       btn.layer = 33554432;
       const ut = btn.addComponent(UITransform);
@@ -192,7 +193,7 @@ export class GameRunner extends Component {
     }
 
     // 底部提示
-    this.mkLabel(root, 'Hint', 0, -270, '按数字键 1~10 选关 · 或点击列表', 16, 500, 25);
+    this.mkLabel(root, 'Hint', 0, -270, '按数字键 1~9 或点击列表选关', 16, 500, 25);
 
     return root;
   }
@@ -207,7 +208,7 @@ export class GameRunner extends Component {
         label.string = `${this.session.rankLabel} · 入职第${this.session.daysEmployed}天 · 最高解锁：第${this.session.profile.highestUnlockedLevel + 1}关`;
       }
     }
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 20; i++) {
       const btn = this.levelSelectRoot.getChildByName(`LevelBtn${i}`);
       if (!btn) continue;
       const label = btn.getComponent(Label);

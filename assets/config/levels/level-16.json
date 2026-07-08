@@ -1,0 +1,16 @@
+{
+  "id": "level-16",
+  "title": "入职第16天·Boss临检常态化",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 42,
+  "whiteDistribution": {
+    "early":  { "routine": 0.46, "report": 0.28, "key": 0.16, "proposal": 0.10, "urgent": 0.00 },
+    "mid":    { "routine": 0.25, "report": 0.24, "key": 0.23, "proposal": 0.21, "urgent": 0.07 },
+    "crisis": { "routine": 0.17, "report": 0.19, "key": 0.23, "proposal": 0.28, "urgent": 0.13 }
+  },
+  "idleCardRatio": 0.10,
+  "boss": { "enabled": true, "minSpawnSec": 22 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "challengeHint": "Boss临检常态化！及时用丢锅炸/拍马屁冻 Boss 卡"
+}

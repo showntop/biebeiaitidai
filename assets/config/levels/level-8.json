@@ -3,7 +3,7 @@
   "title": "入职第8天",
   "durationSec": 60,
   "slots": 6,
-  "approvalInit": 46,
+  "approvalInit": 44,
   "whiteDistribution": {
     "early":  { "routine": 0.45, "report": 0.30, "key": 0.17, "proposal": 0.08, "urgent": 0.00 },
     "mid":    { "routine": 0.26, "report": 0.24, "key": 0.24, "proposal": 0.19, "urgent": 0.07 },

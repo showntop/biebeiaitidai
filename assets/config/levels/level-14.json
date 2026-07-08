@@ -1,0 +1,16 @@
+{
+  "id": "level-14",
+  "title": "入职第14天·甜点关",
+  "durationSec": 55,
+  "slots": 6,
+  "approvalInit": 36,
+  "whiteDistribution": {
+    "early":  { "routine": 0.55, "report": 0.27, "key": 0.12, "proposal": 0.06, "urgent": 0.00 },
+    "mid":    { "routine": 0.35, "report": 0.28, "key": 0.17, "proposal": 0.12, "urgent": 0.08 },
+    "crisis": { "routine": 0.25, "report": 0.20, "key": 0.20, "proposal": 0.22, "urgent": 0.13 }
+  },
+  "idleCardRatio": 0.18,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "challengeHint": "甜点关：起手低、时长短，轻松刷正反馈"
+}

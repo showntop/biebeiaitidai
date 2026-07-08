@@ -3,7 +3,7 @@
   "title": "入职第3天·小高峰",
   "durationSec": 60,
   "slots": 6,
-  "approvalInit": 44,
+  "approvalInit": 42,
   "whiteDistribution": {
     "early":  { "routine": 0.48, "report": 0.30, "key": 0.16, "proposal": 0.06, "urgent": 0.00 },
     "mid":    { "routine": 0.28, "report": 0.25, "key": 0.23, "proposal": 0.16, "urgent": 0.08 },

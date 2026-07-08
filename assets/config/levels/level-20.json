@@ -1,0 +1,16 @@
+{
+  "id": "level-20",
+  "title": "入职第20天·检查点关·Boss决战",
+  "durationSec": 60,
+  "slots": 6,
+  "approvalInit": 42,
+  "whiteDistribution": {
+    "early":  { "routine": 0.44, "report": 0.28, "key": 0.17, "proposal": 0.11, "urgent": 0.00 },
+    "mid":    { "routine": 0.24, "report": 0.24, "key": 0.23, "proposal": 0.22, "urgent": 0.07 },
+    "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.14 }
+  },
+  "idleCardRatio": 0.10,
+  "boss": { "enabled": true, "minSpawnSec": 16 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "challengeHint": "验证批次最终关：Boss最早16秒出，全机制叠加"
+}

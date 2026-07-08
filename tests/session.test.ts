@@ -82,7 +82,7 @@ describe('Session · 结算与解锁', () => {
 
   it('末关通关：isLastLevel=true，hasNext=false（不会越界）', () => {
     const s = new Session();
-    const last = 9; // 末关 index（10 关序列）
+    const last = 19; // 末关 index（20 关序列）
     s.profile.highestUnlockedLevel = last;
     s.startLevel(last);
     s.finishLevel(mkReport('win-survive', 1, last));

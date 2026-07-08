@@ -1,0 +1,16 @@
+{
+  "id": "level-13",
+  "title": "入职第13天·小高峰",
+  "durationSec": 65,
+  "slots": 6,
+  "approvalInit": 40,
+  "whiteDistribution": {
+    "early":  { "routine": 0.42, "report": 0.28, "key": 0.18, "proposal": 0.12, "urgent": 0.00 },
+    "mid":    { "routine": 0.22, "report": 0.23, "key": 0.25, "proposal": 0.22, "urgent": 0.08 },
+    "crisis": { "routine": 0.16, "report": 0.18, "key": 0.25, "proposal": 0.29, "urgent": 0.12 }
+  },
+  "idleCardRatio": 0.14,
+  "boss": { "enabled": false, "minSpawnSec": 999 },
+  "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "challengeHint": "第三个小高峰：时长加长、危机密，建议猎杀式通关"
+}
