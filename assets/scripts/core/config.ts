@@ -81,7 +81,18 @@ export interface BalanceConfigT {
   approval: { init: number; min: number; max: number };
   zones: { hunt: ZoneDef; good: ZoneDef; ok: ZoneDef; danger: ZoneDef };
   phases: { early: PhaseDef; mid: PhaseDef; crisis: PhaseDef };
-  boss: { tellSlots: number; guaranteeEnergyThreshold: number; guaranteeFillTo: number };
+  boss: {
+    tellSlots: number;
+    guaranteeEnergyThreshold: number;
+    guaranteeFillTo: number;
+    /** §5.4 Boss 生成概率：分区基础概率 × 阶段倍率（hunt/good 区不生成）。 */
+    spawnProb: {
+      zone: { danger: number; ok: number };
+      phaseMul: { early: number; mid: number; crisis: number };
+    };
+  };
+  /** §6.2 星级评价阈值。 */
+  stars: { huntFastWinSec: number };
   combo: { windowSec: number; tierExpressions: number };
   control: { scanSec: number; perfectWindowRatio: number };
 }

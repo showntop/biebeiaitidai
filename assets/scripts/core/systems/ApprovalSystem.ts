@@ -116,7 +116,8 @@ export class ApprovalSystem {
     this.huntHoldAccum = 0;
     this.result = GR.Ongoing;
     this.frozen = false;
-    this.events.emit('ApprovalChanged', { from: 100, to: targetApproval, delta: targetApproval - 100 });
+    const max = this.cfg.approval.max;
+    this.events.emit('ApprovalChanged', { from: max, to: targetApproval, delta: targetApproval - max });
   }
 
   private apply(delta: number): void {

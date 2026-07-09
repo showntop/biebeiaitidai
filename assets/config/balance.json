@@ -50,7 +50,14 @@
   "boss": {
     "tellSlots": 4,
     "guaranteeEnergyThreshold": 0.5,
-    "guaranteeFillTo": 0.5
+    "guaranteeFillTo": 0.5,
+    "spawnProb": {
+      "zone": { "danger": 0.1, "ok": 0.04 },
+      "phaseMul": { "early": 0.5, "mid": 1.0, "crisis": 1.5 }
+    }
+  },
+  "stars": {
+    "huntFastWinSec": 40
   },
   "combo": {
     "windowSec": 3.0,

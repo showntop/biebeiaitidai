@@ -1,4 +1,4 @@
-import { tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics } from 'cc';
+import { tween, Tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics } from 'cc';
 import type { EventBus } from '../core/EventBus';
 import type { GameEvents, HitQuality, ApprovalZone } from '../core/types';
 
@@ -26,19 +26,39 @@ const UI_2D = 1 << 25; // 33554432
 export class FxLayer {
   private unsubs: (() => void)[] = [];
 
+  /** root 初始位置：屏震每次先归位到此基准，避免多次震动叠加导致画面残留偏移。 */
+  private readonly rootBase: Vec3;
+  /** approvalLabel 初始色：闪色恢复目标，避免连续触发时把"已改色"误记为基准。 */
+  private approvalBaseColor: Color | null = null;
+
+  /** 常驻全屏遮罩（复用单 node，零 GC；按需换色淡出，dispose 时销毁）。 */
+  private overlayNode: Node | null = null;
+  private overlayG: Graphics | null = null;
+  private overlayOpacity: UIOpacity | null = null;
+
   constructor(
     private bus: EventBus,
     private root: Node,
     private slots: Node[],
     private approvalLabel: Label | null,
   ) {
+    this.rootBase = root.position.clone();
+    if (approvalLabel && approvalLabel.isValid) this.approvalBaseColor = approvalLabel.color.clone();
+    this.ensureOverlay();
     this.bind();
   }
 
-  /** 释放所有事件订阅（换关前调用）。 */
+  /** 释放所有事件订阅 + 清理常驻遮罩 + 停掉进行中的震动/闪色 tween（换关前调用）。 */
   dispose(): void {
     this.unsubs.forEach(fn => fn());
     this.unsubs = [];
+    Tween.stopAllByTarget(this.root);
+    if (this.approvalLabel?.isValid) Tween.stopAllByTarget(this.approvalLabel.node);
+    if (this.overlayOpacity) Tween.stopAllByTarget(this.overlayOpacity);
+    if (this.overlayNode?.isValid) this.overlayNode.destroy();
+    this.overlayNode = null;
+    this.overlayG = null;
+    this.overlayOpacity = null;
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -99,12 +119,13 @@ export class FxLayer {
 
   private fxApprovalChange(delta: number): void {
     const label = this.approvalLabel;
-    if (!label || !label.isValid) return;
-    const orig = label.color.clone();
+    if (!label || !label.isValid || !this.approvalBaseColor) return;
+    // 停掉上一次的延迟恢复，否则连续触发会排队把基准色覆盖成中间色
+    Tween.stopAllByTarget(label.node);
     label.color = delta > 0 ? new Color(100, 255, 100) : new Color(255, 80, 80);
     tween(label.node)
       .delay(0.2)
-      .call(() => { if (label?.isValid) label.color = orig; })
+      .call(() => { if (label?.isValid) label.color = this.approvalBaseColor!; })
       .start();
   }
 
@@ -200,10 +221,15 @@ export class FxLayer {
       .start();
   }
 
-  /** 屏幕震动：随机偏移 + 衰减 + 归位。 */
+  /**
+   * 屏幕震动：随机偏移 + 衰减 + 归位到基准。
+   * 每次先停掉旧震动并归位基准，保证多次震动重叠（如 BossSpawned→BossInspection）
+   * 时画面最终精确回到 rootBase，不会残留偏移。
+   */
   private shake(intensity: number, duration: number): void {
-    const ox = this.root.position.x;
-    const oy = this.root.position.y;
+    const base = this.rootBase;
+    Tween.stopAllByTarget(this.root);
+    this.root.setPosition(base.x, base.y, base.z);
     const t = tween(this.root);
     const steps = 5;
     const stepDur = duration / (steps + 1);
@@ -213,29 +239,47 @@ export class FxLayer {
       const dy = (Math.random() - 0.5) * 2 * intensity * decay;
       t.by(stepDur, { position: new Vec3(dx, dy, 0) });
     }
-    t.to(stepDur, { position: new Vec3(ox, oy, 0) });
+    t.to(stepDur, { position: new Vec3(base.x, base.y, base.z) });
     t.start();
   }
 
-  /** 全屏色块遮罩：先保持再淡出。 */
+  /**
+   * 全屏色块遮罩：复用一个常驻 overlay node，换色重画 + 淡出。
+   * 相比每次 new Node + Graphics，消除高频触发（Boss/冻结/分区跨越）时的 node 创建/GC 开销。
+   */
   private flashOverlay(color: Color, duration: number): void {
+    this.ensureOverlay();
+    const g = this.overlayG!;
+    const op = this.overlayOpacity!;
+    Tween.stopAllByTarget(op);
+    g.clear();
+    g.fillColor = new Color(color.r, color.g, color.b, 255);
+    g.rect(-1500, -1500, 3000, 3000);
+    g.fill();
+    op.opacity = color.a;
+    tween(op)
+      .delay(duration * 0.3)
+      .to(duration * 0.7, { opacity: 0 })
+      .start();
+  }
+
+  /** 懒创建/复用常驻全屏遮罩 node（默认 opacity=0 不可见）。 */
+  private ensureOverlay(): void {
+    if (this.overlayNode?.isValid) return;
     const node = new Node('FxOverlay');
     node.layer = UI_2D;
     node.setPosition(0, 0, 0);
     const ut = node.addComponent(UITransform);
     ut.setContentSize(3000, 3000);
     const g = node.addComponent(Graphics);
-    g.fillColor = new Color(color.r, color.g, color.b, 255);
+    g.fillColor = new Color(255, 255, 255, 255);
     g.rect(-1500, -1500, 3000, 3000);
     g.fill();
-    this.root.addChild(node);
-
     const op = node.addComponent(UIOpacity);
-    op.opacity = color.a;
-    tween(op)
-      .delay(duration * 0.3)
-      .to(duration * 0.7, { opacity: 0 })
-      .call(() => { if (node.isValid) node.destroy(); })
-      .start();
+    op.opacity = 0;
+    this.root.addChild(node);
+    this.overlayNode = node;
+    this.overlayG = g;
+    this.overlayOpacity = op;
   }
 }

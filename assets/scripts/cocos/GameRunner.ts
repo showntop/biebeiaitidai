@@ -383,9 +383,7 @@ export class GameRunner extends Component {
     const snap = this.game.getSnapshot();
 
     if (this.levelLabel) {
-      const remain = Math.max(0, snap.duration - snap.elapsed);
-      // 暂留调试行：用于排查"画面不动/按钮没反应"。确认正常后可删掉 \n 及之后内容。
-      this.levelLabel.string = `${this.session.currentTitle()} | ${this.session.rankLabel} | 入职第${this.session.daysEmployed}天\n[debug] 剩${remain.toFixed(1)}s over=${this.game.over} ${this.game.result}`;
+      this.levelLabel.string = `${this.session.currentTitle()} | ${this.session.rankLabel} | 入职第${this.session.daysEmployed}天`;
     }
     if (this.approvalLabel) this.approvalLabel.string = `认可度: ${Math.round(snap.approval)}`;
     if (this.zoneLabel) {

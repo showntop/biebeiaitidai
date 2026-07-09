@@ -211,8 +211,9 @@ export class Game {
   private shouldSpawnBoss(phase: GamePhase, zone: ApprovalZone): boolean {
     if (!this.level.def.boss.enabled) return false;
     if (this.elapsed < this.level.def.boss.minSpawnSec) return false;
-    const zoneP = zone === 'danger' ? 0.1 : zone === 'ok' ? 0.04 : 0;
-    const phaseM = phase === 'crisis' ? 1.5 : phase === 'mid' ? 1.0 : 0.5;
+    const sp = BalanceConfig.boss.spawnProb;
+    const zoneP = zone === 'danger' ? sp.zone.danger : zone === 'ok' ? sp.zone.ok : 0;
+    const phaseM = sp.phaseMul[phase];
     return this.rng.next() < zoneP * phaseM;
   }
 

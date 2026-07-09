@@ -24,9 +24,10 @@ export class LevelSystem {
     // ★★：全程未进危险区（峰值<70）；猎杀式通关自动满足
     const neverDanger = stats.peakApproval < this.cfg.zones.danger.lo || result === 'win-hunt';
     if (neverDanger) stars = 2;
-    // ★★★（示例专属挑战，关卡可覆写）：猎杀通关且用时<40s，或全程未让 Boss 临检生效
+    // ★★★（示例专属挑战，关卡可覆写）：猎杀通关且用时<配置阈值，或全程未让 Boss 临检生效
     const challenge =
-      (result === 'win-hunt' && stats.timeUsedSec < 40) || stats.bossInspectionsFired === 0;
+      (result === 'win-hunt' && stats.timeUsedSec < this.cfg.stars.huntFastWinSec) ||
+      stats.bossInspectionsFired === 0;
     if (challenge) stars = 3;
     return stars;
   }
