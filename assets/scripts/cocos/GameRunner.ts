@@ -9,6 +9,7 @@ import { buildReportText } from '../core/profile';
 import type { PlayerProfile } from '../core/profile';
 import { PropType as PT } from '../core/types';
 import type { Card, PropType } from '../core/types';
+import { FxLayer } from './FxLayer';
 
 const { ccclass, property } = _decorator;
 
@@ -47,6 +48,7 @@ export class GameRunner extends Component {
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
   private uiState: 'select' | 'playing' | 'result' = 'select';
   private levelSelectRoot: Node | null = null;
+  private fx: FxLayer | null = null;
 
   private static readonly PROP_LABELS = ['加需求', '改需求', '丢锅', '拍马屁'];
   private static readonly PROP_TYPES: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
@@ -76,6 +78,7 @@ export class GameRunner extends Component {
   onDestroy(): void {
     input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
+    this.fx?.dispose();
   }
 
   /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关、B/Escape 返回选关。 */
@@ -131,6 +134,9 @@ export class GameRunner extends Component {
     this.hideLevelSelect();
     this.setGameUIVisible(true);
     this.refreshLockState();
+    // 动效层：每局重新订阅新 EventBus
+    this.fx?.dispose();
+    this.fx = new FxLayer(this.game.bus, this.node, this.slotNodes, this.approvalLabel);
   }
 
   private onNext(): void {
