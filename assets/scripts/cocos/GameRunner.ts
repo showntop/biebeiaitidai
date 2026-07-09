@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, input, Input, EventKeyboard } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, tween, Vec3, input, Input, EventKeyboard } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -334,14 +334,13 @@ export class GameRunner extends Component {
     this.propButtons.children.forEach((btn: Node, i: number) => {
       const label = btn.getComponent(Label);
       if (label) label.string = GameRunner.PROP_LABELS[i] ?? '';
-      // 诊断：Cocos 3.x 触摸命中需要 UITransform 包围盒；纯 Node/小 Label 点不到
-      const ut = btn.getComponent(UITransform);
-      if (!ut) {
+      // 命中区防御：缺 UITransform 或尺寸≤1 则自动补齐到 160×80（否则触摸点不到）
+      let ut = btn.getComponent(UITransform);
+      if (!ut) ut = btn.addComponent(UITransform);
+      if (ut.width <= 1 || ut.height <= 1) {
+        ut.setContentSize(160, 80);
         // eslint-disable-next-line no-console
-        console.warn(`[GameRunner] 道具按钮[${GameRunner.PROP_LABELS[i]}] 没有 UITransform，触摸命中区为 0 → 点不到。给该节点加 UITransform 并设 Width/Height（如 160×80），建议再加 Sprite 背景 + Button 组件。`);
-      } else if (ut.width <= 1 || ut.height <= 1) {
-        // eslint-disable-next-line no-console
-        console.warn(`[GameRunner] 道具按钮[${GameRunner.PROP_LABELS[i]}] UITransform 尺寸 ${ut.width}×${ut.height} 过小，几乎点不到。设成 160×80 左右。`);
+        console.warn(`[GameRunner] 道具按钮[${GameRunner.PROP_LABELS[i]}] 命中区过小，已自动补齐为 160×80（建议编辑器里加 Sprite 背景 + Button 做正式样式）。`);
       }
       const type = GameRunner.PROP_TYPES[i];
       btn.on(Node.EventType.TOUCH_START, () => this.onPropDown(type));
@@ -358,12 +357,25 @@ export class GameRunner extends Component {
   private onPropDown(prop: PropType): void {
     if (prop === PT.KissUp) this.game.useKissUp();
     else this.game.beginCharge(prop);
+    this.punchButton(prop, true);
   }
   private onPropUp(prop: PropType): void {
     if (prop !== PT.KissUp) this.game.release(prop);
+    this.punchButton(prop, false);
   }
   private onPropCancel(prop: PropType): void {
     if (prop !== PT.KissUp) this.game.cancel(prop);
+    this.punchButton(prop, false);
+  }
+
+  /** 道具按钮按下/松开缩放反馈（不依赖 Sprite，Label 节点也有视觉反馈）。 */
+  private punchButton(prop: PropType, down: boolean): void {
+    if (!this.propButtons) return;
+    const i = GameRunner.PROP_TYPES.indexOf(prop);
+    const btn = this.propButtons.children[i];
+    if (!btn) return;
+    const s = down ? 0.92 : 1;
+    tween(btn).to(0.05, { scale: new Vec3(s, s, 1) }).start();
   }
 
   /** 按 §1.2 解锁状态置灰未解锁道具按钮（锁定道具 beginCharge 也会被 core 拒绝，这里是视觉提示）。 */
@@ -413,6 +425,9 @@ export class GameRunner extends Component {
         const idx = Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
         const target = this.slotNodes[idx];
         if (target) this.scanIndicator.setPosition(target.position.x, target.position.y, 0);
+        // 蓄力进度可视化：指示器随 scanPos 0→1 放大，给"蓄满了"的直观反馈
+        const s = 0.6 + this.scanPos * 0.8;
+        this.scanIndicator.setScale(s, s, 1);
       }
     }
   }

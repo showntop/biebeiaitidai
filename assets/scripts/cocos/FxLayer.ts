@@ -22,6 +22,11 @@ const UI_2D = 1 << 25; // 33554432
  *  - Revived      → 金色闪 + "复活 +8s"
  *  - GameOver     → 轻屏震
  *  - HuntChargeStart → 紫色脉冲 + "猎杀倒计时"
+ *  - HuntChargeBreak → 绿色脉冲 + "脱险"
+ *  - BossIncoming → 分级预警（tier 越近震/闪越急，≤2 格出"Boss逼近"浮字）
+ *  - PropUnavailable → 灰色 "Miss" 浮字
+ *  - PropCanceled   → 灰色 "取消" 浮字
+ *  - AIHit        → 暖色闪 + "拍中/完美拍中"
  */
 export class FxLayer {
   private unsubs: (() => void)[] = [];
@@ -75,6 +80,11 @@ export class FxLayer {
     this.on('Revived', () => this.fxRevived());
     this.on('GameOver', () => this.fxGameOver());
     this.on('HuntChargeStart', () => this.fxHuntCharge());
+    this.on('HuntChargeBreak', () => this.fxHuntBreak());
+    this.on('BossIncoming', ({ tier }) => this.fxBossIncoming(tier));
+    this.on('PropUnavailable', () => this.fxMiss());
+    this.on('PropCanceled', () => this.fxCancel());
+    this.on('AIHit', ({ quality }) => this.fxAIHit(quality));
   }
 
   private on<K extends keyof GameEvents>(name: K, fn: (p: GameEvents[K]) => void): void {
@@ -188,6 +198,39 @@ export class FxLayer {
   private fxHuntCharge(): void {
     this.flashOverlay(new Color(100, 80, 255, 80), 0.8);
     this.floatText('猎杀倒计时!', 0, 80, new Color(180, 120, 255), 1.2);
+  }
+
+  /* ---------- 猎杀中断（脱险） ---------- */
+
+  private fxHuntBreak(): void {
+    this.flashOverlay(new Color(100, 255, 150, 70), 0.5);
+    this.floatText('脱险!', 0, 60, new Color(120, 255, 160), 0.9);
+  }
+
+  /* ---------- Boss 分级预警（4格递进，越近越急） ---------- */
+
+  private fxBossIncoming(tier: number): void {
+    // tier: 4 最远 → 1 最近；越近 urgency 越高，震/闪越重
+    const urgency = (5 - tier) / 4; // 4→0.25 … 1→1
+    this.shake(2 + urgency * 6, 0.2 + urgency * 0.2);
+    this.flashOverlay(new Color(255, 60, 60, 40 + urgency * 100), 0.3);
+    if (tier <= 2) this.floatText('⚠ Boss 逼近!', 0, 60, new Color(255, 80, 80), 0.8);
+  }
+
+  /* ---------- Miss / 取消 / 拍马屁命中 ---------- */
+
+  private fxMiss(): void {
+    this.floatText('Miss', 0, -30, new Color(180, 180, 180), 0.6);
+  }
+
+  private fxCancel(): void {
+    this.floatText('取消', 0, -30, new Color(150, 150, 150), 0.5);
+  }
+
+  private fxAIHit(quality: HitQuality): void {
+    const perfect = quality === 'perfect';
+    this.flashOverlay(new Color(255, 180, 200, perfect ? 100 : 50), 0.4);
+    this.floatText(perfect ? '完美拍中!' : '拍中!', 0, 40, new Color(255, 200, 220), 0.8);
   }
 
   /* ---------- 工具方法 ---------- */
