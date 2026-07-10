@@ -44,7 +44,10 @@ export class EventBus {
     const set = this.handlers.get(name);
     if (!set || set.size === 0) return;
     // 拷贝一份再遍历，防止回调中 off/on 导致迭代异常。
-    for (const h of [...set]) (h as Handler<K>)(payload);
+    // 不用 `[...set]`：Cocos 的旧目标转译会把它错误编译为 `[].concat(set)`，
+    // 结果数组里装的是 Set 本身，Web/小游戏运行时会报 "h is not a function"。
+    const snapshot = Array.from(set);
+    for (const h of snapshot) (h as Handler<K>)(payload);
   }
 
   clear(): void {

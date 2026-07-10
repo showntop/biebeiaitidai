@@ -295,9 +295,90 @@ WeChat mini-game style. A simple flat icon of a clipboard/list with a few horizo
 > **v4 修正**（架构性错误，重要）：v3 实测出图（`image.0d9987c3ff.png`）背景里画了一张空椅子——但**椅子已经是资产0（角色0a/0b）的一部分**（0a/0b prompt 里明确写了"SITTING in an office chair, chair back visible"，椅子是烤进角色 sprite 里的，跟机器人是同一张图）。背景层再单独画一张椅子会导致拼合时**两把椅子重叠穿模**。已从背景 prompt 里彻底删除椅子，背景层只保留**墙 + 显示器 + 桌子**，椅子完全交给角色 sprite 层负责，两层各管各的，不重复。
 >
 > **v5 修正**：① **键盘同理也要删**——v4 漏删了键盘，键盘同样已经烤进角色0a/0b（"hands resting on a desk/keyboard"，机器人的手和键盘是同一张 sprite），背景层不该再画一份，否则和角色自带的键盘重叠穿模；② **桌面小摆件不该被禁**——v3 为了清空"墙面"上的多余家具（书架/绿植/装饰画等），矫枉过正连带把"桌面上可以有的小道具"也写进了禁用清单，其实之前讨论过办公喜剧的桌面彩蛋（马克杯/绿植盆栽/日历/便签等）是可以保留的，只要不影响机位对齐、不喧宾夺主。已把禁用范围收窄到"墙面"，桌面允许放 1-2 个小摆件。
+>
+> **v6 修正**（架构性根因，重要）：v5 出图（`bg-office.png` 1088×1920）像素级实测发现**显示器和桌面之间的间距只有图片高度的 6.9%**（屏幕底 y=52.3%、桌面线 y=59.3%），而角色 sprite（`char-back.png` 1024×1024）从头顶到键盘前沿的距离占角色高度的 52.6%——在角色显示尺寸为屏宽 56%（609px）时，头到键盘距离 320px，是背景留出的 133px 间距的 **2.4 倍**，导致角色头顶超出屏幕底部 187px、深深穿入显示器屏幕区域。**无论怎么调代码偏移量都无法解决**这个几何不兼容。已重写 prompt：显示器屏幕**只占图片高度的 10%~30%**（而非原来的 20%~52%），桌面线保持在 ~55%，屏幕底到桌面的间距增大到 **25%**（原图仅 6.9%），给角色 sprite 留出充足的垂直空间。
+>
+> **v6.1 修正**（v6 出图 `image.png` 768×1376 实测发现两个问题）：① **显示器支架没连到桌面**——prompt 说"stand connecting monitor to desk"，但 AI 画了一小段支架就停了，从支架底到桌面之间留了 27.5% 的空墙，显示器像飘在空中。② 根本原因是 prompt 逻辑写反了——不需要在背景里"留空给角色"，角色是叠在前景的 sprite，背景只需保证显示器足够高（屏幕底 ~30%），角色坐到桌面（~55%）时头顶自然在屏幕下方。**显示器支架必须从屏幕底部一路延伸到桌面表面，中间不留空墙。**
+>
+> **v6.2 修正**（v6.1 出图 `image.png` 实测：屏幕 20%~44%，间距仅 6.3%，又回到原点）：AI 反复无视"compact"、"8%~30%"等文字描述，把显示器画大画低。根因是 prompt 里"70-80% of image width"和"compact"自相矛盾——70%屏宽很大，AI 选了遵从宽度指令画大屏。已改为：① 显示器宽度降到 50-60%（而非 70-80%）；② 删掉所有"large/big"相关措辞；③ 用"upper fifth of the image"等分数描述替代百分比（AI 对"upper fifth"的遵从度高于"8%"）；④ 明确"the monitor is SMALL, the stand+wall below it is the TALL dominant element"。
+>
+> **v7 修正**（换思路，v6 三次出图全部比例不对）：AI 从零生成始终无法控制显示器尺寸/位置比例。改为两条路并行：
+> - **方案A（AI 提取）**：拿已有 UI 设计稿 `docs/UI.png`（768×1376，已有所需的显示器+桌面布局）当输入，用 AI 图像编辑提取其中的显示器和桌面、清除其他 UI 元素、补全支架，输出干净背景。优势：布局比例已有，AI 只做清理不重新构图。
+> - **方案B（代码生成，推荐）**：用 Python 按精确比例直接画一张背景图（纯色块矩形：米色墙+深灰屏幕+灰色支架+棕色桌面），零 AI 依赖，比例 100% 可控。flat vector 风格本身就是色块，程序画的矩形和 AI 画的没有本质区别。脚本：`python3 scripts/generate-bg.ts`
+
+### 方案A：从 UI.png 提取（AI 图像编辑）
+
+- **工具**：GPT-image（edit 模式）/ Nano Banana（图像编辑）
+- **输入图**：`docs/UI.png`
+- **尺寸**：1080×1920（如果工具支持指定输出尺寸）
+- **提示词**：
+```
+Edit this image: extract ONLY the monitor (the dark rectangular screen with its bezel/frame)
+and the desk (the brown/wooden horizontal surface) from this UI mockup. Remove ALL other
+elements — remove every dark bar, gray panel, colored button, text, icon, banner, and UI
+widget that is NOT the monitor or the desk.
+
+Rebuild the result as a CLEAN game background:
+- The monitor stays in its current position (upper portion of the image), but add a proper
+  monitor STAND: a thin vertical neck going from the bottom-center of the monitor ALL THE WAY
+  DOWN to the desk surface (no gap, no floating). The stand is flat dark-gray (#3C3A37).
+- The desk stays at its current position (lower-middle), as a simple flat brown slab (#A87C58).
+- Everything else is flat solid warm-beige wall (#EBE1D2), completely empty — no windows, no
+  pictures, no furniture, no UI elements, no text.
+- The monitor screen face is plain blank dark-gray (#3C3A37), no content on it.
+
+Style: flat cartoon vector, bold clean outlines (3-4px), minimal flat color blocks, ABSOLUTELY
+NO gradients, no shadows, no texture. Simple icon-like rendering. Portrait 9:16. No text, no
+UI, no characters, no chair, no keyboard.
+```
+
+### 方案B：代码生成（推荐，零 AI 依赖）
+
+```bash
+python3 scripts/generate-bg.ts
+```
+
+脚本按精确比例生成 `assets/resources/art/bg/bg-office.png`，比例与 `GameRunner.ts` 常量完全一致，无需验收。
+
+### 方案C（推荐）：方案B 骨架 + AI 美化
+
+方案B 的图比例精确但太朴素（纯色块）。先跑方案B 得到骨架图，再让 AI 在保持比例不变的前提下做"风格化美化"——加上光影、描边、细节、质感。AI 图像编辑比从零生成可靠得多，因为布局已经锁死，AI 不会把显示器画大。
+
+- **工具**：GPT-image（edit 模式）/ Nano Banana
+- **输入**：`assets/resources/art/bg/bg-office.png`（方案B 生成）
+- **提示词**：
+```
+Edit this image to add visual richness and polish while keeping EXACTLY the same layout and
+proportions — do NOT move, resize, or restructure any element. The dark-gray monitor screen
+must stay at the same position and same size, the thin monitor stand must stay exactly as
+is connecting the monitor to the desk, and the brown desk must stay at the same height.
+
+Add these refinements ONLY (no structural changes):
+- The wall: add subtle flat cartoon shading — a very faint warm gradient from slightly
+  lighter at top to slightly darker at bottom (still within the warm-beige palette, still
+  no harsh gradients), and a few soft round edge shadows where the monitor stand meets the
+  wall (subtle, flat-cartoon style).
+- The monitor bezel: add a soft inner highlight along the top edge of the bezel (suggests
+  a matte plastic material). The screen face stays blank dark-gray.
+- The monitor stand neck: add a slightly lighter thin highlight stripe down one side
+  (subtle cylindrical shading, flat style).
+- The desk surface: add a few horizontal wood-grain lines (very subtle, low-contrast,
+  same brown family color, no real wood texture) running across the desk, and a slightly
+  darker thin shadow line right under the monitor stand base where it meets the desk
+  (suggests the stand is sitting on the desk casting a small shadow).
+- The small potted plant on the left: make the leaves a richer green and add a couple
+  of leaf shapes (stays small but looks like a real plant, not a green square).
+- The mug on the right: add a small handle visible and a thin rim line at the top.
+- Add bold clean dark outlines (3-4px) around all shapes — the monitor, stand, desk, plant
+  pot, mug — to make everything look like clean flat vector illustration.
+
+Style: FLAT cartoon vector, bold clean outlines, minimal flat color blocks, NO realistic
+shading, NO photorealism, NO soft gradients, NO textures beyond the simple wood-grain
+lines. Casual WeChat mini-game art. Portrait 9:16.
+```
 
 - **工具**：即梦 / GPT-image
-- **参考图**：风格参考 = 【紧急任务卡样张】；机位/比例参考 = 主界面标准图 `image.5c840a7f91.png`
+- **参考图**：风格参考 = 【紧急任务卡样张】
 - **尺寸**：1080×1920（**竖屏 9:16**）
 - **提示词**：
 ```
@@ -312,33 +393,43 @@ head-on, NO perspective vanishing lines, NO diagonal/isometric angle, NO visible
 walls converging to a point. Everything is drawn as flat frontal shapes stacked top-to-bottom,
 like a 2D game screen mockup, not a 3D room render.
 
-SCENE (top to bottom): a plain flat SOLID warm-beige wall (approx #EBE1D2) filling the entire
-upper 2/3 of the image — the WALL itself must be completely EMPTY: no windows, no framed pictures,
-no bookshelf, no wall plants, no other desks/chairs/people, no glass partitions, nothing hanging
-or mounted on the wall. Centered in the upper-middle area: a LARGE flat monitor on a simple stand
-— the monitor should be BIG, occupying roughly 70-80% of the image width and a large portion of
-the upper area (this screen area will later have a conveyor-belt UI overlaid on top, so keep the
-screen face itself plain/blank, a flat dark-gray or #3C3A37 rectangle with a thin lighter bezel,
-no content drawn on it). Below the monitor: a simple flat rectangular wooden desk slab (approx
-#A87C58, plain, no drawers, no legs detail beyond simple flat shapes).
+SCENE (top to bottom, STRICT vertical proportions — these are critical for compositing):
 
-On the DESKTOP surface (not the wall), it's OK to add 1-2 small flat-cartoon desk props for
-office-comedy flavor — e.g. a small coffee mug, a tiny potted plant, or a desk calendar — kept
-small, off to one side, and not overlapping the center/keyboard area. Keep these minimal and
-flat-colored, no gradients.
+1. Wall above monitor (top ~8% of image): plain flat SOLID warm-beige wall (approx #EBE1D2).
+
+2. Monitor (the next ~20% of image height, i.e. roughly y=8% to y=28%): a SMALL flat monitor
+   centered on the wall. The monitor width is about 50-60% of image width (NOT 70-80%, NOT
+   large). The monitor HEIGHT is less than one quarter of the image height. The screen face is
+   a plain/blank flat dark-gray (#3C3A37) rectangle with a thin lighter bezel — NO content on
+   screen. The monitor is SMALL and positioned HIGH UP near the top of the image. Think of a
+   compact desktop monitor, NOT a large TV or giant display.
+
+3. Monitor stand + wall (the TALL middle section, roughly y=28% to y=55%, about one quarter of
+   the image height): this is the DOMINANT vertical element of the image. A simple thin monitor
+   stand — a flat dark-gray (#3C3A37) vertical neck about 5% of image width thick, going ALL
+   THE WAY DOWN from the monitor bottom-center to the desk surface, ending in a flat base foot
+   resting on the desk. The stand MUST physically connect the monitor to the desk with NO gap.
+   On either side of the thin stand, the warm-beige wall (#EBE1D2) is visible. This tall
+   wall+stand section is where a character sprite will be composited in front later — it must
+   be tall and open.
+
+4. Desk (y=~55% to ~68%): a simple flat rectangular wooden desk slab (approx #A87C58, plain, no
+   drawers). The monitor stand base sits ON this desk. 1-2 small desk props OK (mug, plant),
+   kept small and off to one side.
+
+5. Below desk (y=~68% to bottom): open warm-beige area, empty, for bottom UI buttons.
 
 DO NOT draw any chair or keyboard at all — NO chair, NO keyboard, not even an empty/unused one.
 Both the chair AND the keyboard are already part of a SEPARATE character sprite layer (drawn
-together with the robot in a different asset, hands resting on the keyboard) and will be
-composited on top of this background later. If a chair or keyboard is drawn here too, it will
-visually overlap and duplicate with the character sprite's own chair/keyboard. Leave the desk
-surface itself and the space in front of/under the desk empty and open aside from the 1-2 small
-desk props mentioned above.
+together with the robot in a different asset) and will be composited on top of this background
+later.
 
-Leave the area between the monitor and the desk open/uncluttered for later sprite overlays
-(conveyor belt, character+chair+keyboard sprite). Portrait 9:16 orientation. No text, no UI, no
-characters, no people, no chair, no keyboard, no gradients, no shadows, no perspective distortion.
+The WALL must be completely EMPTY: no windows, no framed pictures, no bookshelf, no wall plants,
+no glass partitions, nothing hanging or mounted. Portrait 9:16 orientation. No text, no UI, no
+characters, no people, no gradients, no shadows, no perspective distortion.
 ```
+
+> **v6.2 比例验收方法**：出图后运行 `python3 scripts/measure-bg.ts [图片路径]`。期望值：屏幕区域 y≈8%~28%，桌面线 y≈55%，屏幕底到桌面间距 ≥25%。关键检查：① 间距 ≥20%（否则角色穿模）；② 支架从屏幕底部连到桌面（无空墙）。两个条件都满足才能用。
 
 ---
 

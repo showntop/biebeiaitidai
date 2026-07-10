@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view, Graphics } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -43,6 +43,7 @@ export class GameRunner extends Component {
 
   // 美术资源：运行时从 resources/art/ 自动加载，编辑器里无需手动接线
   private artSprites: Map<string, SpriteFrame> = new Map();
+  private bgFillNode: Node | null = null;
   private bgNode: Node | null = null;
   private charNode: Node | null = null;
 
@@ -51,6 +52,8 @@ export class GameRunner extends Component {
   private readonly dt = 0.05; // 逻辑固定步进
   private accumulator = 0;
   private slotNodes: Node[] = [];
+  private propButtonNodes: Node[] = [];
+  private propButtonBackgrounds: Node[] = [];
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
   private uiState: 'select' | 'playing' | 'result' = 'select';
@@ -307,6 +310,7 @@ export class GameRunner extends Component {
     if (this.timerLabel) this.timerLabel.node.active = v;
     if (this.levelLabel) this.levelLabel.node.active = v;
     // 美术资源（背景/角色）跟随游戏 UI 一起隐藏，避免选关页/结算页时穿透显示
+    if (this.bgFillNode) this.bgFillNode.active = v;
     if (this.bgNode) this.bgNode.active = v;
     if (this.charNode) this.charNode.active = v;
   }
@@ -399,24 +403,16 @@ export class GameRunner extends Component {
       console.warn('[GameRunner] propButtons 未接线：底部4个道具按钮点不到。把 Props 节点拖进 propButtons 槽。');
       return;
     }
-    // 统一重排：场景原始间距只有 120px/字号 40，四字中文按钮必然重叠。
-    // 不改场景文件（避免动 UUID 引用），运行时按钮数统一重新算间距+字号+尺寸。
-    const n = this.propButtons.children.length;
-    const btnW = 150, gap = 24;
-    const totalW = n * btnW + (n - 1) * gap;
-    const startX = -totalW / 2 + btnW / 2;
-    this.propButtons.children.forEach((btn: Node, i: number) => {
+    // 缓存场景里的 4 个真实按钮。后续会在 Props 下加入背景节点，不能再直接遍历 children。
+    this.propButtonNodes = this.propButtons.children.filter((child: Node) => /^Prop\d+$/.test(child.name));
+    this.propButtonNodes.forEach((btn: Node, i: number) => {
       const label = btn.getComponent(Label);
       if (label) {
         label.string = GameRunner.PROP_LABELS[i] ?? '';
-        label.fontSize = 22; // 40 太大，四字中文在150宽按钮里也会挤，降到22
-        label.lineHeight = 24;
+        label.fontSize = 24;
+        label.lineHeight = 28;
         label.overflow = Label.Overflow.SHRINK; // 兜底：万一还超宽，自动缩小字号而非重叠
       }
-      let ut = btn.getComponent(UITransform);
-      if (!ut) ut = btn.addComponent(UITransform);
-      ut.setContentSize(btnW, 80);
-      btn.setPosition(startX + i * (btnW + gap), btn.position.y, 0);
       const type = GameRunner.PROP_TYPES[i];
       btn.on(Node.EventType.TOUCH_START, () => this.onPropDown(type));
       btn.on(Node.EventType.TOUCH_END, () => this.onPropUp(type));
@@ -446,9 +442,8 @@ export class GameRunner extends Component {
 
   /** 道具按钮按下/松开缩放反馈（不依赖 Sprite，Label 节点也有视觉反馈）。 */
   private punchButton(prop: PropType, down: boolean): void {
-    if (!this.propButtons) return;
     const i = GameRunner.PROP_TYPES.indexOf(prop);
-    const btn = this.propButtons.children[i];
+    const btn = this.propButtonNodes[i];
     if (!btn) return;
     const s = down ? 0.92 : 1;
     tween(btn).to(0.05, { scale: new Vec3(s, s, 1) }).start();
@@ -464,7 +459,7 @@ export class GameRunner extends Component {
    */
   private renderPropHUD(): void {
     if (!this.propButtons) return;
-    this.propButtons.children.forEach((btn: Node, i: number) => {
+    this.propButtonNodes.forEach((btn: Node, i: number) => {
       const type = GameRunner.PROP_TYPES[i];
       const label = btn.getComponent(Label);
       if (!label) return;
@@ -478,11 +473,43 @@ export class GameRunner extends Component {
       else if (st.acquisition === 'cd') line2 = `${st.cdRemaining.toFixed(1)}s`;
       else line2 = `${Math.round(st.energy * 100)}%`;
       label.string = `${name}\n${line2}\n×${st.uses}`;
-      if (!unlocked) label.color = new Color(100, 100, 100, 160);
+      // 禁用态仍需可读；用更亮的中灰表达“不可用”，避免灰字压在深底上近乎消失。
+      if (!unlocked) label.color = new Color(175, 175, 175, 230);
       else if (st.uses <= 0) label.color = new Color(180, 80, 80);
       else if (st.ready) label.color = Color.WHITE;
       else label.color = new Color(150, 150, 150);
+      this.drawPropButtonBackground(i, unlocked, st.uses > 0, st.ready);
     });
+  }
+
+  /** 道具按钮底板：把文字从角色/桌面背景中分离出来，同时让禁用、冷却、就绪状态一眼可辨。 */
+  private drawPropButtonBackground(index: number, unlocked: boolean, hasUses: boolean, ready: boolean): void {
+    const bg = this.propButtonBackgrounds[index];
+    if (!bg) return;
+    const ut = bg.getComponent(UITransform);
+    const g = bg.getComponent(Graphics);
+    if (!ut || !g) return;
+
+    const w = ut.width;
+    const h = ut.height;
+    const fill = !unlocked
+      ? new Color(45, 45, 45, 220)
+      : !hasUses
+        ? new Color(85, 35, 35, 235)
+        : ready
+          ? new Color(45, 78, 112, 245)
+          : new Color(48, 48, 48, 235);
+    const stroke = ready && unlocked && hasUses
+      ? new Color(120, 205, 255, 255)
+      : new Color(115, 115, 115, 220);
+
+    g.clear();
+    g.fillColor = fill;
+    g.strokeColor = stroke;
+    g.lineWidth = 3;
+    g.roundRect(-w / 2, -h / 2, w, h, 14);
+    g.fill();
+    g.stroke();
   }
 
   /* ---------- 渲染 ---------- */
@@ -491,7 +518,9 @@ export class GameRunner extends Component {
     const snap = this.game.getSnapshot();
 
     if (this.levelLabel) {
-      this.levelLabel.string = `${this.session.currentTitle()} | ${this.session.rankLabel} | 入职第${this.session.daysEmployed}天`;
+      // currentTitle() 本身已包含"入职第N天"（见各 level-*.json 的 title 字段），
+      // 不再重复拼接 daysEmployed，避免出现"入职第1天 | 实习生 | 入职第1天"这种重复文案。
+      this.levelLabel.string = `${this.session.currentTitle()} | ${this.session.rankLabel}`;
     }
     if (this.approvalLabel) this.approvalLabel.string = `认可度: ${Math.round(snap.approval)}`;
     if (this.zoneLabel) {
@@ -545,7 +574,10 @@ export class GameRunner extends Component {
     // 尝试用卡牌图（有素材就用，没有就 Label 兜底）
     const sf = this.cardSfFor(card.category);
     if (sf) {
-      if (!sprite) sprite = node.addComponent(Sprite);
+      if (!sprite) {
+        sprite = node.addComponent(Sprite);
+        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+      }
       sprite.spriteFrame = sf;
       sprite.enabled = true;
       if (label) label.enabled = false; // 有图就隐藏文字（用 enabled 而非 node.active，避免连 Sprite 一起隐藏）
@@ -590,36 +622,27 @@ export class GameRunner extends Component {
     return this.artSprites.get(`card-${cat}`) ?? null;
   }
 
-  /** 背景图实测比例常量（用 Python/PIL 逐像素扫描 bg-office.png 得出，1088×1920）：
-   *  显示器内屏区域：y ∈ [21.9%, 50.3%]（从图顶算，下同）；显示器左右边界：x ∈ [6.8%, 93.0%]；
-   *  显示器支架：y ∈ [50.3%, 62.2%]；桌面起始线：y = 62.2%。
-   *  （比例以图片"顶部为0%、底部为100%"计。） */
-  private static readonly BG_SCREEN_TOP = 0.219;
-  private static readonly BG_SCREEN_BOTTOM = 0.503;
-  private static readonly BG_SCREEN_LEFT = 0.068;
-  private static readonly BG_SCREEN_RIGHT = 0.930;
-  private static readonly BG_DESK_TOP = 0.622;
+  /** 背景图比例常量（白底AI图纯抠透明，无插入，角色可稍挡显示器底部）。
+   *  显示器内屏：y ∈ [24.3%, 59.3%]；桌面线：y = 62.7%。 */
+  private static readonly BG_SCREEN_TOP = 0.243;
+  private static readonly BG_SCREEN_BOTTOM = 0.593;
+  private static readonly BG_SCREEN_LEFT = 0.035;
+  private static readonly BG_SCREEN_RIGHT = 0.964;
+  private static readonly BG_DESK_TOP = 0.627;
 
-  /** 角色图实测比例常量（char-back.png，1024×1024，透明底）：
-   *  头顶：y=3.9%；手臂/键盘高度带：y ∈ [42%, 49%]；椅子底部：y=93.8%。 */
-  private static readonly CHAR_HEAD_TOP = 0.039;
-  private static readonly CHAR_HANDS_Y = 0.46;
-  // 椅子底部 y=93.8%（备用：后续若需按椅子底部对齐桌面线可参考此值，暂未使用）
-
-  /** 背景竖直方向额外放大系数（overscan/zoom）。
-   *  背景图宽高比(1088:1920)与屏幕视口宽高比接近，纯 cover 时缩放比恰好由"高度"决定，
-   *  缩放后图片高度正好等于屏幕高度 —— 竖直方向零冗余，此时无论顶部对齐还是底部对齐，
-   *  图片位置都完全相同（这是之前"改了底部对齐却毫无变化"的真正原因）。
-   *  必须先把图片多放大一点，制造出竖直方向的裁切余量，再底部对齐把多余部分裁在顶部
-   *  （裁掉墙面留白），显示器才会真正往上移。数值越大，显示器越靠上（同时左右裁掉更多墙面）。
-   *  可按实际效果继续调（1.0=不生效，建议范围 1.05~1.3）。 */
-  private static readonly BG_ZOOM = 1.15;
+  /** 角色图实测比例常量（char-back.png 已裁掉透明边距，646×927，PIL alpha>128 逐行扫描）：
+   *  头顶(天线顶) y=0%；键盘前沿(最宽处) y=58.3%。
+   *  头到键盘距离 = 58.3% 的角色高度。宽高比 = 646/927 ≈ 0.697。 */
+  private static readonly CHAR_HANDS_Y = 0.583;
+  private static readonly CHAR_HEAD_TOP = 0.0;
+  private static readonly CHAR_ASPECT = 646 / 927; // 宽/高
+  /** 角色整体上下微调。正=上移，负=下移，单位=背景图高度的比例（0.05=下移5%背景高）。
+   *  改这一个值就能调角色位置，不用动其他代码。 */
+  private static readonly CHAR_Y_OFFSET = -0.10;
 
   /** 挂背景 + 角色 Sprite，位置按背景图实测比例动态计算（不再猜固定像素）。
-   *  策略：背景先按 "cover"（宽高缩放比取较大值）算出基础缩放，再乘以 BG_ZOOM 制造竖直裁切余量；
-   *  缩放后图片的【底部】贴住屏幕底部（桌面/地板贴底），多出的高度全部从顶部裁掉——
-   *  即裁掉多余的墙面留白，使显示器自然更靠近屏幕顶部（实测反馈：显示器应再靠上）。
-   *  再用上面测出的比例常量反算出显示器/桌面在当前屏幕上的像素位置，把 Belt/Char/Props 对齐上去。 */
+   *  背景按宽度等比完整显示，绝不再用 cover 裁掉显示器两侧；超长屏多出的底部区域用背景底色延伸，
+   *  作为道具操作区。再用图片实测比例反算显示器/桌面位置，把 Belt/Char/Props 对齐上去。 */
   private applyBgCharSprites(): void {
     const LAYER_2D = 1 << 25; // UI_2D
     const visSize = view.getVisibleSize();
@@ -627,48 +650,80 @@ export class GameRunner extends Component {
     if (!bgSf) return;
 
     const texSize = bgSf.originalSize; // 原图像素尺寸，如 1088×1920
-    // cover：取宽/高两个缩放比中较大的一个，保证缩放后图片同时 >= 屏幕宽和屏幕高（不露灰边/黑边）
-    const coverScale = Math.max(visSize.width / texSize.width, visSize.height / texSize.height);
-    const scale = coverScale * GameRunner.BG_ZOOM; // 额外放大，制造竖直裁切余量（否则底部对齐等于无效）
+    // width-fit：显示器横向结构完整保留；超长屏额外高度留给底部操作区，不再牺牲左右画面。
+    const scale = visSize.width / texSize.width;
+    const bgDisplayW = texSize.width * scale;
     const bgDisplayH = texSize.height * scale; // 缩放后背景图的显示高度
-    // 底部对齐：图片底边贴住屏幕底边，多出的高度全部裁在顶部（裁掉墙面留白，显示器随之上移）
-    const bgBottomY = -visSize.height / 2;
+    // 顶部只轻微裁切，让完整显示器落到微信胶囊下方；图片下方的剩余高度自然成为操作区。
+    const extraHeight = Math.max(0, visSize.height - bgDisplayH);
+    const bottomExtension = Math.max(160, extraHeight + 20);
+    const bgBottomY = -visSize.height / 2 + bottomExtension;
     const bgCenterY = bgBottomY + bgDisplayH / 2;
-    const bgTopY = bgCenterY + bgDisplayH / 2; // 缩放后图片顶部的世界坐标（可能高于屏幕顶部，属正常裁切）
+    const bgTopY = bgCenterY + bgDisplayH / 2;
+
+    // 图片没有铺到的区域使用原图墙面底色延伸，避免灰底或硬接缝。
+    if (!this.bgFillNode) {
+      this.bgFillNode = new Node('BgFill');
+      this.bgFillNode.layer = LAYER_2D;
+      this.bgFillNode.parent = this.node;
+      this.bgFillNode.addComponent(UITransform);
+      this.bgFillNode.addComponent(Graphics);
+      this.bgFillNode.active = this.uiState === 'playing';
+    }
+    const fillUt = this.bgFillNode.getComponent(UITransform)!;
+    fillUt.setContentSize(visSize.width, visSize.height);
+    const fillG = this.bgFillNode.getComponent(Graphics)!;
+    fillG.clear();
+    fillG.fillColor = new Color(240, 228, 208, 255); // bg-office.png 实测墙面色
+    fillG.rect(-visSize.width / 2, -visSize.height / 2, visSize.width, visSize.height);
+    fillG.fill();
+    this.bgFillNode.setPosition(0, 0, 0);
+    this.bgFillNode.setSiblingIndex(0);
 
     if (!this.bgNode) {
       this.bgNode = new Node('Bg');
       this.bgNode.layer = LAYER_2D;
       this.bgNode.parent = this.node;
-      const ut = this.bgNode.addComponent(UITransform);
+      this.bgNode.addComponent(UITransform);
       const sprite = this.bgNode.addComponent(Sprite);
       sprite.sizeMode = Sprite.SizeMode.CUSTOM; // 必须先设，避免被 spriteFrame 赋值时的自动尺寸覆盖
       sprite.spriteFrame = bgSf;
-      ut.setContentSize(texSize.width * scale, bgDisplayH); // cover：宽高都按等比缩放后的尺寸
-      this.bgNode.setSiblingIndex(0); // 放到最底层
       this.bgNode.active = this.uiState === 'playing';
     }
+    this.bgNode.getComponent(UITransform)!.setContentSize(bgDisplayW, bgDisplayH);
     this.bgNode.setPosition(0, bgCenterY, 0); // 每次调用都刷新（防止 visSize 变化，比如窗口 resize）
+    this.bgNode.setSiblingIndex(1);
 
     // 用比例常量反算显示器屏幕区域在当前屏幕坐标系下的像素位置
     // 背景图顶部世界坐标 = bgTopY；某比例 p 处的世界 y = bgTopY - p * bgDisplayH
     const screenTopY = bgTopY - GameRunner.BG_SCREEN_TOP * bgDisplayH;
     const screenBottomY = bgTopY - GameRunner.BG_SCREEN_BOTTOM * bgDisplayH;
-    const screenCenterY = (screenTopY + screenBottomY) / 2;
-    const screenWidthPx = (GameRunner.BG_SCREEN_RIGHT - GameRunner.BG_SCREEN_LEFT) * visSize.width;
+    const screenWidthPx = (GameRunner.BG_SCREEN_RIGHT - GameRunner.BG_SCREEN_LEFT) * bgDisplayW;
     const deskTopY = bgTopY - GameRunner.BG_DESK_TOP * bgDisplayH;
 
-    // Belt（传送带卡槽）对齐到显示器屏幕纵向居中位置，横向宽度收窄到屏幕内屏宽度的~90%
+    // HUD 贴合显示器内屏，而不是沿用 960×640 横屏场景里的固定 y 坐标。
+    const monitorPadding = Math.max(24, visSize.width * 0.035);
+    const hudTopY = screenTopY - monitorPadding;
+    const hudBottomY = screenBottomY + monitorPadding;
+    const statInsetX = Math.min(visSize.width * 0.34, screenWidthPx * 0.36);
+    this.layoutHudLabel(this.levelLabel, 0, hudTopY, Math.min(screenWidthPx * 0.72, 680), 44, 26);
+    this.layoutHudLabel(this.approvalLabel, -statInsetX, hudBottomY, screenWidthPx * 0.28, 40, 22);
+    this.layoutHudLabel(this.timerLabel, 0, hudBottomY, screenWidthPx * 0.22, 40, 22);
+    this.layoutHudLabel(this.zoneLabel, statInsetX, hudBottomY, screenWidthPx * 0.28, 40, 22);
+
+    // Belt（传送带卡槽）放在标题和状态行之间，卡牌始终限制在显示器内。
     if (this.beltNode) {
-      this.beltNode.setPosition(this.beltNode.position.x, screenCenterY, 0);
+      const beltY = (hudTopY + hudBottomY) / 2;
+      this.beltNode.setPosition(this.beltNode.position.x, beltY, 0);
       let beltUt = this.beltNode.getComponent(UITransform);
       if (!beltUt) beltUt = this.beltNode.addComponent(UITransform);
       // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度
       const beltW = Math.min(screenWidthPx * 0.92, visSize.width * 0.9);
-      this.layoutBeltSlots(beltW);
+      const beltH = Math.max(92, Math.min((screenTopY - screenBottomY) * 0.42, 150));
+      this.layoutBeltSlots(beltW, beltH);
     }
 
-    // 角色：头顶贴着显示器支架底部一点点（screenBottomY 往下一点），按角色图头顶比例反算 contentSize
+    // 角色：键盘前沿对齐桌面线。角色稍微挡住显示器底部是正常的（坐在桌前面对屏幕的视角）。
     const charSf = this.artSprites.get('char-back');
     if (charSf) {
       if (!this.charNode) {
@@ -679,25 +734,24 @@ export class GameRunner extends Component {
         const sprite = this.charNode.addComponent(Sprite);
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.spriteFrame = charSf;
-        this.charNode.setSiblingIndex(1);
+        this.charNode.setSiblingIndex(2);
         this.charNode.active = this.uiState === 'playing';
       }
-      // 角色高度：从"显示器支架底部(screenBottomY)"到"桌面线(deskTopY)"的空间容纳角色的
-      // 手部以上部分即可（背影主要露头+肩），按角色图头顶(3.9%)到手部(46%)这段占角色总高的 (46-3.9)%
-      // 反过来推：想要"头到手"这段在屏幕上显示 gapH 像素，则角色总高 = gapH / (0.46-0.039)
-      const gapH = Math.max(60, screenBottomY - deskTopY - 10); // 支架底部到桌面的可用间隙，留10px边距
-      const charDisplayH = gapH / (GameRunner.CHAR_HANDS_Y - GameRunner.CHAR_HEAD_TOP);
-      const charDisplayW = charDisplayH; // char-back.png 是 1:1 正方形
+      // 角色占屏宽 56%，是视觉主体
+      const charDisplayH = Math.min(visSize.width * 0.56, visSize.height * 0.35);
+      const charDisplayW = charDisplayH * GameRunner.CHAR_ASPECT; // 646:927 不是正方形
       const charUt = this.charNode.getComponent(UITransform)!;
       charUt.setContentSize(charDisplayW, charDisplayH);
-      // 角色图片顶部边缘（透明画布边界，非头顶本身）对齐到 screenBottomY 下方一点（紧贴显示器支架底部）
-      const charTopEdgeY = screenBottomY - 6;
-      this.charNode.setPosition(0, charTopEdgeY - charDisplayH / 2, 0);
+      // 键盘对齐桌面线，CHAR_Y_OFFSET 控制整体上下微调（正=上移，负=下移，单位=背景高度比例）
+      const charCenterY = deskTopY + (GameRunner.CHAR_HANDS_Y - 0.5) * charDisplayH + GameRunner.CHAR_Y_OFFSET * bgDisplayH;
+      this.charNode.setPosition(0, charCenterY, 0);
     }
+
+    this.layoutPropButtons(visSize.width, visSize.height);
   }
 
-  /** 把 Belt 下的 6 个卡槽横向等距重新排布到指定总宽度内（居中）。 */
-  private layoutBeltSlots(totalW: number): void {
+  /** 把 Belt 下的 6 个卡槽横向等距重新排布到指定区域内（居中）。 */
+  private layoutBeltSlots(totalW: number, slotH: number): void {
     if (!this.beltNode || this.slotNodes.length === 0) return;
     const n = this.slotNodes.length;
     const gap = 8;
@@ -706,8 +760,75 @@ export class GameRunner extends Component {
     this.slotNodes.forEach((slot: Node, i: number) => {
       let ut = slot.getComponent(UITransform);
       if (!ut) ut = slot.addComponent(UITransform);
-      if (ut.width > slotW) ut.setContentSize(slotW, ut.height); // 只收窄，不强行放大
+      ut.setContentSize(slotW, slotH);
+      const label = slot.getComponent(Label);
+      if (label) {
+        label.fontSize = Math.min(24, slotW * 0.24);
+        label.lineHeight = Math.min(30, slotH * 0.28);
+        label.overflow = Label.Overflow.SHRINK;
+      }
       slot.setPosition(startX + i * (slotW + gap), slot.position.y, 0);
+    });
+  }
+
+  /** 统一 HUD 标签的命中盒、字号和位置。 */
+  private layoutHudLabel(label: Label | null, x: number, y: number, w: number, h: number, fontSize: number): void {
+    if (!label) return;
+    const ut = label.node.getComponent(UITransform);
+    if (ut) ut.setContentSize(w, h);
+    label.fontSize = fontSize;
+    label.lineHeight = fontSize + 6;
+    label.overflow = Label.Overflow.SHRINK;
+    label.node.setPosition(x, y, 0);
+  }
+
+  /** 底部独立操作区：4 个宽矮按钮固定贴屏幕最底部（标准手游拇指热区），并为微信 home indicator 留足安全距离。 */
+  private layoutPropButtons(viewWidth: number, viewHeight: number): void {
+    if (!this.propButtons || this.propButtonNodes.length === 0) return;
+    const horizontalPadding = Math.max(32, viewWidth * 0.045);
+    const gap = Math.max(12, viewWidth * 0.016);
+    const totalW = Math.min(viewWidth - horizontalPadding * 2, 920);
+    const btnW = (totalW - gap * (this.propButtonNodes.length - 1)) / this.propButtonNodes.length;
+    const btnH = Math.min(112, Math.max(88, viewHeight * 0.055));
+    const startX = -totalW / 2 + btnW / 2;
+    // 固定贴底部，留安全距离避开 home indicator
+    const y = -viewHeight / 2 + Math.max(150, viewHeight * 0.105);
+    this.propButtons.setPosition(0, y, 0);
+
+    this.ensurePropButtonBackgrounds();
+    this.propButtonNodes.forEach((btn: Node, i: number) => {
+      const x = startX + i * (btnW + gap);
+      let ut = btn.getComponent(UITransform);
+      if (!ut) ut = btn.addComponent(UITransform);
+      ut.setContentSize(btnW, btnH);
+      btn.setPosition(x, 0, 0);
+      const label = btn.getComponent(Label);
+      if (label) {
+        label.fontSize = Math.min(24, btnW * 0.14);
+        label.lineHeight = Math.min(28, btnH * 0.27);
+        label.overflow = Label.Overflow.SHRINK;
+      }
+
+      const bg = this.propButtonBackgrounds[i];
+      if (bg) {
+        const bgUt = bg.getComponent(UITransform)!;
+        bgUt.setContentSize(btnW, btnH);
+        bg.setPosition(x, 0, 0);
+      }
+    });
+  }
+
+  /** 背景是按钮的兄弟节点并排在按钮之前，保证不会遮住 Label，也不会污染按钮事件列表。 */
+  private ensurePropButtonBackgrounds(): void {
+    if (!this.propButtons || this.propButtonBackgrounds.length > 0) return;
+    this.propButtonNodes.forEach((_, i: number) => {
+      const bg = new Node(`PropBg${i}`);
+      bg.layer = 1 << 25;
+      bg.addComponent(UITransform);
+      bg.addComponent(Graphics);
+      this.propButtons!.addChild(bg);
+      bg.setSiblingIndex(i);
+      this.propButtonBackgrounds.push(bg);
     });
   }
 

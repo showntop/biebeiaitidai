@@ -2,7 +2,7 @@
   "ver": "1.0.27",
   "importer": "image",
   "imported": true,
-  "uuid": "3a5a5a4f-1892-4e3e-b02c-df29690e8389",
+  "uuid": "5e413368-7738-4a1e-ab17-9ee4e1dbac6b",
   "files": [
     ".json",
     ".png"
@@ -10,8 +10,8 @@
   "subMetas": {
     "6c48a": {
       "importer": "texture",
-      "uuid": "3a5a5a4f-1892-4e3e-b02c-df29690e8389@6c48a",
-      "displayName": "bg-office",
+      "uuid": "5e413368-7738-4a1e-ab17-9ee4e1dbac6b@6c48a",
+      "displayName": "prop-change-demand",
       "id": "6c48a",
       "name": "texture",
       "userData": {
@@ -22,7 +22,7 @@
         "mipfilter": "none",
         "anisotropy": 0,
         "isUuid": true,
-        "imageUuidOrDatabaseUri": "3a5a5a4f-1892-4e3e-b02c-df29690e8389",
+        "imageUuidOrDatabaseUri": "5e413368-7738-4a1e-ab17-9ee4e1dbac6b",
         "visible": false
       },
       "ver": "1.0.22",
@@ -37,6 +37,6 @@
     "type": "texture",
     "fixAlphaTransparencyArtifacts": false,
     "hasAlpha": true,
-    "redirect": "3a5a5a4f-1892-4e3e-b02c-df29690e8389@6c48a"
+    "redirect": "5e413368-7738-4a1e-ab17-9ee4e1dbac6b@6c48a"
   }
 }
