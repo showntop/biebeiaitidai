@@ -55,7 +55,6 @@ export interface PropDef {
   cd?: PhaseCd;
   totalCap: number;
   energyPerEffectiveHit?: number;
-  energyFillRateRatio?: number;
   energyPerSec?: number;
   clearRadius?: number;
   freezeSec?: { min: number; max: number };

@@ -12,7 +12,7 @@
       "holdSec": 2.0
     },
     "good": {
-      "lo": 16,
+      "lo": 19,
       "hi": 49,
       "genBonus": 0.0
     },

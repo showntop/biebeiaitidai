@@ -60,7 +60,7 @@ export type Acquisition = (typeof Acquisition)[keyof typeof Acquisition];
 
 /** 认可度分区（含猎杀线，§5.1）。 */
 export const ApprovalZone = {
-  Hunt: 'hunt', // 0~25 猎杀线：持续达2秒 → 猎杀式通关（数值见 assets/config/balance.json，随M4调优变化，此处不重复维护具体值）
+  Hunt: 'hunt', // 0~18 猎杀线：持续达2秒 → 猎杀式通关（数值见 assets/config/balance.json，随M4调优变化，此处不重复维护具体值）
   Good: 'good', // 猎杀线之上~49 状态良好
   Ok: 'ok', // 50~69 勉强接受：白卡生成速度加成见config
   Danger: 'danger', // 70~100 危险：白卡生成速度加成上升，Boss概率上升
