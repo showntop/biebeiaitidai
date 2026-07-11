@@ -93,7 +93,7 @@ export interface GameEvents {
   /** 一张卡抵达处理区被结算（§5.2）。delta 为本次认可度变化。 */
   CardResolved: { card: Card; delta: number };
   /** 传送带整体左移一格（离散挡位，§4.3） */
-  CardShifted: { tickIndex: number };
+  CardShifted: { tickIndex: number; outgoing?: Card | null };
   /** 某挡位为空（空挡，命中即Miss） */
   SlotEmpty: { slot: number };
   /** 道具命中任务卡（加需求/改需求/丢锅），§4.3 */

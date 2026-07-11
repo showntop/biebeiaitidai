@@ -1,4 +1,4 @@
-import { tween, Tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics } from 'cc';
+import { tween, Tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics, Mask, instantiate } from 'cc';
 import type { EventBus } from '../core/EventBus';
 import type { GameEvents, HitQuality, ApprovalZone } from '../core/types';
 
@@ -41,16 +41,42 @@ export class FxLayer {
   private overlayG: Graphics | null = null;
   private overlayOpacity: UIOpacity | null = null;
 
+  /** 出队裁剪节点：带 Mask 的矩形区域，ghost 放在里面滑动时被裁出"被显示器吞没"效果。 */
+  private exitClip: Node | null = null;
+
   constructor(
     private bus: EventBus,
     private root: Node,
     private slots: Node[],
     private approvalLabel: Label | null,
+    private getShiftDurationSec: () => number = () => 0.46,
   ) {
     this.rootBase = root.position.clone();
     if (approvalLabel && approvalLabel.isValid) this.approvalBaseColor = approvalLabel.color.clone();
     this.ensureOverlay();
+    this.refreshSlotBases();
     this.bind();
+  }
+
+  private slotBases: Vec3[] = [];
+
+  /** 布局层重排卡槽后刷新逻辑中心点；动效始终以这些基准点计算，避免连续 tween 漂移。 */
+  refreshSlotBases(): void {
+    this.slotBases = this.slots.map((slot) => slot?.isValid ? slot.position.clone() : new Vec3());
+    // 同步 exitClip 的位置/尺寸以匹配新布局
+    if (this.exitClip?.isValid && this.slots.length > 0) {
+      const first = this.slots[0];
+      const last = this.slots[this.slots.length - 1];
+      const firstUt = first?.getComponent(UITransform);
+      const lastUt = last?.getComponent(UITransform);
+      if (first?.isValid && last?.isValid && firstUt && lastUt) {
+        const left = first.position.x - firstUt.width / 2;
+        const right = last.position.x + lastUt.width / 2;
+        const ut = this.exitClip.getComponent(UITransform);
+        if (ut) ut.setContentSize(right - left, Math.max(firstUt.height, lastUt.height) + 4);
+        this.exitClip.setPosition((left + right) / 2, first.position.y, 0);
+      }
+    }
   }
 
   /** 释放所有事件订阅 + 清理常驻遮罩 + 停掉进行中的震动/闪色 tween（换关前调用）。 */
@@ -64,6 +90,8 @@ export class FxLayer {
     this.overlayNode = null;
     this.overlayG = null;
     this.overlayOpacity = null;
+    if (this.exitClip?.isValid) this.exitClip.destroy();
+    this.exitClip = null;
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -85,6 +113,7 @@ export class FxLayer {
     this.on('PropUnavailable', () => this.fxMiss());
     this.on('PropCanceled', () => this.fxCancel());
     this.on('AIHit', ({ quality }) => this.fxAIHit(quality));
+    this.on('CardShifted', ({ outgoing }) => this.fxConveyorShift(!!outgoing));
   }
 
   private on<K extends keyof GameEvents>(name: K, fn: (p: GameEvents[K]) => void): void {
@@ -121,8 +150,9 @@ export class FxLayer {
     if (delta === 0 || !this.approvalLabel) return;
     const sign = delta > 0 ? '+' : '';
     const color = delta > 0 ? new Color(100, 255, 100) : new Color(255, 80, 80);
-    const p = this.approvalLabel.node.position;
-    this.floatText(`${sign}${Math.round(delta)}`, p.x + 120, p.y, color, 0.7);
+    const target = this.robotHeadPoint();
+    this.flyResolvedCard(`${sign}${Math.round(delta)}`, color, target);
+    this.floatText(`${sign}${Math.round(delta)}`, target.x, target.y + 18, color, 0.75);
   }
 
   /* ---------- 认可度变化（Label 闪色） ---------- */
@@ -231,6 +261,155 @@ export class FxLayer {
     const perfect = quality === 'perfect';
     this.flashOverlay(new Color(255, 180, 200, perfect ? 100 : 50), 0.4);
     this.floatText(perfect ? '完美拍中!' : '拍中!', 0, 40, new Color(255, 200, 220), 0.8);
+  }
+
+  /** 传送带主视觉：整排卡片线性左移，入口/出口由 Belt 的矩形遮罩裁切。 */
+  private fxConveyorShift(hasOutgoingCard: boolean): void {
+    if (this.slots.length < 2) return;
+    const gap = (this.slotBases[1]?.x ?? this.slots[1].position.x) - (this.slotBases[0]?.x ?? this.slots[0].position.x);
+    if (!Number.isFinite(gap) || Math.abs(gap) < 1) return;
+    const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
+    if (hasOutgoingCard) this.spawnOutgoingGhost(gap);
+    this.slots.forEach((slot, index) => {
+      if (!slot?.isValid) return;
+      Tween.stopAllByTarget(slot);
+      const base = this.slotBases[index]?.clone() ?? slot.position.clone();
+      slot.setPosition(base.x + gap, base.y, base.z);
+      slot.setScale(new Vec3(1, 1, 1));
+      const opacity = slot.getComponent(UIOpacity) ?? slot.addComponent(UIOpacity);
+      Tween.stopAllByTarget(opacity);
+      opacity.opacity = 255;
+      tween(slot).to(duration, { position: base }, { easing: 'linear' }).start();
+    });
+  }
+
+  /**
+   * 旧处理区卡片在队列换档前克隆一份，放入带 Mask 的 exitClip 中向左滑出。
+   *
+   * ghost 从 slot0 中心线性左移 cardW 距离；exitClip 的矩形 Mask 把超出传送带
+   * 左边缘的部分裁掉，视觉上呈现 完整 → 2/3 → 1/2 → 1/3 → 完全离开 的"被显示器吞没"效果。
+   */
+  private spawnOutgoingGhost(gap: number): void {
+    const head = this.slots[0];
+    if (!head?.isValid) return;
+    const clip = this.ensureExitClip();
+    if (!clip) return;
+
+    const base = this.slotBases[0]?.clone() ?? head.position.clone();
+    const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
+    const headUt = head.getComponent(UITransform);
+    const cardW = headUt?.width ?? Math.abs(gap);
+    if (cardW <= 0) return;
+
+    // ghost 相对 exitClip 的位置（exitClip 定位在传送带中心，需把 slot0 的 belt 坐标转成 clip 局部坐标）
+    const ghostLocalX = base.x - clip.position.x;
+
+    const ghost = instantiate(head);
+    ghost.name = 'OutgoingCardGhost';
+    ghost.layer = head.layer;
+    ghost.parent = clip;
+    ghost.setPosition(ghostLocalX, 0, 0);
+    ghost.setScale(new Vec3(1, 1, 1));
+    const opacity = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
+    opacity.opacity = 255;
+
+    // 滑出距离 = 卡片宽度 × 1.1（刚好完全离开裁剪区，留 10% 余量确保彻底消失）
+    const travel = cardW * 1.1;
+    tween(ghost)
+      .to(duration, { position: new Vec3(ghostLocalX - travel, 0, 0) }, { easing: 'linear' })
+      .call(() => { if (ghost.isValid) ghost.destroy(); })
+      .start();
+  }
+
+  /** 创建/复用带 Mask 的裁剪节点，覆盖整个传送带区域。ghost 放在里面滑动时被矩形 Mask 裁剪。 */
+  private ensureExitClip(): Node | null {
+    if (this.exitClip?.isValid) return this.exitClip;
+    const belt = this.slots[0]?.parent;
+    if (!belt?.isValid || this.slots.length < 1) return null;
+
+    const clip = new Node('ExitClip');
+    clip.layer = UI_2D;
+    clip.parent = belt;
+    clip.setSiblingIndex(belt.children.length - 1); // 顶层，ghost 不被其他节点遮挡
+
+    const first = this.slots[0];
+    const last = this.slots[this.slots.length - 1];
+    const firstUt = first?.getComponent(UITransform);
+    const lastUt = last?.getComponent(UITransform);
+    if (first?.isValid && last?.isValid && firstUt && lastUt) {
+      const left = first.position.x - firstUt.width / 2;
+      const right = last.position.x + lastUt.width / 2;
+      const w = right - left;
+      const h = Math.max(firstUt.height, lastUt.height) + 4;
+      const ut = clip.addComponent(UITransform);
+      ut.setContentSize(w, h);
+      clip.setPosition((left + right) / 2, first.position.y, 0);
+    }
+
+    const mask = clip.addComponent(Mask);
+    mask.type = Mask.Type.RECT;
+
+    this.exitClip = clip;
+    return clip;
+  }
+
+  private flyResolvedCard(text: string, color: Color, target: Vec3): void {
+    const startNode = this.slots[0] ?? this.approvalLabel?.node;
+    if (!startNode?.isValid) return;
+    const start = this.pointInRoot(startNode);
+    const node = new Node('ResolvedCardFly');
+    node.layer = UI_2D;
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(66, 46);
+    const g = node.addComponent(Graphics);
+    g.fillColor = new Color(250, 246, 236, 255);
+    g.strokeColor = color;
+    g.lineWidth = 3;
+    g.roundRect(-33, -23, 66, 46, 10);
+    g.fill();
+    g.stroke();
+    const label = node.addComponent(Label);
+    label.string = text;
+    label.fontSize = 24;
+    label.lineHeight = 28;
+    label.isBold = true;
+    label.color = color;
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+    node.setPosition(start.x, start.y, 0);
+    this.root.addChild(node);
+    const op = node.addComponent(UIOpacity);
+    op.opacity = 255;
+    const peak = new Vec3((start.x + target.x) / 2, Math.max(start.y, target.y) + 70, 0);
+    tween(node)
+      .to(0.18, { position: peak, scale: new Vec3(0.82, 0.82, 1) }, { easing: 'quadOut' })
+      .to(0.26, { position: target, scale: new Vec3(0.38, 0.38, 1) }, { easing: 'quadIn' })
+      .call(() => { if (node.isValid) node.destroy(); })
+      .start();
+    tween(op).delay(0.28).to(0.16, { opacity: 0 }, { easing: 'quadIn' }).start();
+  }
+
+  private robotHeadPoint(): Vec3 {
+    const char = this.root.getChildByName('Char');
+    if (char?.isValid) {
+      const ut = char.getComponent(UITransform);
+      return new Vec3(char.position.x, char.position.y + (ut?.height ?? 180) * 0.42, 0);
+    }
+    const p = this.approvalLabel?.node.position ?? new Vec3(0, 0, 0);
+    return new Vec3(p.x + 120, p.y, 0);
+  }
+
+  /** 将节点坐标近似折算到 root 局部坐标；本项目 UI 节点无旋转/缩放嵌套。 */
+  private pointInRoot(node: Node): Vec3 {
+    let x = node.position.x;
+    let y = node.position.y;
+    let cur = node.parent;
+    while (cur && cur !== this.root) {
+      x += cur.position.x;
+      y += cur.position.y;
+      cur = cur.parent;
+    }
+    return new Vec3(x, y, 0);
   }
 
   /* ---------- 工具方法 ---------- */

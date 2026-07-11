@@ -78,12 +78,12 @@ export class ConveyorSystem implements BeltView {
       }
       this.lastBossTier = null;
       this.shiftLeft();
-      this.events.emit('CardShifted', { tickIndex: this.idSeq++ });
+      this.events.emit('CardShifted', { tickIndex: this.idSeq++, outgoing: head });
       return;
     }
     if (head) this.events.emit('CardEnteredProcessing', { card: head });
     this.shiftLeft();
-    this.events.emit('CardShifted', { tickIndex: this.idSeq++ });
+    this.events.emit('CardShifted', { tickIndex: this.idSeq++, outgoing: head });
     this.updateBossTell();
   }
 

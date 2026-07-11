@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -49,6 +49,7 @@ export class GameRunner extends Component {
   /** 显示器外的顶部/底部 HUD。保持显示器背景与内屏节点不被重绘。 */
   private subtitleNode: Node | null = null;
   private lowerHudNode: Node | null = null;
+  private monitorMetaNode: Node | null = null;
 
   private session!: Session;
   private game!: Game;
@@ -94,6 +95,10 @@ export class GameRunner extends Component {
   };
   /** 空槽也显示即将到来的任务预览，避免队列退化成一排 "---"。 */
   private static readonly QUEUE_PREVIEW_ART_KEYS = ['card-doc-blue-a', 'card-doc-stack', 'card-target', 'card-idea', 'card-alarm', 'card-coffee'];
+  private static readonly QUEUE_PREVIEW_COLORS: ReadonlyArray<Readonly<Color>> = [
+    new Color(80, 160, 255), new Color(145, 145, 145), new Color(180, 100, 255),
+    new Color(60, 200, 220), new Color(255, 180, 40), new Color(125, 125, 125),
+  ];
 
   /** 卡牌 Graphics 背景样式常量。卡牌 = 代码画圆角矩形底 + 纯图标 Sprite（见美术指南「卡牌/按钮=代码画底+纯图标」）。 */
   private static readonly CARD_BORDER_COLORS: Readonly<Record<string, Readonly<Color>>> = Object.freeze({
@@ -264,7 +269,13 @@ export class GameRunner extends Component {
     // 道具 HUD（CD/能量/次数/就绪）由 render() 每帧刷新（renderPropHUD），无需此处单独调用
     // 动效层：每局重新订阅新 EventBus
     this.fx?.dispose();
-    this.fx = new FxLayer(this.game.bus, this.node, this.slotNodes, this.approvalLabel);
+    this.fx = new FxLayer(
+      this.game.bus,
+      this.node,
+      this.slotNodes,
+      this.approvalLabel,
+      () => BalanceConfig.phases[this.game.phase].slotPeriodSec,
+    );
     this.bindEventFeed();
     // 视觉层：挂背景和（有素材就挂，没有不影响 Label 兜底跑）
     this.applyBgCharSprites();
@@ -414,6 +425,7 @@ export class GameRunner extends Component {
     if (this.charNode) this.charNode.active = v;
     if (this.subtitleNode) this.subtitleNode.active = v;
     if (this.lowerHudNode) this.lowerHudNode.active = v;
+    if (this.monitorMetaNode) this.monitorMetaNode.active = v;
   }
 
   /** 工具：在 parent 下创建一个带 Label 的 Node。 */
@@ -591,7 +603,7 @@ export class GameRunner extends Component {
       const sf = this.propSfFor(type);
       if (label) {
         label.string = `${name}\n${line2}${usesText}`;
-        label.color = Color.WHITE;
+        label.color = !unlocked || st.uses <= 0 ? new Color(115, 110, 105, 255) : new Color(42, 38, 34, 255);
         // Label 就挂在按钮节点本身，不能再移动 label.node（会把整个按钮移回原点）。
         label.horizontalAlign = sf ? 2 : 1;
         label.verticalAlign = 1;
@@ -607,7 +619,7 @@ export class GameRunner extends Component {
           // 再 sizeMode=CUSTOM，最后赋 spriteFrame。CUSTOM 模式下赋值不会用原图覆盖节点尺寸。
           const ut = icon.node.getComponent(UITransform);
           if (ut) {
-            const iconW = Math.min(btnW * 0.42, btnH * 0.46);
+            const iconW = Math.min(btnW * 0.48, btnH * 0.52);
             const aspect = sf.originalSize.height > 0 ? sf.originalSize.width / sf.originalSize.height : 1;
             ut.setContentSize(iconW, iconW / aspect);
             icon.node.setPosition(-btnW * 0.22, btnH * 0.05, 0); // 图标靠左，文字在右侧
@@ -623,7 +635,7 @@ export class GameRunner extends Component {
     });
   }
 
-  /** 道具按钮底板：按道具功能色着色 + 状态叠加（未解锁压暗 / 用尽去饱和 / 就绪高亮描边）。 */
+  /** 道具按钮统一为浅色功能卡：与黑色线稿图标同一视觉语言，靠彩色描边表达类别。 */
   private drawPropButtonBackground(index: number, unlocked: boolean, hasUses: boolean, ready: boolean): void {
     const bg = this.propButtonBackgrounds[index];
     if (!bg) return;
@@ -635,24 +647,23 @@ export class GameRunner extends Component {
     const h = ut.height;
     const base = GameRunner.PROP_COLORS[index] ?? new Color(80, 160, 255);
 
-    // 状态对底色的调制：未解锁/用尽 → 降到 40% 亮度；就绪 → 原色；充能中 → 65%
-    const dim = !unlocked || !hasUses ? 0.38 : ready ? 1.0 : 0.62;
+    const inactive = !unlocked || !hasUses;
+    const mix = inactive ? 0.87 : ready ? 0.72 : 0.80;
     const fill = new Color(
-      Math.round(base.r * dim),
-      Math.round(base.g * dim),
-      Math.round(base.b * dim),
-      245,
+      Math.round(base.r * (1 - mix) + 250 * mix),
+      Math.round(base.g * (1 - mix) + 245 * mix),
+      Math.round(base.b * (1 - mix) + 235 * mix),
+      255,
     );
-    // 描边：就绪时亮金白，其余同色系暗一档
-    const stroke = (ready && unlocked && hasUses)
-      ? new Color(255, 240, 180, 255)
-      : new Color(Math.round(base.r * 0.5), Math.round(base.g * 0.5), Math.round(base.b * 0.5), 230);
+    const stroke = inactive
+      ? new Color(130, 125, 118, 210)
+      : new Color(base.r, base.g, base.b, 255);
 
     g.clear();
     g.fillColor = fill;
     g.strokeColor = stroke;
     g.lineWidth = ready ? 4 : 3;
-    g.roundRect(-w / 2, -h / 2, w, h, 12);
+    g.roundRect(-w / 2, -h / 2, w, h, 16);
     g.fill();
     g.stroke();
   }
@@ -720,7 +731,7 @@ export class GameRunner extends Component {
     this.renderPropHUD();
   }
 
-  /** 为每个传送带卡槽创建 Graphics 背景节点（放在 slot 的父节点 beltNode 下，排在最末尾保证不遮挡前景）。 */
+  /** 为每个传送带卡槽创建 Graphics 背景节点。背景跟随卡槽自身，避免被显示器层级吞掉。 */
   private ensureSlotBackgrounds(): void {
     if (!this.beltNode || this.slotBackgrounds.length > 0) return;
     this.slotNodes.forEach((slot: Node, i: number) => {
@@ -728,101 +739,44 @@ export class GameRunner extends Component {
       bg.layer = 1 << 25;
       bg.addComponent(UITransform);
       bg.addComponent(Graphics);
-      this.beltNode!.addChild(bg);
-      bg.setSiblingIndex(this.beltNode!.children.length - 1); // 垫底
-      // 立即按对应 slot 的位置/尺寸定位，否则 6 个背景会默认堆在 beltNode 原点 (0,0) 重叠成一坨
+      slot.addChild(bg);
+      bg.setSiblingIndex(0); // 卡槽内最底层，位于图标和权重文字之前
       const slotUt = slot.getComponent(UITransform);
       const bgUt = bg.getComponent(UITransform);
       if (slotUt && bgUt) bgUt.setContentSize(slotUt.width, slotUt.height);
-      bg.setPosition(slot.position);
+      bg.setPosition(0, 0, 0);
+      bg.active = true;
       this.slotBackgrounds.push(bg);
     });
   }
 
-  /** 绘制单个卡槽的 Graphics 背景：圆角矩形底 + 按卡状态/类别着色 + 边框。 */
+  /** 黑色线稿图标配浅色类别卡片：保证在深色显示器里有足够对比且类别一眼可分。 */
   private drawCardBackground(slotIndex: number, card: Card | null): void {
     const bg = this.slotBackgrounds[slotIndex];
     if (!bg) return;
     const ut = bg.getComponent(UITransform);
     const g = bg.getComponent(Graphics);
     if (!ut || !g) return;
-
     const w = ut.width;
     const h = ut.height;
     if (w <= 0 || h <= 0) return;
-
+    const base = card
+      ? (GameRunner.CARD_BORDER_COLORS[card.category] ?? GameRunner.CARD_BORDER_COLORS.routine)
+      : (GameRunner.QUEUE_PREVIEW_COLORS[slotIndex % GameRunner.QUEUE_PREVIEW_COLORS.length] ?? new Color(120, 120, 120));
+    const muted = !card;
+    const mix = muted ? 0.76 : 0.66;
+    const fill = new Color(
+      Math.round(base.r * (1 - mix) + 250 * mix),
+      Math.round(base.g * (1 - mix) + 246 * mix),
+      Math.round(base.b * (1 - mix) + 238 * mix),
+      muted ? 220 : 255,
+    );
     g.clear();
-    // 空槽：半透底，无边
-    if (!card) {
-      g.fillColor = new Color(240, 235, 225, 100);
-      g.roundRect(-w / 2, -h / 2, w, h, GameRunner.CARD_CORNER_RADIUS);
-      g.fill();
-      return;
-    }
-
-    // 有卡：按状态决定填充色和描边色
-    let fill: Color;
-    let stroke: Color;
-    const baseStroke = GameRunner.CARD_BORDER_COLORS[card.category] ?? GameRunner.CARD_BORDER_COLORS.routine;
-
-    switch (card.state) {
-      case 'rework':
-        fill = GameRunner.COLOR_REWORK.clone();
-        stroke = new Color(160, 50, 50, 255);
-        break;
-      case 'inserted': {
-        fill = GameRunner.COLOR_INSERTED.clone();
-        stroke = new Color(100, 100, 100, 255);
-        // 斜条纹覆盖（浅灰细线），暗示"杂活"
-        g.fillColor = fill;
-        g.roundRect(-w / 2, -h / 2, w, h, GameRunner.CARD_CORNER_RADIUS);
-        g.fill();
-        g.strokeColor = stroke;
-        g.lineWidth = GameRunner.CARD_BORDER_WIDTH;
-        g.roundRect(-w / 2, -h / 2, w, h, GameRunner.CARD_CORNER_RADIUS);
-        g.stroke();
-        // 斜纹：5条对角线，半透灰色，不抢主视觉
-        for (let t = -2; t <= 2; t++) {
-          const cx = t * (w / 4);
-          g.lineWidth = 1.5;
-          g.strokeColor = new Color(120, 120, 120, 80);
-          g.moveTo(cx - h / 2, -h / 2);
-          g.lineTo(cx + h / 2, h / 2);
-          g.stroke();
-        }
-        return; // inserted 已在上面完成绘制
-      }
-      case 'idle':
-        fill = new Color(
-          Math.round(baseStroke.r * GameRunner.CARD_IDLE_DIM),
-          Math.round(baseStroke.g * GameRunner.CARD_IDLE_DIM),
-          Math.round(baseStroke.b * GameRunner.CARD_IDLE_DIM),
-          200,
-        );
-        stroke = new Color(
-          Math.round(baseStroke.r * GameRunner.CARD_STROKE_DIM),
-          Math.round(baseStroke.g * GameRunner.CARD_STROKE_DIM),
-          Math.round(baseStroke.b * GameRunner.CARD_STROKE_DIM),
-          230,
-        );
-        break;
-      case 'boss':
-        fill = new Color(40, 40, 40, 250);
-        stroke = new Color(255, 200, 60, 255); // 金色描边，威慑感
-        break;
-      case 'active-white':
-      default:
-        fill = GameRunner.CARD_FILL_COLOR.clone();
-        stroke = baseStroke.clone();
-        break;
-    }
-
     g.fillColor = fill;
-    g.roundRect(-w / 2, -h / 2, w, h, GameRunner.CARD_CORNER_RADIUS);
+    g.strokeColor = new Color(base.r, base.g, base.b, muted ? 190 : 255);
+    g.lineWidth = muted ? 2.5 : 3.5;
+    g.roundRect(-w / 2, -h / 2, w, h, 13);
     g.fill();
-    g.strokeColor = stroke;
-    g.lineWidth = GameRunner.CARD_BORDER_WIDTH;
-    g.roundRect(-w / 2, -h / 2, w, h, GameRunner.CARD_CORNER_RADIUS);
     g.stroke();
   }
 
@@ -839,7 +793,7 @@ export class GameRunner extends Component {
       const preview = this.artSprites.get(previewKey) ?? null;
       if (preview) {
         sprite.spriteFrame = preview;
-        sprite.color = new Color(200, 200, 200, 100);
+        sprite.color = new Color(255, 255, 255, 210);
         sprite.enabled = true;
       } else {
         sprite.spriteFrame = null;
@@ -889,16 +843,16 @@ export class GameRunner extends Component {
       const sprite = iconNode.addComponent(Sprite);
       sprite.sizeMode = Sprite.SizeMode.CUSTOM;
       iconNode.parent = slot;
-      iconNode.setSiblingIndex(0);
     }
+    iconNode.setSiblingIndex(Math.min(1, slot.children.length - 1));
     const slotUt = slot.getComponent(UITransform);
     const iconUt = iconNode.getComponent(UITransform)!;
-    // 图标占卡槽 55%，居中留白，不撑满整卡（卡牌 = Graphics背景 + 居中图标）
+    // 美术卡片自身包含圆角底板与图标，整张卡按比例展示，不再拆成灰底+小图标。
     if (slotUt) {
-      const iconSize = Math.min(slotUt.width, slotUt.height) * 0.55;
+      const iconSize = Math.min(slotUt.width * 0.56, slotUt.height * 0.56);
       iconUt.setContentSize(iconSize, iconSize);
     }
-    iconNode.setPosition(0, slotUt ? slotUt.height * 0.06 : 0, 0); // 视觉居中偏上，给底部权重数字留位
+    iconNode.setPosition(0, slotUt ? slotUt.height * 0.02 : 0, 0);
     return iconNode.getComponent(Sprite)!;
   }
 
@@ -1016,6 +970,7 @@ export class GameRunner extends Component {
       this.layoutSubtitle(visSize.width, screenTopY + Math.max(16, visSize.height * 0.02));
     }
     if (this.levelLabel) { this.levelLabel.color = new Color(55, 48, 42, 255); this.levelLabel.isBold = true; }
+    this.layoutMonitorMeta(screenTopY, screenWidthPx, visSize.width);
     // 状态行上移到显示器内部安全带，避开角色天线与头部。
     const statY = hudBottomY + Math.min(64, (screenTopY - screenBottomY) * 0.14);
     this.layoutHudLabel(this.approvalLabel, -statInsetX, statY, screenWidthPx * 0.28, 36, 19);
@@ -1031,6 +986,9 @@ export class GameRunner extends Component {
       // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度
       const beltW = Math.min(screenWidthPx * 0.92, visSize.width * 0.9);
       const beltH = Math.max(92, Math.min((screenTopY - screenBottomY) * 0.42, 150));
+      beltUt.setContentSize(beltW, beltH);
+      const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
+      mask.type = Mask.Type.RECT;
       this.layoutBeltSlots(beltW, beltH);
     }
 
@@ -1062,6 +1020,30 @@ export class GameRunner extends Component {
 
     this.layoutPropButtons(visSize.width, visSize.height);
     this.layoutLowerHud(visSize.width, visSize.height);
+  }
+
+  /** 显示器内只保留一条任务流说明，填补空屏但不重绘显示器美术。 */
+  private layoutMonitorMeta(screenTopY: number, screenWidth: number, viewWidth: number): void {
+    if (!this.monitorMetaNode) {
+      const node = new Node('MonitorMeta');
+      node.layer = 1 << 25;
+      node.parent = this.node;
+      node.addComponent(UITransform);
+      const label = node.addComponent(Label);
+      label.string = 'AI 显示器 · 任务流';
+      label.color = new Color(220, 220, 214, 235);
+      label.horizontalAlign = 1;
+      label.verticalAlign = 1;
+      label.isBold = true;
+      label.overflow = Label.Overflow.SHRINK;
+      this.monitorMetaNode = node;
+    }
+    const label = this.monitorMetaNode.getComponent(Label)!;
+    label.fontSize = Math.min(18, Math.max(14, viewWidth * 0.04));
+    label.lineHeight = label.fontSize + 4;
+    this.monitorMetaNode.getComponent(UITransform)!.setContentSize(Math.min(screenWidth * 0.6, 380), 28);
+    this.monitorMetaNode.setPosition(0, screenTopY - Math.max(24, viewWidth * 0.055), 0);
+    this.monitorMetaNode.active = this.uiState === 'playing';
   }
 
   /** 副标题固定在主标题与显示器之间，不进入显示器内屏。 */
@@ -1175,11 +1157,12 @@ export class GameRunner extends Component {
     const n = this.slotNodes.length;
     const gap = 8;
     const slotW = (totalW - gap * (n - 1)) / n;
+    const cardH = Math.min(slotH, slotW * 1.18);
     const startX = -totalW / 2 + slotW / 2;
     this.slotNodes.forEach((slot: Node, i: number) => {
       let ut = slot.getComponent(UITransform);
       if (!ut) ut = slot.addComponent(UITransform);
-      ut.setContentSize(slotW, slotH);
+      ut.setContentSize(slotW, cardH);
       const label = slot.getComponent(Label);
       if (label) {
         label.fontSize = Math.min(24, slotW * 0.24);
@@ -1192,10 +1175,11 @@ export class GameRunner extends Component {
       const bg = this.slotBackgrounds[i];
       if (bg) {
         const bgUt = bg.getComponent(UITransform);
-        if (bgUt) bgUt.setContentSize(slotW, slotH);
-        bg.setPosition(startX + i * (slotW + gap), slot.position.y, 0);
+        if (bgUt) bgUt.setContentSize(slotW, cardH);
+        bg.setPosition(0, 0, 0);
       }
     });
+    this.fx?.refreshSlotBases();
   }
 
   /** 统一 HUD 标签的命中盒、字号和位置。 */
