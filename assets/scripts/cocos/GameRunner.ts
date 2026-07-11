@@ -1886,7 +1886,7 @@ export class GameRunner extends Component {
   private static readonly CHAR_ASPECT = 646 / 927; // 宽/高
   /** 角色整体上下微调。正=上移，负=下移，单位=背景图高度的比例（0.05=下移5%背景高）。
    *  改这一个值就能调角色位置，不用动其他代码。 */
-  private static readonly CHAR_Y_OFFSET = -0.12;
+  private static readonly CHAR_Y_OFFSET = -0.10;
 
   /** 挂背景 + 角色 Sprite，位置按背景图实测比例动态计算（不再猜固定像素）。
    *  背景按宽度等比完整显示，绝不再用 cover 裁掉显示器两侧；超长屏多出的底部区域用背景底色延伸，
