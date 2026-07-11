@@ -723,13 +723,18 @@ export class GameRunner extends Component {
   /** 为每个传送带卡槽创建 Graphics 背景节点（放在 slot 的父节点 beltNode 下，排在最末尾保证不遮挡前景）。 */
   private ensureSlotBackgrounds(): void {
     if (!this.beltNode || this.slotBackgrounds.length > 0) return;
-    this.slotNodes.forEach((_, i: number) => {
+    this.slotNodes.forEach((slot: Node, i: number) => {
       const bg = new Node(`SlotBg${i}`);
       bg.layer = 1 << 25;
       bg.addComponent(UITransform);
       bg.addComponent(Graphics);
       this.beltNode!.addChild(bg);
       bg.setSiblingIndex(this.beltNode!.children.length - 1); // 垫底
+      // 立即按对应 slot 的位置/尺寸定位，否则 6 个背景会默认堆在 beltNode 原点 (0,0) 重叠成一坨
+      const slotUt = slot.getComponent(UITransform);
+      const bgUt = bg.getComponent(UITransform);
+      if (slotUt && bgUt) bgUt.setContentSize(slotUt.width, slotUt.height);
+      bg.setPosition(slot.position);
       this.slotBackgrounds.push(bg);
     });
   }
