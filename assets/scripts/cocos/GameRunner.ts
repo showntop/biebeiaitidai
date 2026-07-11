@@ -80,7 +80,7 @@ export class GameRunner extends Component {
   private slotBackgrounds: Node[] = [];
   /**
    * 卡片视觉按 card.id 持有，不再按槽位复用。
-   * 这是保证“移动中内容不换卡”和出口物理裁切的核心。
+   * 这是保证"移动中内容不换卡"和出口物理裁切的核心。
    */
   private cardVisuals = new Map<number, CardVisual>();
   private propButtonNodes: Node[] = [];
@@ -553,7 +553,7 @@ export class GameRunner extends Component {
     }
   }
 
-  /** 动态创建开始页覆盖层（纯代码，不依赖场景节点）。 */
+  /** 动态创建开始页覆盖层 —— "岗位替代警报"海报式入口。 */
   private createLevelSelectUI(): Node {
     const root = new Node('LevelSelectUI');
     root.layer = 33554432; // UI_2D
@@ -563,27 +563,49 @@ export class GameRunner extends Component {
     this.node.addChild(root);
 
     const vis = view.getVisibleSize();
-    const contentW = Math.min(vis.width * 0.82, 560);
-    this.makeStartBadge(root, 0, vis.height * 0.245, Math.min(contentW * 0.62, 330), 42, '岗位替代警报');
-    const title = this.mkLabel(root, 'Title', 0, vis.height * 0.17, '别让 AI 替代你', 48, contentW, 70);
-    this.styleStartLabel(title, new Color(32, 27, 22, 255), true);
-    const subtitle = this.mkLabel(root, 'Subtitle', 0, vis.height * 0.105, '第1轮反击 · 替代警报', 24, contentW, 40);
-    this.styleStartLabel(subtitle, new Color(96, 74, 54, 255), true);
-    const pitch = this.mkLabel(root, 'Pitch', 0, vis.height * 0.035, 'AI 正在接管任务队列。扔纸团干扰它，别让老板觉得它比你好用。', 19, contentW * 0.92, 62);
-    this.styleStartLabel(pitch, new Color(54, 46, 38, 255), false);
-    this.makeStartRuleCard(root, -contentW * 0.255, -vis.height * 0.06, contentW * 0.3, 82, '01', '长按纸团');
-    this.makeStartRuleCard(root, 0, -vis.height * 0.06, contentW * 0.3, 82, '02', '拖向任务');
-    this.makeStartRuleCard(root, contentW * 0.255, -vis.height * 0.06, contentW * 0.3, 82, '03', '松手反击');
-    this.mkLabel(root, 'RankInfo', 0, -vis.height * 0.15, '', 17, contentW, 34);
-    this.makeStartButton(root, 0, -vis.height * 0.225, Math.min(contentW * 0.72, 390), 70, '开始反击', () => this.onLevelSelected(0));
-    const hint = this.mkLabel(root, 'Hint', 0, -vis.height * 0.305, '目标：把 AI 的“优秀表现”打回原形', 16, contentW, 32);
-    this.styleStartLabel(hint, new Color(86, 66, 50, 255), true);
-    this.makeStartDoodles(root, vis, contentW);
+    const posterW = Math.min(vis.width * 0.88, 650);
+    const posterH = Math.min(vis.height * 0.62, 700);
+    const posterCY = vis.height * 0.045; // poster 中心 Y
+
+    // ── 警报条：红色倾斜横幅，压在 poster 顶部 ──
+    this.paintStartAlertBar(root, posterW, posterH, posterCY);
+
+    // ── 主标题：两行，手写海报感，微微旋转 ──
+    const titleNode = new Node('StartTitle');
+    titleNode.layer = 33554432;
+    titleNode.parent = root;
+    titleNode.setPosition(0, posterCY + posterH * 0.18, 0);
+    titleNode.setRotationFromEuler(0, 0, -2); // -2° 手写海报倾斜
+    const titleUt = titleNode.addComponent(UITransform);
+    titleUt.setContentSize(posterW * 0.84, 120);
+    const titleLabel = titleNode.addComponent(Label);
+    titleLabel.string = '别让 AI\n替代你';
+    titleLabel.fontSize = 52;
+    titleLabel.lineHeight = 62;
+    titleLabel.horizontalAlign = 1; // CENTER
+    titleLabel.verticalAlign = 1;
+    titleLabel.color = new Color(28, 22, 18, 255);
+    titleLabel.isBold = true;
+    titleLabel.overflow = Label.Overflow.NONE;
+
+    // ── 危机说明：一句话 ──
+    const crisis = this.mkLabel(root, 'CrisisText', 0, posterCY - posterH * 0.02, 'AI 正在接管你的任务队列', 22, posterW * 0.82, 40);
+    this.styleStartLabel(crisis, new Color(72, 58, 44, 255), false);
+
+    // ── 唯一 CTA：红色大按钮 ──
+    this.makeStartButton(root, 0, posterCY - posterH * 0.22, Math.min(posterW * 0.52, 340), 72, '开始反击 →', () => this.onLevelSelected(0));
+
+    // ── 底部进度：轻量一行 ──
+    const rank = this.mkLabel(root, 'RankInfo', 0, posterCY - posterH * 0.38, '', 16, posterW * 0.76, 30);
+    this.styleStartLabel(rank, new Color(96, 80, 62, 255), false);
+
+    // ── 装饰涂鸦 ──
+    this.makeStartDoodles(root, vis, posterW, posterCY);
 
     return root;
   }
 
-  /** 刷新开始页内容（段位/进度）。 */
+  /** 刷新开始页内容（进度行）。 */
   private updateLevelSelectContent(): void {
     if (!this.levelSelectRoot) return;
     const bg = this.levelSelectRoot.getComponent(Graphics);
@@ -592,9 +614,10 @@ export class GameRunner extends Component {
     if (rankInfo) {
       const label = rankInfo.getComponent(Label);
       if (label) {
-        label.string = `反替代进度 · 已解锁第${this.session.profile.highestUnlockedLevel + 1}关`;
-        label.color = new Color(84, 72, 60, 255);
-        label.isBold = true;
+        const day = this.session.daysEmployed;
+        label.string = `第${this.session.profile.highestUnlockedLevel + 1}轮反击 · 入职第${day}天`;
+        label.color = new Color(96, 80, 62, 255);
+        label.isBold = false;
       }
     }
   }
@@ -646,17 +669,19 @@ export class GameRunner extends Component {
   private paintFullScreenStartBg(g: Graphics): void {
     const vis = view.getVisibleSize();
     const posterW = Math.min(vis.width * 0.88, 650);
-    const posterH = Math.min(vis.height * 0.74, 800);
+    const posterH = Math.min(vis.height * 0.62, 700);
     const posterX = -posterW / 2;
-    const posterY = -posterH / 2 + vis.height * 0.045;
+    const posterCY = vis.height * 0.045;
+    const posterY = posterCY - posterH / 2;
     g.clear();
+
     // 办公室墙面底色
     g.fillColor = new Color(238, 226, 207, 255);
     g.rect(-vis.width / 2, -vis.height / 2, vis.width, vis.height);
     g.fill();
 
-    // 微弱横向纸纹，避免大面积纯色显廉价
-    g.strokeColor = new Color(219, 205, 184, 80);
+    // 微弱横向纸纹
+    g.strokeColor = new Color(219, 205, 184, 70);
     g.lineWidth = 1;
     for (let y = -vis.height / 2 + 28; y < vis.height / 2; y += 34) {
       g.moveTo(-vis.width / 2 + 20, y);
@@ -676,56 +701,32 @@ export class GameRunner extends Component {
     g.roundRect(posterX, posterY, posterW, posterH, 30);
     g.fill();
     g.stroke();
+  }
 
-    // 顶部警报条
-    g.fillColor = new Color(224, 62, 52, 255);
-    g.roundRect(posterX + 18, posterY + posterH - 72, posterW - 36, 46, 17);
+  /** 在 poster 顶部画倾斜红色警报横幅。 */
+  private paintStartAlertBar(parent: Node, posterW: number, _posterH: unknown, posterCY: number): void {
+    const node = new Node('StartAlertBar');
+    node.layer = 33554432;
+    node.parent = parent;
+    const barW = posterW * 0.62;
+    const barH = 46;
+    const barY = posterCY + (Math.min(view.getVisibleSize().height * 0.62, 700) as number) * 0.40;
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(barW, barH);
+    node.setPosition(-posterW * 0.04, barY, 0);
+    node.setRotationFromEuler(0, 0, -3); // 倾斜贴在公告顶部
+    const g = node.addComponent(Graphics);
+    g.fillColor = new Color(224, 56, 46, 255);
+    g.strokeColor = new Color(26, 22, 19, 255);
+    g.lineWidth = 3;
+    g.roundRect(-barW / 2, -barH / 2, barW, barH, 14);
     g.fill();
-    g.strokeColor = new Color(34, 29, 24, 255);
-    g.lineWidth = 3;
-    g.roundRect(posterX + 18, posterY + posterH - 72, posterW - 36, 46, 17);
     g.stroke();
-
-    // 中间简化显示器暗区，呼应游戏主画面
-    const monitorW = posterW * 0.74;
-    const monitorH = posterH * 0.19;
-    const monitorY = posterY + posterH * 0.47;
-    g.fillColor = new Color(55, 55, 52, 255);
-    g.strokeColor = new Color(26, 24, 22, 255);
-    g.lineWidth = 4;
-    g.roundRect(-monitorW / 2, monitorY, monitorW, monitorH, 18);
-    g.fill(); g.stroke();
-    g.fillColor = new Color(90, 90, 84, 255);
-    const cardW = monitorW * 0.12;
-    const cardH = monitorH * 0.43;
-    for (let i = 0; i < 5; i++) {
-      const x = -monitorW * 0.36 + i * monitorW * 0.18;
-      g.roundRect(x, monitorY + monitorH * 0.3, cardW, cardH, 9);
-      g.fill();
-    }
-
-    // 底部高危认可度条
-    const barW = posterW * 0.72;
-    const barH = 18;
-    const barY = posterY + posterH * 0.155;
-    g.fillColor = new Color(250, 245, 235, 255);
-    g.strokeColor = new Color(34, 29, 24, 255);
-    g.lineWidth = 3;
-    g.roundRect(-barW / 2, barY, barW, barH, 9);
-    g.fill(); g.stroke();
-    const segs: Array<[number, Color]> = [
-      [0.20, new Color(111, 76, 225, 255)],
-      [0.34, new Color(78, 174, 74, 255)],
-      [0.22, new Color(245, 199, 52, 255)],
-      [0.24, new Color(231, 61, 47, 255)],
-    ];
-    let x = -barW / 2 + 3;
-    for (const [ratio, color] of segs) {
-      const w = (barW - 6) * ratio;
-      g.fillColor = color;
-      g.rect(x, barY + 3, w, barH - 6);
-      g.fill();
-      x += w;
+    const labelNode = this.mkLabel(node, 'AlertText', 0, 0, '⚠ 岗位替代警报', 22, barW - 24, barH - 6);
+    const label = labelNode.getComponent(Label);
+    if (label) {
+      label.color = new Color(255, 241, 194, 255);
+      label.isBold = true;
     }
   }
 
@@ -767,85 +768,42 @@ export class GameRunner extends Component {
     label.overflow = Label.Overflow.SHRINK;
   }
 
-  private makeStartBadge(parent: Node, x: number, y: number, w: number, h: number, text: string): Node {
-    const node = new Node('StartAlertBadge');
-    node.layer = 33554432;
-    node.parent = parent;
-    node.addComponent(UITransform).setContentSize(w, h);
-    const g = node.addComponent(Graphics);
-    g.fillColor = new Color(34, 29, 24, 255);
-    g.roundRect(-w / 2, -h / 2, w, h, 12);
-    g.fill();
-    node.setPosition(x, y, 0);
-    const labelNode = this.mkLabel(node, 'BadgeText', 0, 0, text, 20, w - 18, h - 4);
-    const label = labelNode.getComponent(Label);
-    if (label) {
-      label.color = new Color(255, 238, 192, 255);
-      label.isBold = true;
-    }
-    return node;
-  }
-
-  private makeStartRuleCard(parent: Node, x: number, y: number, w: number, h: number, num: string, text: string): Node {
-    const node = new Node(`StartRule${num}`);
-    node.layer = 33554432;
-    node.parent = parent;
-    node.addComponent(UITransform).setContentSize(w, h);
-    const g = node.addComponent(Graphics);
-    g.fillColor = new Color(255, 252, 244, 255);
-    g.strokeColor = new Color(45, 39, 32, 255);
-    g.lineWidth = 3;
-    g.roundRect(-w / 2, -h / 2, w, h, 15);
-    g.fill(); g.stroke();
-    g.fillColor = new Color(255, 220, 96, 255);
-    g.circle(-w * 0.28, h * 0.2, Math.min(15, w * 0.13));
-    g.fill();
-    node.setPosition(x, y, 0);
-    const numNode = this.mkLabel(node, `RuleNum${num}`, -w * 0.28, h * 0.2, num, 15, 38, 24);
-    this.styleStartLabel(numNode, new Color(40, 34, 28, 255), true);
-    const textNode = this.mkLabel(node, `RuleText${num}`, 0, -h * 0.18, text, 16, w - 14, 32);
-    this.styleStartLabel(textNode, new Color(42, 36, 30, 255), true);
-    return node;
-  }
-
-  private makeStartDoodles(parent: Node, vis: { width: number; height: number }, contentW: number): void {
+  private makeStartDoodles(parent: Node, vis: { width: number; height: number }, posterW: number, posterCY: number): void {
     const doodle = new Node('StartDoodles');
     doodle.layer = 33554432;
     doodle.parent = parent;
     doodle.addComponent(UITransform).setContentSize(vis.width, vis.height);
     const g = doodle.addComponent(Graphics);
-    // 右上角红章：REPLACED?
-    const stampX = contentW * 0.34;
-    const stampY = vis.height * 0.085;
-    g.strokeColor = new Color(211, 42, 38, 180);
+    const posterH = Math.min(vis.height * 0.62, 700);
+
+    // 右上角红章：REPLACED? —— 被驳回的"替代"警告，打上红色问号
+    const stampCX = posterW * 0.37;
+    const stampCY = posterCY + posterH * 0.42;
+    g.strokeColor = new Color(211, 42, 38, 190);
     g.lineWidth = 4;
-    g.roundRect(stampX - 58, stampY - 26, 116, 52, 8);
+    g.roundRect(stampCX - 60, stampCY - 28, 120, 56, 10);
     g.stroke();
-    g.moveTo(stampX - 48, stampY - 12);
-    g.lineTo(stampX + 48, stampY + 14);
+    // 斜线划掉
+    g.moveTo(stampCX - 50, stampCY - 14);
+    g.lineTo(stampCX + 50, stampCY + 16);
     g.stroke();
 
-    // 左下纸团涂鸦
-    const paperX = -contentW * 0.38;
-    const paperY = -vis.height * 0.235;
-    g.fillColor = new Color(255, 255, 255, 245);
-    g.strokeColor = new Color(44, 39, 34, 220);
+    // 左下纸团涂鸦 —— 暗示"扔纸团反击"
+    const paperX = -posterW * 0.38;
+    const paperY = posterCY - posterH * 0.44;
+    g.fillColor = new Color(255, 255, 255, 240);
+    g.strokeColor = new Color(42, 36, 30, 220);
     g.lineWidth = 2;
+    // 三个纸团聚一堆
     g.circle(paperX, paperY, 13); g.fill(); g.stroke();
-    g.circle(paperX + 14, paperY + 5, 12); g.fill(); g.stroke();
-    g.circle(paperX + 4, paperY + 17, 10); g.fill(); g.stroke();
-    g.strokeColor = new Color(80, 160, 255, 180);
+    g.circle(paperX + 16, paperY + 4, 12); g.fill(); g.stroke();
+    g.circle(paperX + 5, paperY + 18, 10); g.fill(); g.stroke();
+    // 纸团褶皱线
+    g.strokeColor = new Color(80, 160, 255, 160);
     g.moveTo(paperX - 6, paperY + 6);
-    g.lineTo(paperX + 20, paperY + 2);
-    g.moveTo(paperX, paperY + 17);
-    g.lineTo(paperX + 24, paperY + 12);
-    g.stroke();
-
-    // 两条飞行轨迹，暗示“扔出去”
-    g.strokeColor = new Color(54, 46, 38, 110);
-    g.lineWidth = 3;
-    g.moveTo(paperX + 34, paperY + 12);
-    g.bezierCurveTo(-contentW * 0.15, -vis.height * 0.17, contentW * 0.08, -vis.height * 0.12, contentW * 0.22, -vis.height * 0.06);
+    g.lineTo(paperX + 22, paperY + 2);
+    g.moveTo(paperX + 2, paperY + 16);
+    g.lineTo(paperX + 24, paperY + 10);
     g.stroke();
   }
 
@@ -1377,7 +1335,7 @@ export class GameRunner extends Component {
         label.horizontalAlign = 2;
         label.verticalAlign = 1;
       }
-      // 道具区改为“纸团弹药台”：旧功能图标只作为素材保留，不再盖在纸团堆上。
+      // 道具区改为"纸团弹药台"：旧功能图标只作为素材保留，不再盖在纸团堆上。
       const icon = this.propIconSprites[i];
       const btnUt = btn.getComponent(UITransform);
       const btnW = btnUt?.width ?? 140;
@@ -1560,7 +1518,7 @@ export class GameRunner extends Component {
     const h = ut.height;
     if (w <= 0 || h <= 0) return;
     if (!card) {
-      // 空槽仅保留中性轮廓，避免入场卡与“预览图标”叠在一起产生内容变形。
+      // 空槽仅保留中性轮廓，避免入场卡与"预览图标"叠在一起产生内容变形。
       g.clear();
       g.fillColor = new Color(245, 241, 232, 28);
       g.strokeColor = new Color(225, 220, 210, 76);
@@ -1735,7 +1693,7 @@ export class GameRunner extends Component {
   }
 
   /**
-   * 出口使用“卡片宽度”作为完整移出距离：
+   * 出口使用"卡片宽度"作为完整移出距离：
    * 0%=完整，25%=裁左 1/4，50%=只剩右半，75%=只剩右 1/4，100%=完全移出。
    */
   private exitCardVisual(visual: CardVisual): void {
