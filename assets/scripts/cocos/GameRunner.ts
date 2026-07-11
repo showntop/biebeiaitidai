@@ -1308,12 +1308,9 @@ export class GameRunner extends Component {
   }
 
   /**
-   * §4.1 道具 HUD：每帧把 PropSystem.getState() 渲染到 4 个道具按钮。
-   *  布局：上半图标 Sprite（有素材时）+ 下半两行文字（名称 / 状态×次数）。
-   *  - CD 类：显示剩余冷却秒（就绪时"就绪"）
-   *  - 能量类：显示充能百分比（就绪时"就绪"）
-   *  - 始终显示剩余次数 ×N
-   *  底色按道具功能色（蓝/紫/红/粉）着色；未解锁/用尽压暗，就绪提亮。
+   * 纸团武器槽 HUD：每帧刷新 4 个槽位。
+   *  左半：纸团堆 Graphics（每类不同形状）。右半：大字次数 + 一行状态。
+   *  CD/能量：在按钮左右各画一段弧形进度，替代之前的纯文字秒数。
    */
   private renderPropHUD(): void {
     if (!this.propButtons) return;
@@ -1322,40 +1319,37 @@ export class GameRunner extends Component {
       const label = btn.getComponent(Label);
       const st = this.game.prop.getState(type);
       const unlocked = this.game.prop.isUnlocked(type);
-      const name = GameRunner.PROP_LABELS[i];
       const action = GameRunner.PROP_ACTION_LABELS[i] ?? '';
-      let line2: string;
-      if (!unlocked) line2 = '未解锁';
-      else if (st.uses <= 0) line2 = '已用尽';
-      else if (st.ready) line2 = '就绪';
-      else if (st.acquisition === 'cd') line2 = `${st.cdRemaining.toFixed(1)}s`;
-      else line2 = `${Math.round(st.energy * 100)}%`;
-      const usesText = !unlocked || type === PT.KissUp ? '' : `×${st.uses}`;
-      const sf = this.propSfFor(type);
+      const uses = unlocked ? st.uses : 0;
+      const kissUp = type === PT.KissUp;
+      let statusText: string;
+      let cdPct = 1; // 0=满CD, 1=就绪
+      if (!unlocked) { statusText = '锁'; cdPct = 0; }
+      else if (uses <= 0) { statusText = '空'; cdPct = 0; }
+      else if (st.ready) statusText = '就绪';
+      else if (st.acquisition === 'cd') {
+        statusText = `${st.cdRemaining.toFixed(1)}s`;
+        cdPct = 1 - st.cdRemaining / Math.max(1, st.cdDuration);
+      } else {
+        statusText = `${Math.round(st.energy * 100)}%`;
+        cdPct = st.energy;
+      }
+      const countText = kissUp ? '' : (uses > 0 ? `×${uses}` : '');
       if (label) {
-        label.string = `${name}\n${action} ${line2}${usesText}`;
-        label.color = !unlocked || st.uses <= 0 ? new Color(115, 110, 105, 255) : new Color(42, 38, 34, 255);
-        // Label 就挂在按钮节点本身，不能再移动 label.node（会把整个按钮移回原点）。
-        label.horizontalAlign = 2;
+        label.string = `${action}\n${countText}\n${statusText}`;
+        const dim = !unlocked || uses <= 0;
+        label.color = dim ? new Color(130, 123, 118, 255) : new Color(38, 34, 30, 255);
+        label.horizontalAlign = 2; // RIGHT
         label.verticalAlign = 1;
+        label.fontSize = Math.min(16, label.fontSize || 14);
+        label.lineHeight = label.fontSize + 3;
       }
-      // 道具区改为"纸团弹药台"：旧功能图标只作为素材保留，不再盖在纸团堆上。
-      const icon = this.propIconSprites[i];
-      const btnUt = btn.getComponent(UITransform);
-      const btnW = btnUt?.width ?? 140;
-      const btnH = btnUt?.height ?? 96;
-      if (icon) {
-        void sf;
-        void btnW;
-        void btnH;
-        icon.enabled = false;
-      }
-      this.drawPropButtonBackground(i, unlocked, st.uses > 0, st.ready);
+      this.drawPropButtonBackground(i, unlocked, uses > 0, st.ready, cdPct);
     });
   }
 
-  /** 道具按钮统一为浅色功能卡：与黑色线稿图标同一视觉语言，靠彩色描边表达类别。 */
-  private drawPropButtonBackground(index: number, unlocked: boolean, hasUses: boolean, ready: boolean): void {
+  /** 纸团武器槽背景：底卡 + 差异化纸团 + CD 进度条。 */
+  private drawPropButtonBackground(index: number, unlocked: boolean, hasUses: boolean, ready: boolean, cdPct = 1): void {
     const bg = this.propButtonBackgrounds[index];
     if (!bg) return;
     const ut = bg.getComponent(UITransform);
@@ -1365,60 +1359,105 @@ export class GameRunner extends Component {
     const w = ut.width;
     const h = ut.height;
     const base = GameRunner.PROP_COLORS[index] ?? new Color(80, 160, 255);
-
     const inactive = !unlocked || !hasUses;
-    const mix = inactive ? 0.87 : ready ? 0.72 : 0.80;
-    const fill = new Color(
-      Math.round(base.r * (1 - mix) + 250 * mix),
-      Math.round(base.g * (1 - mix) + 245 * mix),
-      Math.round(base.b * (1 - mix) + 235 * mix),
-      255,
-    );
-    const stroke = inactive
-      ? new Color(130, 125, 118, 210)
-      : new Color(base.r, base.g, base.b, 255);
 
     g.clear();
-    g.fillColor = fill;
-    g.strokeColor = stroke;
+
+    // ── 底卡 ──
+    const fillM = inactive ? 0.88 : ready ? 0.70 : 0.80;
+    g.fillColor = new Color(
+      Math.round(base.r * (1 - fillM) + 250 * fillM),
+      Math.round(base.g * (1 - fillM) + 245 * fillM),
+      Math.round(base.b * (1 - fillM) + 235 * fillM),
+      255,
+    );
+    g.strokeColor = inactive ? new Color(130, 125, 118, 200) : ready ? base : new Color(base.r, base.g, base.b, 180);
     g.lineWidth = ready ? 4 : 3;
     g.roundRect(-w / 2, -h / 2, w, h, 16);
     g.fill();
     g.stroke();
 
-    const pileAlpha = inactive ? 120 : 245;
-    const paperFill = inactive
-      ? new Color(190, 186, 178, 210)
-      : new Color(
-        Math.round(base.r * 0.22 + 248 * 0.78),
-        Math.round(base.g * 0.22 + 246 * 0.78),
-        Math.round(base.b * 0.22 + 238 * 0.78),
-        pileAlpha,
-      );
+    // ── CD 小进度条（非就绪且有进度） ──
+    if (!ready && !inactive && cdPct > 0) {
+      const barPad = 6;
+      const barBH = 4;
+      const barW = w - barPad * 2;
+      const barY = -h / 2 + barBH + 4;
+      g.fillColor = new Color(200, 195, 186, 255);
+      g.rect(-barW / 2, barY - barBH / 2, barW, barBH);
+      g.fill();
+      g.fillColor = base;
+      g.rect(-barW / 2, barY - barBH / 2, barW * cdPct, barBH);
+      g.fill();
+    }
+
+    // ── 差异化纸团（左半） ──
     const cx = -w * 0.28;
     const cy = h * 0.02;
-    const r = Math.min(18, h * 0.18);
-    g.fillColor = paperFill;
-    g.strokeColor = inactive ? new Color(90, 86, 80, 130) : new Color(42, 38, 34, 230);
-    g.lineWidth = 2.5;
-    g.circle(cx - r * 0.42, cy - r * 0.18, r * 0.82);
-    g.fill();
-    g.stroke();
-    g.circle(cx + r * 0.28, cy - r * 0.08, r * 0.92);
-    g.fill();
-    g.stroke();
-    g.circle(cx - r * 0.02, cy + r * 0.46, r * 0.76);
-    g.fill();
-    g.stroke();
-    g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 220);
-    g.lineWidth = 2;
-    g.moveTo(cx - r * 0.82, cy + r * 0.10);
-    g.lineTo(cx - r * 0.18, cy + r * 0.55);
-    g.lineTo(cx + r * 0.44, cy - r * 0.02);
-    g.moveTo(cx - r * 0.46, cy - r * 0.48);
-    g.lineTo(cx + r * 0.28, cy - r * 0.24);
-    g.lineTo(cx + r * 0.66, cy - r * 0.66);
-    g.stroke();
+    this.drawPaperPile(g, index, cx, cy, h, base, inactive);
+
+    // ── 状态图标 ──
+    if (!unlocked) {
+      g.strokeColor = new Color(120, 114, 108, 200);
+      g.lineWidth = 3;
+      g.circle(cx, cy + 2, 10);
+      g.stroke();
+      g.rect(cx - 4, cy - 8, 8, 10);
+      g.stroke();
+    } else if (!hasUses) {
+      g.strokeColor = new Color(120, 114, 108, 180);
+      g.lineWidth = 2;
+      g.moveTo(cx - 14, cy - 14); g.lineTo(cx + 14, cy + 14); g.stroke();
+      g.moveTo(cx + 14, cy - 14); g.lineTo(cx - 14, cy + 14); g.stroke();
+    }
+  }
+
+  /** 按道具类型画差异化纸团形状：0=圆纸团 1=皱纸团 2=咖啡团 3=便签。 */
+  private drawPaperPile(g: Graphics, index: number, cx: number, cy: number, h: number, base: Color, inactive: boolean): void {
+    const r = Math.min(19, h * 0.20);
+    const f = inactive
+      ? new Color(192, 188, 182, 200)
+      : new Color(Math.round(base.r * 0.16 + 248 * 0.84), Math.round(base.g * 0.16 + 246 * 0.84), Math.round(base.b * 0.16 + 238 * 0.84), 245);
+    const s = inactive ? new Color(100, 95, 90, 140) : new Color(42, 38, 34, 230);
+
+    if (index === 0) {
+      // 白纸团=加需求：三个圆纸团
+      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
+      g.circle(cx - r * 0.38, cy - r * 0.22, r * 0.82); g.fill(); g.stroke();
+      g.circle(cx + r * 0.32, cy - r * 0.10, r * 0.92); g.fill(); g.stroke();
+      g.circle(cx, cy + r * 0.48, r * 0.76); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 200); g.lineWidth = 1.8;
+      g.moveTo(cx - r * 0.7, cy + r * 0.15); g.lineTo(cx - r * 0.15, cy + r * 0.55); g.lineTo(cx + r * 0.4, cy + r * 0.05); g.stroke();
+    } else if (index === 1) {
+      // 紫纸团=改需求：六边形皱纸团
+      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
+      g.moveTo(cx - r * 0.8, cy - r * 0.3); g.lineTo(cx + r * 0.3, cy - r * 0.9); g.lineTo(cx + r * 0.9, cy - r * 0.1);
+      g.lineTo(cx + r * 0.7, cy + r * 0.6); g.lineTo(cx - r * 0.1, cy + r * 0.9); g.lineTo(cx - r * 0.9, cy + r * 0.15); g.close(); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 200); g.lineWidth = 1.5;
+      g.moveTo(cx - r * 0.4, cy - r * 0.2); g.lineTo(cx + r * 0.2, cy + r * 0.3); g.stroke();
+    } else if (index === 2) {
+      // 咖啡团=甩锅：深色椭圆+咖啡渍点
+      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
+      g.circle(cx, cy - r * 0.1, r * 0.88); g.fill(); g.stroke();
+      g.circle(cx - r * 0.6, cy + r * 0.35, r * 0.62); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 110 : 220); g.lineWidth = 1.5;
+      g.moveTo(cx - r * 0.5, cy - r * 0.3); g.lineTo(cx + r * 0.3, cy + r * 0.4); g.stroke();
+      g.fillColor = new Color(70, 48, 28, inactive ? 80 : 180);
+      g.circle(cx + r * 0.3, cy - r * 0.2, r * 0.12); g.fill();
+      g.circle(cx - r * 0.2, cy - r * 0.5, r * 0.08); g.fill();
+    } else {
+      // 粉便签=拍马屁：方形便签+折角+横线
+      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
+      g.moveTo(cx - r * 0.85, cy - r * 0.70); g.lineTo(cx + r * 0.70, cy - r * 0.70); g.lineTo(cx + r * 0.70, cy + r * 0.50);
+      g.lineTo(cx + r * 0.20, cy + r * 0.50); g.lineTo(cx - r * 0.10, cy + r * 0.80); g.lineTo(cx - r * 0.85, cy + r * 0.80); g.close(); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 90 : 200); g.lineWidth = 1.5;
+      g.moveTo(cx + r * 0.20, cy + r * 0.50); g.lineTo(cx - r * 0.10, cy + r * 0.80); g.stroke();
+      g.fillColor = f; g.strokeColor = s; g.lineWidth = 1.5;
+      g.moveTo(cx + r * 0.70, cy + r * 0.50); g.lineTo(cx + r * 0.20, cy + r * 0.50); g.lineTo(cx + r * 0.70, cy + r * 0.20); g.close(); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 80 : 160); g.lineWidth = 1;
+      g.moveTo(cx - r * 0.5, cy + r * 0.1); g.lineTo(cx + r * 0.2, cy + r * 0.1); g.stroke();
+      g.moveTo(cx - r * 0.5, cy + r * 0.3); g.lineTo(cx + r * 0.1, cy + r * 0.3); g.stroke();
+    }
   }
 
   /* ---------- 渲染 ---------- */
