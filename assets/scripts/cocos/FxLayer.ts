@@ -41,8 +41,8 @@ export class FxLayer {
   private overlayG: Graphics | null = null;
   private overlayOpacity: UIOpacity | null = null;
 
-  /** 出队裁剪节点：带 Mask 的矩形区域，ghost 放在里面滑动时被裁出"被显示器吞没"效果。 */
-  private exitClip: Node | null = null;
+  /** 出队裁剪：直接在 Belt 节点上加 Mask（Belt 是场景树已有节点，渲染管线已初始化，Mask 可靠工作）。 */
+  private beltMaskReady = false;
 
   constructor(
     private bus: EventBus,
@@ -63,29 +63,7 @@ export class FxLayer {
   /** 布局层重排卡槽后刷新逻辑中心点；动效始终以这些基准点计算，避免连续 tween 漂移。 */
   refreshSlotBases(): void {
     this.slotBases = this.slots.map((slot) => slot?.isValid ? slot.position.clone() : new Vec3());
-    // 同步 exitClip 的位置/尺寸以匹配新布局
-    if (this.exitClip?.isValid && this.slots.length > 0) {
-      const first = this.slots[0];
-      const last = this.slots[this.slots.length - 1];
-      const firstUt = first?.getComponent(UITransform);
-      const lastUt = last?.getComponent(UITransform);
-      if (first?.isValid && last?.isValid && firstUt && lastUt) {
-        const left = first.position.x - firstUt.width / 2;
-        const right = last.position.x + lastUt.width / 2;
-        const w = right - left;
-        const h = Math.max(firstUt.height, lastUt.height) + 4;
-        const ut = this.exitClip.getComponent(UITransform);
-        if (ut) ut.setContentSize(w, h);
-        this.exitClip.setPosition((left + right) / 2, first.position.y, 0);
-        // 重绘 Graphics 模板矩形
-        const g = this.exitClip.getComponent(Graphics);
-        if (g) {
-          g.clear();
-          g.rect(-w / 2, -h / 2, w, h);
-          g.fill();
-        }
-      }
-    }
+    this.ensureBeltMask();
   }
 
   /** 释放所有事件订阅 + 清理常驻遮罩 + 停掉进行中的震动/闪色 tween（换关前调用）。 */
@@ -99,8 +77,7 @@ export class FxLayer {
     this.overlayNode = null;
     this.overlayG = null;
     this.overlayOpacity = null;
-    if (this.exitClip?.isValid) this.exitClip.destroy();
-    this.exitClip = null;
+    this.beltMaskReady = false;
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -293,16 +270,15 @@ export class FxLayer {
   }
 
   /**
-   * 旧处理区卡片在队列换档前克隆一份，放入带 Mask 的 exitClip 中向左滑出。
+   * 旧处理区卡片在队列换档前克隆一份，挂到 Belt 下向左滑出。
    *
-   * ghost 从 slot0 中心线性左移 cardW 距离；exitClip 的矩形 Mask 把超出传送带
-   * 左边缘的部分裁掉，视觉上呈现 完整 → 2/3 → 1/2 → 1/3 → 完全离开 的"被显示器吞没"效果。
+   * Belt 节点已加 Mask（见 ensureBeltMask），ghost 滑出 Belt 左边缘时被 Mask
+   * 裁剪，视觉上呈现 完整 → 2/3 → 1/2 → 1/3 → 完全离开 的"被显示器吞没"效果。
    */
   private spawnOutgoingGhost(gap: number): void {
     const head = this.slots[0];
-    if (!head?.isValid) return;
-    const clip = this.ensureExitClip();
-    if (!clip) return;
+    const belt = head?.parent;
+    if (!head?.isValid || !belt?.isValid) return;
 
     const base = this.slotBases[0]?.clone() ?? head.position.clone();
     const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
@@ -310,67 +286,71 @@ export class FxLayer {
     const cardW = headUt?.width ?? Math.abs(gap);
     if (cardW <= 0) return;
 
-    // ghost 相对 exitClip 的位置（exitClip 定位在传送带中心，需把 slot0 的 belt 坐标转成 clip 局部坐标）
-    const ghostLocalX = base.x - clip.position.x;
-
     const ghost = instantiate(head);
     ghost.name = 'OutgoingCardGhost';
     ghost.layer = head.layer;
-    ghost.parent = clip;
-    ghost.setPosition(ghostLocalX, 0, 0);
+    ghost.parent = belt;
+    ghost.setSiblingIndex(belt.children.length - 1); // 顶层
+    ghost.setPosition(base);
     ghost.setScale(new Vec3(1, 1, 1));
     const opacity = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
     opacity.opacity = 255;
 
-    // 滑出距离 = 卡片宽度 × 1.1（刚好完全离开裁剪区，留 10% 余量确保彻底消失）
+    // 滑出距离 = 卡片宽度 × 1.1（完全离开 Belt 裁剪区 + 10% 余量）
     const travel = cardW * 1.1;
     tween(ghost)
-      .to(duration, { position: new Vec3(ghostLocalX - travel, 0, 0) }, { easing: 'linear' })
+      .to(duration, { position: new Vec3(base.x - travel, base.y, base.z) }, { easing: 'linear' })
       .call(() => { if (ghost.isValid) ghost.destroy(); })
       .start();
   }
 
-  /** 创建/复用带 Mask 的裁剪节点，覆盖整个传送带区域。ghost 放在里面滑动时被矩形 Mask 裁剪。 */
-  private ensureExitClip(): Node | null {
-    if (this.exitClip?.isValid) return this.exitClip;
+  /**
+   * 在 Belt 节点上加 Mask（GRAPHICS_STENCIL），裁剪区域 = 传送带范围 + 右侧多一格 gap
+   * （给 shift 动画中右移的卡片留空间）。Belt 是场景树已有节点，渲染管线已初始化，
+   * Mask 在这里能可靠工作（动态创建的新节点上 Mask 经常不初始化模板缓冲）。
+   */
+  private ensureBeltMask(): void {
+    if (this.beltMaskReady) return;
     const belt = this.slots[0]?.parent;
-    if (!belt?.isValid || this.slots.length < 1) return null;
-
-    const clip = new Node('ExitClip');
-    clip.layer = UI_2D;
+    if (!belt?.isValid || this.slots.length < 1) return;
 
     const first = this.slots[0];
     const last = this.slots[this.slots.length - 1];
     const firstUt = first?.getComponent(UITransform);
     const lastUt = last?.getComponent(UITransform);
-    let w = 200, h = 120, cx = 0, cy = 0;
-    if (first?.isValid && last?.isValid && firstUt && lastUt) {
-      const left = first.position.x - firstUt.width / 2;
-      const right = last.position.x + lastUt.width / 2;
-      w = right - left;
-      h = Math.max(firstUt.height, lastUt.height) + 4;
-      cx = (left + right) / 2;
-      cy = first.position.y;
-    }
+    if (!first?.isValid || !last?.isValid || !firstUt || !lastUt) return;
 
-    const ut = clip.addComponent(UITransform);
+    // 计算裁剪区域：从 slot0 左边缘到 slotN 右边缘 + 一格 gap（shift 动画余量）
+    const gap = this.slots.length > 1
+      ? Math.abs(this.slots[1].position.x - this.slots[0].position.x)
+      : firstUt.width + 8;
+    const left = first.position.x - firstUt.width / 2;
+    const right = last.position.x + lastUt.width / 2 + gap;
+    const w = right - left;
+    const h = Math.max(firstUt.height, lastUt.height) + 4;
+
+    // 确保 Belt 有 UITransform（Mask 依赖 contentSize 做裁剪矩形）
+    let ut = belt.getComponent(UITransform);
+    if (!ut) ut = belt.addComponent(UITransform);
     ut.setContentSize(w, h);
-    clip.setPosition(cx, cy, 0);
+    // Belt 的 anchor 默认 (0.5, 0.5)，rect 居中于 Belt position。
+    // slots 在 layoutBeltSlots 中围绕 X=0 对称排布，所以 Belt position 的 X 应为 0
+    // 或接近 0。这里不改动 Belt position，只设 contentSize。
 
     // GRAPHICS_STENCIL：Graphics 画矩形 = 可见区域；矩形外被裁剪
-    // 比 RECT 更可靠（RECT 动态创建时模板缓冲可能不初始化）
-    const g = clip.addComponent(Graphics);
+    let g = belt.getComponent(Graphics);
+    if (!g) g = belt.addComponent(Graphics);
+    g.clear();
     g.rect(-w / 2, -h / 2, w, h);
     g.fill();
 
-    const mask = clip.addComponent(Mask);
-    mask.type = Mask.Type.GRAPHICS_STENCIL;
+    let mask = belt.getComponent(Mask);
+    if (!mask) {
+      mask = belt.addComponent(Mask);
+      mask.type = Mask.Type.GRAPHICS_STENCIL;
+    }
 
-    clip.parent = belt;
-    clip.setSiblingIndex(belt.children.length - 1); // 顶层，ghost 不被其他节点遮挡
-
-    this.exitClip = clip;
-    return clip;
+    this.beltMaskReady = true;
   }
 
   private flyResolvedCard(text: string, color: Color, target: Vec3): void {
