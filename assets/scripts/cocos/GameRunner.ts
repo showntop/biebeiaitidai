@@ -1836,8 +1836,8 @@ export class GameRunner extends Component {
    *  显示器内屏：y ∈ [24.3%, 59.3%]；桌面线：y = 62.7%。 */
   private static readonly BG_SCREEN_TOP = 0.243;
   private static readonly BG_SCREEN_BOTTOM = 0.593;
-  private static readonly BG_SCREEN_LEFT = 0.035;
-  private static readonly BG_SCREEN_RIGHT = 0.964;
+  private static readonly BG_SCREEN_LEFT = 0.138;
+  private static readonly BG_SCREEN_RIGHT = 0.861;
   private static readonly BG_DESK_TOP = 0.627;
 
   /** 角色图实测比例常量（char-back.png 已裁掉透明边距，646×927，PIL alpha>128 逐行扫描）：
