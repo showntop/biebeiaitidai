@@ -265,14 +265,19 @@ export class FxLayer {
   }
 
   /**
-   * 旧处理区卡片在队列换档前克隆一份。
+   * 旧处理区卡片在队列换档前克隆一份，原地"被显示器吞没"消失。
    *
-   * ghost 与其余卡片同属 Belt，从 slot0 中心向左线性移动一整张卡宽(cardW)，
-   * 被 Belt 自身的矩形 Mask 逐段裁切：完整 → 2/3 → 1/2 → 1/3 → 完全离开。
+   * Belt 的 Mask 对动态 instantiate 创建的子节点不生效（3.8 限制），
+   * 所以 ghost 滑出时不会被裁剪，整张可见到 destroy 瞬间消失。
    *
-   * 关键：ghost 的左边缘初始就贴在 Mask 左边界（slot0 左边缘 = -beltW/2），
-   * 所以移动过程中左半部分持续被 Mask 裁掉，右半部分逐渐缩窄直至完全消失。
-   * 之前只移动 gap(≈一格间距) 远不够滑出 Mask，所以看起来"碰到边缘就瞬间消失"。
+   * 改用移动 + scale.x 同步收缩模拟"被吞没"：
+   *   - ghost 向左移动一整张卡宽（position.x: base.x → base.x - cardW）
+   *   - scale.x 从 1 同步缩到 0（卡片边移边窄）
+   *   - 两个 tween 相同 duration + linear easing，天然同步
+   *   - 视觉上：卡片向左滑出，同时从两侧收窄，逐步消失
+   *     完整 → 3/4 → 1/2 → 1/4 → 完全消失
+   *   - 整张卡（含 Graphics 背景 + 图标 + 权重文字，都是子节点随父节点缩放）
+   *     一起收窄，不依赖任何 Mask/裁剪/Stencil。
    */
   private spawnOutgoingGhost(gap: number): void {
     const head = this.slots[0];
@@ -299,14 +304,16 @@ export class FxLayer {
     const opacity = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
     opacity.opacity = 255;
 
-    // 向左移动一整张卡宽（不是 gap），让 ghost 完全滑出 Belt Mask 裁剪区。
-    // slot0 左边缘 = -beltW/2 = Mask 左边界，ghost 从 slot0 中心向左移动 cardW，
-    // 左边缘从 -beltW/2 移到 -beltW/2 - cardW，右边缘从 -beltW/2 + cardW 移到 -beltW/2，
-    // 全程被 Mask 逐段裁切：完整 → 2/3 → 1/2 → 1/3 → 完全离开。
-    const travel = cardW;
+    // 两个独立线性 tween，相同 duration + easing → 天然同步
+    Tween.stopAllByTarget(ghost);
+    // 1. 向左移动一整张卡宽
     tween(ghost)
-      .to(duration, { position: new Vec3(base.x - travel, base.y, base.z) }, { easing: 'linear' })
+      .to(duration, { position: new Vec3(base.x - cardW, base.y, base.z) }, { easing: 'linear' })
       .call(() => { if (ghost.isValid) ghost.destroy(); })
+      .start();
+    // 2. scale.x 从 1 缩到 0.01（不用 0 避免 Cocos 渲染异常）
+    tween(ghost)
+      .to(duration, { scale: new Vec3(0.01, 1, 1) }, { easing: 'linear' })
       .start();
   }
 
