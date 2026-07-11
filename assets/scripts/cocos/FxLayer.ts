@@ -265,25 +265,19 @@ export class FxLayer {
   }
 
   /**
-   * 旧处理区卡片在队列换档前克隆一份，原地"被显示器吞没"消失。
+   * 旧处理区卡片在队列换档前克隆一份，向左滑出同时逐渐淡出。
    *
-   * Belt 的 Mask 对动态 instantiate 创建的子节点不生效（3.8 限制），
-   * 所以 ghost 滑出时不会被裁剪，整张可见到 destroy 瞬间消失。
-   *
-   * 改用移动 + scale.x 同步收缩模拟"被吞没"：
-   *   - ghost 向左移动一整张卡宽（position.x: base.x → base.x - cardW）
-   *   - scale.x 从 1 同步缩到 0（卡片边移边窄）
-   *   - 两个 tween 相同 duration + linear easing，天然同步
-   *   - 视觉上：卡片向左滑出，同时从两侧收窄，逐步消失
-   *     完整 → 3/4 → 1/2 → 1/4 → 完全消失
-   *   - 整张卡（含 Graphics 背景 + 图标 + 权重文字，都是子节点随父节点缩放）
-   *     一起收窄，不依赖任何 Mask/裁剪/Stencil。
+   * 不依赖 Belt Mask（3.8 对动态 instantiate 子节点不裁剪）。
+   * 用单个 tween + onUpdate 回调同步控制 position 和 opacity：
+   *   - ghost 向左移动一整张卡宽
+   *   - opacity 从 255 线性降到 0（跟移动同步）
+   *   - 视觉上：卡片向左滑出，同时逐渐变透明，完整→3/4可见→1/2→1/4→消失
    */
   private spawnOutgoingGhost(gap: number): void {
     const head = this.slots[0];
     const belt = head?.parent;
     if (!head?.isValid || !belt?.isValid) return;
-    // 清理上一轮可能残留的 ghost（连续快速出队时防止重叠堆积）
+    // 清理上一轮残留
     belt.children.forEach((c: Node) => {
       if (c.name === 'OutgoingCardGhost') c.destroy();
     });
@@ -301,19 +295,22 @@ export class FxLayer {
     ghost.setSiblingIndex(belt.children.length - 1);
     ghost.setPosition(base);
     ghost.setScale(new Vec3(1, 1, 1));
-    const opacity = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
-    opacity.opacity = 255;
+    const op = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
+    op.opacity = 255;
 
-    // 两个独立线性 tween，相同 duration + easing → 天然同步
+    // 单个 tween + onUpdate：position 和 opacity 同步，不会互相干扰
     Tween.stopAllByTarget(ghost);
-    // 1. 向左移动一整张卡宽
+    const endX = base.x - cardW;
     tween(ghost)
-      .to(duration, { position: new Vec3(base.x - cardW, base.y, base.z) }, { easing: 'linear' })
+      .to(duration, { position: new Vec3(endX, base.y, base.z) }, {
+        easing: 'linear',
+        onUpdate: (target: Node, ratio: number) => {
+          // ratio: 0→1，opacity 从 255 线性降到 0
+          const o = target.getComponent(UIOpacity);
+          if (o) o.opacity = Math.max(0, Math.round(255 * (1 - ratio)));
+        },
+      })
       .call(() => { if (ghost.isValid) ghost.destroy(); })
-      .start();
-    // 2. scale.x 从 1 缩到 0.01（不用 0 避免 Cocos 渲染异常）
-    tween(ghost)
-      .to(duration, { scale: new Vec3(0.01, 1, 1) }, { easing: 'linear' })
       .start();
   }
 
