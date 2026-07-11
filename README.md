@@ -54,7 +54,7 @@ npm run sim         # 贪婪 bot 千局模拟，输出胜负/星级/峰值分布
 | types / EventBus / rng / config | 领域类型+事件契约、类型安全事件总线、可注入确定性 RNG、数据驱动配置 |
 | ApprovalSystem | 认可度分区、增减来源、Boss 只加不减结算、猎杀线维持2秒/生存式双路径胜负、冻结暂停 |
 | ConveyorSystem | 队列模型、按阶段分布生成、挡位左移结算、Boss 临检结算+分级预警 Tell、道具变更(插入/污染/清空) |
-| PropSystem | 4 道具 CD/能量槏、蓄力扫描命中、Perfect 可变奖励池、连击(纯演出)、Boss 资源保底§5.4②、取消手势 |
+| PropSystem | 4 类纸团 CD/能量槏、长按蓄力+划扔落点命中（兼容键盘扫描调试）、Perfect 可变奖励池、连击(纯演出)、Boss 资源保底§5.4②、取消手势 |
 | AIActorSystem | 事件→表情(优先级+时长)，纯表现不回写数值 |
 | LevelSystem | 关卡数据 + §6.2 星级评价 |
 | Game | 总装：事件接线、tick 主循环、输入 API、冻结编排、统计结算 |

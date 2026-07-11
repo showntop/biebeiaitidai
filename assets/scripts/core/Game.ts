@@ -19,7 +19,7 @@ import { PropType as PT } from './types';
  * 职责：
  *  - 创建各系统并完成事件接线（系统间通过 EventBus 解耦，跨系统协调集中在此）。
  *  - tick(dt) 驱动主循环：道具扫描、AI表情、（冻结期外）认可度计时、挡位左移、白卡生成、Boss生成。
- *  - 输入 API：beginCharge/release/cancel/useKissUp（Cocos 输入层调用）。
+ *  - 输入 API：beginCharge/release/releaseAtSlot/cancel/useKissUp（Cocos 输入层调用）。
  *  - 拍马屁冻结编排：暂停 belt+approval，到期恢复。
  *  - CardHit → Conveyor 变更（插入/污染/清空）。
  *  - 统计峰值/用时/Boss临检次数 → 结算星级。
@@ -146,6 +146,10 @@ export class Game {
   }
   release(prop: PropType): boolean {
     return this.prop.release(prop);
+  }
+
+  releaseAtSlot(prop: PropType, slot: number): boolean {
+    return this.prop.releaseAtSlot(prop, slot);
   }
   cancel(prop: PropType): void {
     this.prop.cancel(prop);

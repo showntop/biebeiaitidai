@@ -1,6 +1,6 @@
 {
   "add-demand": {
-    "label": "加需求",
+    "label": "白纸团",
     "acquisition": "cd",
     "cd": {
       "early": 3.0,
@@ -11,7 +11,7 @@
     "effect": "insert"
   },
   "change-demand": {
-    "label": "改需求",
+    "label": "紫纸团",
     "acquisition": "cd",
     "cd": {
       "early": 5.0,
@@ -22,7 +22,7 @@
     "effect": "rework"
   },
   "throw-pot": {
-    "label": "丢锅",
+    "label": "咖啡团",
     "acquisition": "energy",
     "energyPerEffectiveHit": 0.25,
     "totalCap": 2,
@@ -30,7 +30,7 @@
     "effect": "clear"
   },
   "kiss-up": {
-    "label": "拍马屁",
+    "label": "粉便签",
     "acquisition": "energy",
     "energyPerSec": 0.02,
     "totalCap": 1,

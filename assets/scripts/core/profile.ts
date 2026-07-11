@@ -10,10 +10,10 @@ import type { RunReport } from './RunReport';
 
 /** §3.2 段位档（加权分分档，权重向"猎杀次数"倾斜）。 */
 export const Rank = {
-  Intern: 'intern', // 实习生 0~20
-  Worker: 'worker', // 打工人 21~50
-  Involution: 'involution', // 卷王 51~100
-  AntiInvolution: 'anti-involution', // 反卷斗士 101~200
+  Intern: 'intern', // 岗位保卫者 0~20
+  Worker: 'worker', // 反替代打工人 21~50
+  Involution: 'involution', // AI干扰专家 51~100
+  AntiInvolution: 'anti-involution', // 反替代斗士 101~200
   AIBuster: 'ai-buster', // AI克星 200+
 } as const;
 export type Rank = (typeof Rank)[keyof typeof Rank];
@@ -35,7 +35,7 @@ export interface PlayerProfile {
   huntWinCount: number;
   /** §3.2 累计获得三星的关卡序号集合（去重源真值，可序列化；同一关多次三星只记一次）。 */
   star3Levels: number[];
-  /** §3.2 叙事包装"入职第N天"= 最高通关关卡序号 + 1。 */
+  /** 反替代进度编号 = 最高通关关卡序号 + 1。 */
   get daysEmployed(): number;
 }
 
@@ -115,10 +115,10 @@ export function applyRunResult(profile: PlayerProfile, levelIndex: number, repor
 
 /** 段位中文名（用于 UI）。 */
 export const RankLabels: Record<Rank, string> = {
-  intern: '实习生',
-  worker: '打工人',
-  involution: '卷王',
-  'anti-involution': '反卷斗士',
+  intern: '岗位保卫者',
+  worker: '反替代打工人',
+  involution: 'AI干扰专家',
+  'anti-involution': '反替代斗士',
   'ai-buster': 'AI克星',
 };
 
@@ -135,12 +135,12 @@ export function buildReportText(p: PlayerProfile, report: RunReport, levelIndex:
   const day = levelIndex + 1;
   const rank = RankLabels[rankOf(p)];
   if (report.result === 'win-hunt') {
-    return `入职第${day}天，我把AI逼到当场崩溃被劝退，段位：${rank}`;
+    return `第${day}轮反击，我把AI逼到当场崩溃被劝退，段位：${rank}`;
   }
   if (report.result === 'win-survive') {
-    return `入职第${day}天，死死扛住了AI的KPI攻势，段位：${rank}`;
+    return `第${day}轮反击，死死扛住了AI的KPI攻势，段位：${rank}`;
   }
-  return `入职第${day}天，AI已能替代你，段位：${rank}`;
+  return `第${day}轮反击失败，AI已经准备接管你的工作，段位：${rank}`;
 }
 
 /** 显式标注 GameResult 类型用于类型守卫（防止 typo）。 */

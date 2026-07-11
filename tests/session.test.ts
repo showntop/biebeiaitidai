@@ -11,7 +11,7 @@ function mkReport(result: RunReport['result'], stars: number, levelIndex: number
     stars,
     levelIndex,
     levelId: `level-${levelIndex + 1}`,
-    levelTitle: `入职第${levelIndex + 1}天`,
+    levelTitle: `第${levelIndex + 1}轮反击`,
     peakApproval: 50,
     finalApproval: 50,
     timeUsedSec: 60,
@@ -136,8 +136,8 @@ describe('Session · 持久化', () => {
 describe('Session · 段位/战报文案', () => {
   it('rankLabel 返回中文段位', () => {
     const s = new Session();
-    expect(s.rankLabel).toBe('实习生');
-    s.profile.huntWinCount = 20; // 20*3=60 → 卷王
-    expect(s.rankLabel).toBe('卷王');
+    expect(s.rankLabel).toBe('岗位保卫者');
+    s.profile.huntWinCount = 20; // 20*3=60 → AI干扰专家
+    expect(s.rankLabel).toBe('AI干扰专家');
   });
 });

@@ -15,7 +15,7 @@ interface PropRuntime {
 /**
  * 道具系统（核心规则层，对应策划文档§4）。
  *
- * 4 道具：加需求(插入)/改需求(倒扣)/丢锅(范围清空) 走"蓄力扫描-松手"瞄准；
+ * 4 纸团：白纸团(插入)/紫纸团(倒扣)/咖啡纸团(范围清空) 走"长按蓄力+划扔"瞄准；
  * 拍马屁(冻结) 点按即放、不走扫描。
  *
  * 关键设计落点：
@@ -104,6 +104,14 @@ export class PropSystem {
     const slot = this.slotFromScan();
     const quality = this.perfectAt(slot) ? HQ.Perfect : HQ.Normal;
     this.resolve(prop, slot, quality);
+    return true;
+  }
+
+  /** Cocos 投纸团输入：表现层根据落点算出槽位，规则层仍复用同一套命中结算。 */
+  releaseAtSlot(prop: PropType, slot: number, quality: HitQuality = HQ.Normal): boolean {
+    if (this.charging !== prop) return false;
+    const clamped = Math.max(0, Math.min(this.slots - 1, Math.floor(slot)));
+    this.resolve(prop, clamped, quality);
     return true;
   }
 

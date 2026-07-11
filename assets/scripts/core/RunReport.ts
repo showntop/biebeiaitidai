@@ -18,7 +18,7 @@ export interface RunReport {
   levelIndex: number;
   /** 关卡 id（如 "level-1"）。 */
   levelId: string;
-  /** §3.3 关卡叙事标题（"入职第N天"）。 */
+  /** §3.3 关卡叙事标题（"第N轮反击"）。 */
   levelTitle: string;
   /** 全程认可度峰值。 */
   peakApproval: number;

@@ -11,7 +11,7 @@
 
 ```
 Canvas
-├── LevelLabel (Label)     — 顶部：当前关标题 | 段位 | 入职第N天
+├── LevelLabel (Label)     — 顶部：游戏标题 / 当前反替代任务
 ├── Timer (Label)          — 顶部居中：倒计时
 ├── Approval (Label)       — 左上："认可度: XX"
 ├── Zone (Label)           — 右上：当前分区
@@ -20,12 +20,12 @@ Canvas
 │   ├── ...
 │   └── Slot5 (Label)
 ├── ScanIndicator (Node)   — 小色块，跟随蓄力扫描高亮当前挡位
-├── Props (Node)            — 底部，水平排列 4 个按钮（顺序：加需求/改需求/丢锅/拍马屁）
+├── Props (Node)            — 底部，水平排列 4 个纸团按钮（顺序：加需求/改需求/甩锅/拍马屁）
 │   ├── Prop0 (Node)         ⚠ 每个按钮必须有 UITransform(Width×Height≈160×80) + Sprite背景 + Button组件，否则点不到
 │   ├── Prop1 (Node)
 │   ├── Prop2 (Node)
 │   └── Prop3 (Node)
-├── ReportLabel (Label)    — 居中，默认隐藏；局结束显示战报(梗文案+星级+峰值+连击+段位+天数)
+├── ReportLabel (Label)    — 居中，默认隐藏；局结束显示战报(梗文案+星级+峰值+连击+反替代段位)
 ├── NextBtn (Node)         — 结算时显示，点按进下一关（hasNext=false 时隐藏）
 └── RetryBtn (Node)        — 结算时显示，点按重试本关
 ```
@@ -35,7 +35,7 @@ Canvas
     levelLabel / reportLabel / nextBtn / retryBtn`。
 
 4. **运行**（编辑器预览或微信小游戏构建）：
-   - 进入"最高解锁关"（首次为第 1 关），关卡标题/段位/天数显示在顶部
+   - 进入"最高解锁关"（首次为第 1 关），当前反替代任务显示在顶部
    - 传送带 6 格刷新卡牌、认可度/分区/倒计时实时变化
    - 按住道具按钮 → 扫描指示器移动 → 松手命中；**未解锁道具按钮置灰**（如第 1 关的丢锅/拍马屁）
    - 局结束 → 战报面板出现，通关则解锁下一关、可点 NextBtn 继续；失败/重玩可点 RetryBtn
@@ -67,4 +67,3 @@ Canvas
    - 数字不动、`over=false` → 真卡住了，看 Console 红错。
 
 3. **按钮命中区**（最高频原因）：Cocos 3.x 触摸命中走 UITransform 包围盒。纯 Node 或只有 Label 的按钮命中区≈0，表现为"按钮没反应"。每个道具/流程按钮节点务必：`UITransform`(160×80) + `Sprite`(背景) + `Button`(可选，带按压反馈)。
-

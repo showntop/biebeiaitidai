@@ -91,10 +91,10 @@ function drawCardBg(g: Graphics, style: CardStyle, w: number, h: number): void {
 | card-urgent | 紧急/闹钟 | `alarm-clock` |
 | card-meeting | 会议/咖啡 | `coffee` |
 | card-boss | 老板/审查 | `search` / `user-round-search` |
-| prop-add-demand | 加需求 | `file-plus` |
-| prop-change-demand | 改需求 | `refresh-cw` / `undo-2` |
-| prop-throw-pot | 丢锅 | `cooking-pot` |
-| prop-kiss-up | 拍马屁 | `heart` |
+| prop-add-demand | 白纸团（加需求） | crumpled paper wad + small document mark |
+| prop-change-demand | 紫纸团（改需求） | purple crumpled paper wad + redo mark |
+| prop-throw-pot | 咖啡纸团（甩锅） | coffee-stained heavy paper wad |
+| prop-kiss-up | 粉便签团（拍马屁） | pink sticky-note wad + small heart mark |
 | icon-event-log | 事件日志 | `clipboard-list` |
 
 **用法（两条路）**：
@@ -309,7 +309,7 @@ No text.
 ## 资产 3｜道具 ×4
 
 > **⚠️ v3 架构级修正（同资产2）**：道具按钮**不再整张出图**。「圆角方按钮底」改由 **Cocos `Graphics` 代码绘制**，美术层**只需纯图标**（透明底、单色、无按钮框）。
-> - **首选：开源图标**（见开头「免费开源图标库」）——加需求=`file-plus`、改需求=`refresh-cw`、丢锅=`cooking-pot`、拍马屁=`heart`，Lucide/Tabler 现成，无需 AI。
+> - **首选：代码绘制纸团堆**（当前 Cocos 已用 Graphics 画纸团形状，避免图标风格不统一）。若后续出正式素材，四个 prop 图标都应是同一套“揉皱纸团”剪影，只通过颜色/污渍/小标记区分功能，不再使用文件、锅、爱心等大号功能图标。
 > - **次选：AI 只画纯图标**，用下方"纯图标版"提示词，不要再画按钮底。
 
 - **工具**：开源图标库（首选）/ 即梦 / GPT-image
@@ -330,10 +330,10 @@ GREEN background (pure flat #00FF00 greenscreen), no text.
 
 | 文件名 | {符号} | 开源图标(Lucide) |
 |---|---|---|
-| `prop-add-demand`（加需求） | a crumpled paper document being inserted from the side with motion lines | `file-plus` |
-| `prop-change-demand`（改需求） | a circular rewind/flip arrow around a document (meaning "redo/rework") | `refresh-cw` / `undo-2` |
-| `prop-throw-pot`（丢锅） | a flying cooking pot with motion speed lines | `cooking-pot` |
-| `prop-kiss-up`（拍马屁） | a pink heart with a lipstick mark | `heart` |
+| `prop-add-demand`（白纸团/加需求） | a white crumpled office paper ball with a tiny blue document stamp and simple motion fold lines | paper wad |
+| `prop-change-demand`（紫纸团/改需求） | a purple crumpled office paper ball with a tiny redo arrow stamp, same silhouette as the white paper ball | paper wad |
+| `prop-throw-pot`（咖啡纸团/甩锅） | a heavier coffee-stained crumpled paper ball, beige brown stains, same silhouette family | paper wad |
+| `prop-kiss-up`（粉便签/拍马屁） | a pink sticky-note paper ball with a tiny heart stamp, cute but still crumpled paper | paper wad |
 
 ---
 

@@ -106,7 +106,7 @@ export interface WhiteDist {
 
 export interface LevelDef {
   id: string;
-  /** §1.3 主题叙事标题（如"入职第1天"）。 */
+  /** §1.3 主题叙事标题（如"第1轮反击"）。 */
   title?: string;
   durationSec: number;
   slots: number;

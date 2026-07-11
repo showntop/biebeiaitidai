@@ -31,7 +31,7 @@ function mkReport(result: RunReport['result'], stars: number, levelIndex: number
 }
 
 describe('PlayerProfile 段位与累加', () => {
-  it('初始档案：实习生段位、第1天', () => {
+  it('初始档案：岗位保卫者段位、第1轮', () => {
     const p = createProfile();
     expect(p.highestUnlockedLevel).toBe(0);
     expect(p.huntWinCount).toBe(0);
@@ -41,7 +41,7 @@ describe('PlayerProfile 段位与累加', () => {
     expect(rankOf(p)).toBe('intern');
   });
 
-  it('段位阈值边界：21=打工人、51=卷王、101=反卷斗士、201=AI克星', () => {
+  it('段位阈值边界：21=反替代打工人、51=AI干扰专家、101=反替代斗士、201=AI克星', () => {
     expect(rankFromScore(0)).toBe('intern');
     expect(rankFromScore(20)).toBe('intern');
     expect(rankFromScore(21)).toBe('worker');
@@ -58,7 +58,7 @@ describe('PlayerProfile 段位与累加', () => {
     p.huntWinCount = 2; // 2*3 = 6
     p.star3Levels = [0, 1, 2]; // 3 个三星关卡 → 3*1 = 3
     p.highestUnlockedLevel = 4; // 4*0.5 = 2
-    expect(rankScore(p)).toBe(6 + 3 + 2); // 11 → 实习生
+    expect(rankScore(p)).toBe(6 + 3 + 2); // 11 → 岗位保卫者
     expect(rankOf(p)).toBe('intern');
   });
 
@@ -114,22 +114,22 @@ describe('PlayerProfile 段位与累加', () => {
   });
 
   it('段位中文名', () => {
-    expect(RankLabels.intern).toBe('实习生');
+    expect(RankLabels.intern).toBe('岗位保卫者');
     expect(RankLabels['ai-buster']).toBe('AI克星');
   });
 
   it('战报文案：猎杀/生存/失败', () => {
     const p = createProfile();
-    p.huntWinCount = 10; // 段位跳到卷王
+    p.huntWinCount = 10; // 段位跳到 AI干扰专家
     const hunt = mkReport('win-hunt', 3, 6);
     expect(buildReportText(p, hunt, 6)).toContain('把AI逼到当场崩溃被劝退');
-    expect(buildReportText(p, hunt, 6)).toContain('入职第7天');
+    expect(buildReportText(p, hunt, 6)).toContain('第7轮反击');
 
     const survive = mkReport('win-survive', 1, 2);
     expect(buildReportText(p, survive, 2)).toContain('死死扛住了AI的KPI攻势');
 
     const fail = mkReport('lose', 0, 3);
-    expect(buildReportText(p, fail, 3)).toContain('AI已能替代你');
+    expect(buildReportText(p, fail, 3)).toContain('AI已经准备接管你的工作');
   });
 });
 

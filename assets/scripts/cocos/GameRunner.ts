@@ -1,13 +1,12 @@
-import { _decorator, Component, Node, Label, Color, UITransform, tween, Tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate, profiler } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
 import { Session } from '../core/Session';
 import type { Storage } from '../core/Session';
-import { summarizeReport } from '../core/RunReport';
 import { buildReportText } from '../core/profile';
 import type { PlayerProfile } from '../core/profile';
-import { PropType as PT } from '../core/types';
+import { CardState as CS, PropType as PT } from '../core/types';
 import type { Card, PropType } from '../core/types';
 import { FxLayer } from './FxLayer';
 
@@ -21,6 +20,19 @@ interface CardVisual {
   pendingCard: Card | null;
 }
 
+interface PaperTuning {
+  arcHeight: number;
+  duration: number;
+  spin: number;
+  startScale: Vec3;
+  midScale: Vec3;
+  endScale: Vec3;
+  guideDots: number;
+  guideDotRadius: number;
+}
+
+type PaperOutcome = 'hit' | 'miss' | 'invalid';
+
 /**
  * Cocos 表现层薄壳 —— 持有 core.Session + core.Game，只做：驱动 tick、转发输入、按 Session 状态渲染。
  *
@@ -28,7 +40,7 @@ interface CardVisual {
  * 这里只把按钮事件翻译成 Session/Game 调用、把 Session 状态反映到节点。
  *
  * 【需在编辑器验证的节点接线】新增节点（相对旧版）：
- *   - LevelLabel (Label)  顶部：当前关标题 + 段位 + 入职第N天
+ *   - LevelLabel (Label)  顶部：当前关标题 + 反替代进度
  *   - ReportLabel (Label) 居中：局结束显示战报（结果/星级/峰值/连击 + 战报梗文案）；默认隐藏
  *   - NextBtn (Node)      结算时显示，点按进入下一关（hasNext=false 时隐藏）
  *   - RetryBtn (Node)     结算时显示，点按重试本关
@@ -74,16 +86,26 @@ export class GameRunner extends Component {
   private propButtonNodes: Node[] = [];
   private propButtonBackgrounds: Node[] = [];
   private propIconSprites: (Sprite | null)[] = [];
+  private aimingProp: PropType | null = null;
+  private aimingSlot = 0;
+  private aimStart = new Vec3();
+  private aimPoint = new Vec3();
+  private paperAimNode: Node | null = null;
+  private aimGuideNode: Node | null = null;
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
   private uiState: 'select' | 'playing' | 'result' = 'select';
   private levelSelectRoot: Node | null = null;
+  private tutorialRoot: Node | null = null;
+  private tutorialStep = 0;
+  private tutorialDone = false;
   private fx: FxLayer | null = null;
   private eventUnsubs: Array<() => void> = [];
   private lastEventText = '事件 · 等待下一条任务';
   private compactHeader = false;
 
-  private static readonly PROP_LABELS = ['加需求', '改需求', '丢锅', '拍马屁'];
+  private static readonly PROP_LABELS = ['白纸团', '紫纸团', '咖啡团', '粉便签'];
+  private static readonly PROP_ACTION_LABELS = ['加需求', '改需求', '甩锅', '拍马屁'];
   private static readonly PROP_TYPES: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
 
   /** 道具按钮主色（视觉规范§1.4 + UI稿：蓝/紫/红/粉，高饱和强对比）。 */
@@ -95,6 +117,49 @@ export class GameRunner extends Component {
   ];
   /** 道具 key → artSprites 索引名（与 props/ 目录文件名约定一致）。 */
   private static readonly PROP_ART_KEYS = ['prop-add-demand', 'prop-change-demand', 'prop-throw-pot', 'prop-kiss-up'];
+  /** 纸团飞行手感参数：表现层先集中调，手感稳定后再沉到 JSON。 */
+  private static readonly PAPER_TUNING: Readonly<Record<PropType, PaperTuning>> = {
+    [PT.AddDemand]: {
+      arcHeight: 125,
+      duration: 0.30,
+      spin: 380,
+      startScale: new Vec3(1, 1, 1),
+      midScale: new Vec3(0.92, 1.08, 1),
+      endScale: new Vec3(0.72, 0.72, 1),
+      guideDots: 8,
+      guideDotRadius: 3.2,
+    },
+    [PT.ChangeDemand]: {
+      arcHeight: 175,
+      duration: 0.38,
+      spin: 520,
+      startScale: new Vec3(1.03, 0.97, 1),
+      midScale: new Vec3(0.84, 1.16, 1),
+      endScale: new Vec3(0.66, 0.66, 1),
+      guideDots: 9,
+      guideDotRadius: 3,
+    },
+    [PT.ThrowPot]: {
+      arcHeight: 72,
+      duration: 0.24,
+      spin: 240,
+      startScale: new Vec3(1.08, 1.08, 1),
+      midScale: new Vec3(1.08, 0.92, 1),
+      endScale: new Vec3(0.82, 0.82, 1),
+      guideDots: 7,
+      guideDotRadius: 3.8,
+    },
+    [PT.KissUp]: {
+      arcHeight: 96,
+      duration: 0.34,
+      spin: -420,
+      startScale: new Vec3(0.96, 0.96, 1),
+      midScale: new Vec3(0.86, 1.12, 1),
+      endScale: new Vec3(0.42, 0.42, 1),
+      guideDots: 8,
+      guideDotRadius: 3.1,
+    },
+  };
   /** 任务队列使用专用图标卡，不再回退成英文类别文字。 */
   private static readonly CARD_ART_KEYS: Record<string, string> = {
     routine: 'card-doc-blue-a',
@@ -142,6 +207,7 @@ export class GameRunner extends Component {
   private static readonly ENV_DARK = new Color(60, 58, 55, 255);      // 显示器外壳 #3C3A37
 
   onLoad(): void {
+    this.hideDebugOverlays();
     this.session = new Session(new CocosStorage());
     this.session.continueProgress(); // 继续"最高解锁关"进度
 
@@ -156,11 +222,22 @@ export class GameRunner extends Component {
     });
     this.bindPropButtons();
     this.bindFlowButtons();
-    this.showLevelSelect(); // M3: 先进选关页，不直接开打
+    this.showLevelSelect(); // 先进入开始页，不直接开打
 
     // 桌面预览键盘兜底（绕过按钮命中区问题，先验证游戏逻辑）
     input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
+    // 纸团拖出按钮区域后，按钮节点会收到 TOUCH_CANCEL；后续拖动/松手必须由全局触摸接管。
+    input.on(Input.EventType.TOUCH_MOVE, this.onGlobalTouchMove, this);
+    input.on(Input.EventType.TOUCH_END, this.onGlobalTouchEnd, this);
+    input.on(Input.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
+    input.on(Input.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
+    input.on(Input.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
+    this.node.on(Node.EventType.TOUCH_MOVE, this.onGlobalTouchMove, this);
+    this.node.on(Node.EventType.TOUCH_END, this.onGlobalTouchEnd, this);
+    this.node.on(Node.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
+    this.node.on(Node.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
+    this.node.on(Node.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
 
     // 美术资源自动加载：扫描 resources/art/ 下所有 PNG，按文件名建索引
     // 加载完成后自动建 Bg/Char 节点并接线，编辑器里无需任何手动操作
@@ -222,18 +299,28 @@ export class GameRunner extends Component {
   onDestroy(): void {
     input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
+    input.off(Input.EventType.TOUCH_MOVE, this.onGlobalTouchMove, this);
+    input.off(Input.EventType.TOUCH_END, this.onGlobalTouchEnd, this);
+    input.off(Input.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
+    input.off(Input.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
+    input.off(Input.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
+    this.node.off(Node.EventType.TOUCH_MOVE, this.onGlobalTouchMove, this);
+    this.node.off(Node.EventType.TOUCH_END, this.onGlobalTouchEnd, this);
+    this.node.off(Node.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
+    this.node.off(Node.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
+    this.node.off(Node.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
     this.fx?.dispose();
     this.resetCardVisuals();
+    this.clearPaperAim(true);
     this.clearEventFeed();
+    this.hideTutorial();
   }
 
   /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关、B/Escape 返回选关。 */
   private onKeyDown(e: EventKeyboard): void {
-    // 选关页：数字键1-9选关，0=10
+    // 开始页：Enter/Space/1 开始第一关
     if (this.uiState === 'select') {
-      const num = e.keyCode - 48; // '0'=48
-      if (num >= 1 && num <= 9) this.onLevelSelected(num - 1);
-      else if (num === 0) this.onLevelSelected(9); // '0' = L10
+      if (e.keyCode === 13 || e.keyCode === 32 || e.keyCode === 49) this.onLevelSelected(0);
       return;
     }
     // 结算页：R 重试 / N 下一关 / V 复活(仅lose) / B 返回选关
@@ -271,6 +358,7 @@ export class GameRunner extends Component {
   /** 用 Session 当前关开新一局。 */
   private startGame(): void {
     this.resetCardVisuals();
+    this.clearPaperAim(true);
     const idx = this.session.currentIndex;
     const seed = (Date.now() % 100000) ^ ((idx + 1) * 2654435761); // 每关/每次尝试不同
     this.game = new Game(getLevel(idx), new SeededRng(seed >>> 0), this.session.allowedPropsFor(idx));
@@ -278,6 +366,7 @@ export class GameRunner extends Component {
     this.scanPos = 0;
     this.reported = false;
     this.uiState = 'playing';
+    this.lastEventText = '事件 · 长按纸团，拖向任务卡';
     this.hideReport();
     this.hideLevelSelect();
     this.setGameUIVisible(true);
@@ -294,6 +383,7 @@ export class GameRunner extends Component {
     this.bindEventFeed();
     // 视觉层：挂背景和（有素材就挂，没有不影响 Label 兜底跑）
     this.applyBgCharSprites();
+    this.beginTutorialIfNeeded();
   }
 
   /** 事件区只呈现对玩家有意义的最新结果，避免长期显示无效占位文案。 */
@@ -301,7 +391,10 @@ export class GameRunner extends Component {
     this.clearEventFeed();
     const propName = (prop: PropType): string => GameRunner.PROP_LABELS[GameRunner.PROP_TYPES.indexOf(prop)] ?? '道具';
     this.eventUnsubs.push(
-      this.game.bus.on('CardHit', ({ prop, slot, quality }) => this.setEventText(`${propName(prop)}命中第${slot + 1}格 · ${quality === 'perfect' ? '精准' : '已处理'}`)),
+      this.game.bus.on('CardHit', ({ prop, slot, quality }) => {
+        this.setEventText(`${propName(prop)}命中第${slot + 1}格 · ${quality === 'perfect' ? '精准' : '已处理'}`);
+        this.completeTutorial();
+      }),
       this.game.bus.on('ApprovalChanged', ({ delta }) => this.setEventText(`认可度 ${delta > 0 ? '+' : ''}${delta}`)),
       this.game.bus.on('PropUnavailable', ({ prop }) => this.setEventText(`${propName(prop)}暂时无法使用`)),
       this.game.bus.on('BossIncoming', () => this.setEventText('Boss 临检正在接近')),
@@ -318,6 +411,91 @@ export class GameRunner extends Component {
     this.lastEventText = `事件 · ${text}`;
     const label = this.lowerHudNode?.getChildByName('Event')?.getComponent(Label);
     if (label) label.string = this.lastEventText;
+  }
+
+  private missionTitle(index = this.session.currentIndex): string {
+    const title = getLevel(index).title ?? '';
+    return title.includes('·') ? title.split('·').slice(1).join('·') : title || '替代警报';
+  }
+
+  private shouldShowTutorial(): boolean {
+    return this.uiState === 'playing' && this.session.currentIndex === 0 && !this.tutorialDone;
+  }
+
+  private beginTutorialIfNeeded(): void {
+    this.tutorialStep = 0;
+    if (!this.shouldShowTutorial()) {
+      this.hideTutorial();
+      return;
+    }
+    this.showTutorial('长按一个纸团');
+  }
+
+  private advanceTutorial(step: number, text: string): void {
+    if (!this.shouldShowTutorial() || step <= this.tutorialStep) return;
+    this.tutorialStep = step;
+    this.showTutorial(text);
+    this.setEventText(text);
+  }
+
+  private completeTutorial(): void {
+    if (!this.shouldShowTutorial()) return;
+    this.tutorialDone = true;
+    this.hideTutorial();
+  }
+
+  private hideTutorial(): void {
+    if (this.tutorialRoot?.isValid) this.tutorialRoot.active = false;
+  }
+
+  private showTutorial(text: string): void {
+    if (!this.tutorialRoot?.isValid) {
+      const root = new Node('TutorialHint');
+      root.layer = 1 << 25;
+      root.parent = this.node;
+      root.addComponent(UITransform);
+      root.addComponent(Graphics);
+      const labelNode = new Node('TutorialText');
+      labelNode.layer = 1 << 25;
+      labelNode.parent = root;
+      labelNode.addComponent(UITransform);
+      const label = labelNode.addComponent(Label);
+      label.horizontalAlign = 1;
+      label.verticalAlign = 1;
+      label.isBold = true;
+      label.overflow = Label.Overflow.SHRINK;
+      this.tutorialRoot = root;
+    }
+    const vis = view.getVisibleSize();
+    const w = Math.min(vis.width * 0.68, 420);
+    const h = 44;
+    const root = this.tutorialRoot;
+    root.getComponent(UITransform)!.setContentSize(w, h);
+    const g = root.getComponent(Graphics)!;
+    g.clear();
+    g.fillColor = new Color(35, 32, 28, 230);
+    g.strokeColor = new Color(255, 236, 160, 255);
+    g.lineWidth = 2;
+    g.roundRect(-w / 2, -h / 2, w, h, 14);
+    g.fill(); g.stroke();
+    const label = root.getChildByName('TutorialText')?.getComponent(Label);
+    if (label) {
+      label.string = text;
+      label.fontSize = 18;
+      label.lineHeight = 24;
+      label.color = new Color(255, 246, 220, 255);
+      label.node.getComponent(UITransform)!.setContentSize(w - 24, h - 6);
+    }
+    this.layoutTutorialHint();
+    root.active = true;
+    root.setSiblingIndex(this.node.children.length - 1);
+  }
+
+  private layoutTutorialHint(): void {
+    if (!this.tutorialRoot?.isValid) return;
+    const vis = view.getVisibleSize();
+    const propY = this.propButtons?.position.y ?? -vis.height / 2 + 180;
+    this.tutorialRoot.setPosition(0, propY + Math.max(92, vis.height * 0.09), 0);
   }
 
   private onNext(): void {
@@ -338,13 +516,15 @@ export class GameRunner extends Component {
     this.hideReport();
   }
 
-  /* ---------- M3: 关卡选择页 ---------- */
+  /* ---------- 开始页 ---------- */
 
-  /** 显示选关页：隐藏游戏 UI，创建/显示选关覆盖层。 */
+  /** 显示开始页：隐藏游戏 UI，创建/显示开局覆盖层。 */
   private showLevelSelect(): void {
+    this.hideDebugOverlays();
     this.uiState = 'select';
     this.setGameUIVisible(false);
     this.hideReport();
+    this.hideTutorial();
     if (!this.levelSelectRoot) {
       this.levelSelectRoot = this.createLevelSelectUI();
     }
@@ -356,65 +536,66 @@ export class GameRunner extends Component {
     if (this.levelSelectRoot) this.levelSelectRoot.active = false;
   }
 
-  /** 动态创建选关覆盖层（纯代码，不依赖场景节点）。 */
+  private hideDebugOverlays(): void {
+    try {
+      profiler.hideStats();
+    } catch {
+      /* profiler 在部分运行环境可能不存在，忽略即可 */
+    }
+    const doc = (globalThis as { document?: Document }).document;
+    if (!doc) return;
+    const selectors = ['#vConsole', '.vc-switch', '.vc-mask', '.vc-panel', '.vConsole'];
+    for (const selector of selectors) {
+      doc.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+        el.style.display = 'none';
+        el.style.pointerEvents = 'none';
+      });
+    }
+  }
+
+  /** 动态创建开始页覆盖层（纯代码，不依赖场景节点）。 */
   private createLevelSelectUI(): Node {
     const root = new Node('LevelSelectUI');
     root.layer = 33554432; // UI_2D
+    root.addComponent(UITransform).setContentSize(view.getVisibleSize().width, view.getVisibleSize().height);
+    const bg = root.addComponent(Graphics);
+    this.paintFullScreenStartBg(bg);
     this.node.addChild(root);
 
-    // 标题
-    const title = this.mkLabel(root, 'Title', 0, 270, '别让AI替代你', 40, 600, 50);
-
-    // 段位信息行
-    this.mkLabel(root, 'RankInfo', 0, 220, '', 24, 700, 35);
-
-    // 关卡列表（20关，每关一行）
-    for (let i = 0; i < 20; i++) {
-      const y = 180 - i * 32;
-      const btn = new Node(`LevelBtn${i}`);
-      btn.layer = 33554432;
-      const ut = btn.addComponent(UITransform);
-      ut.setContentSize(500, 36);
-      const label = btn.addComponent(Label);
-      label.fontSize = 22;
-      label.lineHeight = 30;
-      label.horizontalAlign = 1;
-      label.verticalAlign = 1;
-      label.color = Color.WHITE;
-      btn.setPosition(0, y, 0);
-      root.addChild(btn);
-      // 触摸选关
-      btn.on(Node.EventType.TOUCH_END, () => this.onLevelSelected(i));
-    }
-
-    // 底部提示
-    this.mkLabel(root, 'Hint', 0, -270, '按数字键 1~9 或点击列表选关', 16, 500, 25);
+    const vis = view.getVisibleSize();
+    const contentW = Math.min(vis.width * 0.82, 560);
+    this.makeStartBadge(root, 0, vis.height * 0.245, Math.min(contentW * 0.62, 330), 42, '岗位替代警报');
+    const title = this.mkLabel(root, 'Title', 0, vis.height * 0.17, '别让 AI 替代你', 48, contentW, 70);
+    this.styleStartLabel(title, new Color(32, 27, 22, 255), true);
+    const subtitle = this.mkLabel(root, 'Subtitle', 0, vis.height * 0.105, '第1轮反击 · 替代警报', 24, contentW, 40);
+    this.styleStartLabel(subtitle, new Color(96, 74, 54, 255), true);
+    const pitch = this.mkLabel(root, 'Pitch', 0, vis.height * 0.035, 'AI 正在接管任务队列。扔纸团干扰它，别让老板觉得它比你好用。', 19, contentW * 0.92, 62);
+    this.styleStartLabel(pitch, new Color(54, 46, 38, 255), false);
+    this.makeStartRuleCard(root, -contentW * 0.255, -vis.height * 0.06, contentW * 0.3, 82, '01', '长按纸团');
+    this.makeStartRuleCard(root, 0, -vis.height * 0.06, contentW * 0.3, 82, '02', '拖向任务');
+    this.makeStartRuleCard(root, contentW * 0.255, -vis.height * 0.06, contentW * 0.3, 82, '03', '松手反击');
+    this.mkLabel(root, 'RankInfo', 0, -vis.height * 0.15, '', 17, contentW, 34);
+    this.makeStartButton(root, 0, -vis.height * 0.225, Math.min(contentW * 0.72, 390), 70, '开始反击', () => this.onLevelSelected(0));
+    const hint = this.mkLabel(root, 'Hint', 0, -vis.height * 0.305, '目标：把 AI 的“优秀表现”打回原形', 16, contentW, 32);
+    this.styleStartLabel(hint, new Color(86, 66, 50, 255), true);
+    this.makeStartDoodles(root, vis, contentW);
 
     return root;
   }
 
-  /** 刷新选关页内容（段位/关卡解锁/星级）。 */
+  /** 刷新开始页内容（段位/进度）。 */
   private updateLevelSelectContent(): void {
     if (!this.levelSelectRoot) return;
+    const bg = this.levelSelectRoot.getComponent(Graphics);
+    if (bg) this.paintFullScreenStartBg(bg);
     const rankInfo = this.levelSelectRoot.getChildByName('RankInfo');
     if (rankInfo) {
       const label = rankInfo.getComponent(Label);
       if (label) {
-        label.string = `${this.session.rankLabel} · 入职第${this.session.daysEmployed}天 · 最高解锁：第${this.session.profile.highestUnlockedLevel + 1}关`;
+        label.string = `反替代进度 · 已解锁第${this.session.profile.highestUnlockedLevel + 1}关`;
+        label.color = new Color(84, 72, 60, 255);
+        label.isBold = true;
       }
-    }
-    for (let i = 0; i < 20; i++) {
-      const btn = this.levelSelectRoot.getChildByName(`LevelBtn${i}`);
-      if (!btn) continue;
-      const label = btn.getComponent(Label);
-      if (!label) continue;
-      const def = getLevel(i);
-      const unlocked = this.session.isLevelUnlocked(i);
-      const has3 = this.session.profile.star3Levels.includes(i);
-      const stars = has3 ? '★★★' : '☆☆☆';
-      const lockText = unlocked ? '' : ' [锁]';
-      label.string = `第${i + 1}关 ${def.title ?? def.id} ${stars}${lockText}`;
-      label.color = unlocked ? Color.WHITE : new Color(100, 100, 100, 160);
     }
   }
 
@@ -441,6 +622,7 @@ export class GameRunner extends Component {
     if (this.subtitleNode) this.subtitleNode.active = v;
     if (this.lowerHudNode) this.lowerHudNode.active = v;
     if (this.monitorMetaNode) this.monitorMetaNode.active = v;
+    if (this.tutorialRoot) this.tutorialRoot.active = v && this.shouldShowTutorial();
   }
 
   /** 工具：在 parent 下创建一个带 Label 的 Node。 */
@@ -461,6 +643,212 @@ export class GameRunner extends Component {
     return node;
   }
 
+  private paintFullScreenStartBg(g: Graphics): void {
+    const vis = view.getVisibleSize();
+    const posterW = Math.min(vis.width * 0.88, 650);
+    const posterH = Math.min(vis.height * 0.74, 800);
+    const posterX = -posterW / 2;
+    const posterY = -posterH / 2 + vis.height * 0.045;
+    g.clear();
+    // 办公室墙面底色
+    g.fillColor = new Color(238, 226, 207, 255);
+    g.rect(-vis.width / 2, -vis.height / 2, vis.width, vis.height);
+    g.fill();
+
+    // 微弱横向纸纹，避免大面积纯色显廉价
+    g.strokeColor = new Color(219, 205, 184, 80);
+    g.lineWidth = 1;
+    for (let y = -vis.height / 2 + 28; y < vis.height / 2; y += 34) {
+      g.moveTo(-vis.width / 2 + 20, y);
+      g.lineTo(vis.width / 2 - 20, y + 2);
+      g.stroke();
+    }
+
+    // 主海报阴影
+    g.fillColor = new Color(75, 60, 42, 45);
+    g.roundRect(posterX + 10, posterY - 10, posterW, posterH, 30);
+    g.fill();
+
+    // 主海报纸张
+    g.fillColor = new Color(255, 247, 232, 255);
+    g.strokeColor = new Color(34, 29, 24, 255);
+    g.lineWidth = 5;
+    g.roundRect(posterX, posterY, posterW, posterH, 30);
+    g.fill();
+    g.stroke();
+
+    // 顶部警报条
+    g.fillColor = new Color(224, 62, 52, 255);
+    g.roundRect(posterX + 18, posterY + posterH - 72, posterW - 36, 46, 17);
+    g.fill();
+    g.strokeColor = new Color(34, 29, 24, 255);
+    g.lineWidth = 3;
+    g.roundRect(posterX + 18, posterY + posterH - 72, posterW - 36, 46, 17);
+    g.stroke();
+
+    // 中间简化显示器暗区，呼应游戏主画面
+    const monitorW = posterW * 0.74;
+    const monitorH = posterH * 0.19;
+    const monitorY = posterY + posterH * 0.47;
+    g.fillColor = new Color(55, 55, 52, 255);
+    g.strokeColor = new Color(26, 24, 22, 255);
+    g.lineWidth = 4;
+    g.roundRect(-monitorW / 2, monitorY, monitorW, monitorH, 18);
+    g.fill(); g.stroke();
+    g.fillColor = new Color(90, 90, 84, 255);
+    const cardW = monitorW * 0.12;
+    const cardH = monitorH * 0.43;
+    for (let i = 0; i < 5; i++) {
+      const x = -monitorW * 0.36 + i * monitorW * 0.18;
+      g.roundRect(x, monitorY + monitorH * 0.3, cardW, cardH, 9);
+      g.fill();
+    }
+
+    // 底部高危认可度条
+    const barW = posterW * 0.72;
+    const barH = 18;
+    const barY = posterY + posterH * 0.155;
+    g.fillColor = new Color(250, 245, 235, 255);
+    g.strokeColor = new Color(34, 29, 24, 255);
+    g.lineWidth = 3;
+    g.roundRect(-barW / 2, barY, barW, barH, 9);
+    g.fill(); g.stroke();
+    const segs: Array<[number, Color]> = [
+      [0.20, new Color(111, 76, 225, 255)],
+      [0.34, new Color(78, 174, 74, 255)],
+      [0.22, new Color(245, 199, 52, 255)],
+      [0.24, new Color(231, 61, 47, 255)],
+    ];
+    let x = -barW / 2 + 3;
+    for (const [ratio, color] of segs) {
+      const w = (barW - 6) * ratio;
+      g.fillColor = color;
+      g.rect(x, barY + 3, w, barH - 6);
+      g.fill();
+      x += w;
+    }
+  }
+
+  private makeStartButton(parent: Node, x: number, y: number, w: number, h: number, text: string, onTap: () => void): Node {
+    const btn = new Node('StartButton');
+    btn.layer = 33554432;
+    btn.parent = parent;
+    btn.addComponent(UITransform).setContentSize(w, h);
+    const g = btn.addComponent(Graphics);
+    g.fillColor = new Color(229, 66, 54, 255);
+    g.strokeColor = new Color(25, 23, 21, 255);
+    g.lineWidth = 4;
+    g.roundRect(-w / 2, -h / 2, w, h, 18);
+    g.fill(); g.stroke();
+    g.fillColor = new Color(255, 255, 255, 34);
+    g.roundRect(-w / 2 + 8, h / 2 - 24, w - 16, 14, 8);
+    g.fill();
+    btn.setPosition(x, y, 0);
+    const labelNode = this.mkLabel(btn, 'StartButtonLabel', 0, 1, text, 28, w - 24, h - 8);
+    const label = labelNode.getComponent(Label);
+    if (label) {
+      label.isBold = true;
+      label.color = Color.WHITE;
+    }
+    btn.on(Node.EventType.TOUCH_START, () => btn.setScale(0.97, 0.97, 1));
+    btn.on(Node.EventType.TOUCH_CANCEL, () => btn.setScale(1, 1, 1));
+    btn.on(Node.EventType.TOUCH_END, () => {
+      btn.setScale(1, 1, 1);
+      onTap();
+    });
+    return btn;
+  }
+
+  private styleStartLabel(node: Node, color: Color, bold: boolean): void {
+    const label = node.getComponent(Label);
+    if (!label) return;
+    label.color = color;
+    label.isBold = bold;
+    label.overflow = Label.Overflow.SHRINK;
+  }
+
+  private makeStartBadge(parent: Node, x: number, y: number, w: number, h: number, text: string): Node {
+    const node = new Node('StartAlertBadge');
+    node.layer = 33554432;
+    node.parent = parent;
+    node.addComponent(UITransform).setContentSize(w, h);
+    const g = node.addComponent(Graphics);
+    g.fillColor = new Color(34, 29, 24, 255);
+    g.roundRect(-w / 2, -h / 2, w, h, 12);
+    g.fill();
+    node.setPosition(x, y, 0);
+    const labelNode = this.mkLabel(node, 'BadgeText', 0, 0, text, 20, w - 18, h - 4);
+    const label = labelNode.getComponent(Label);
+    if (label) {
+      label.color = new Color(255, 238, 192, 255);
+      label.isBold = true;
+    }
+    return node;
+  }
+
+  private makeStartRuleCard(parent: Node, x: number, y: number, w: number, h: number, num: string, text: string): Node {
+    const node = new Node(`StartRule${num}`);
+    node.layer = 33554432;
+    node.parent = parent;
+    node.addComponent(UITransform).setContentSize(w, h);
+    const g = node.addComponent(Graphics);
+    g.fillColor = new Color(255, 252, 244, 255);
+    g.strokeColor = new Color(45, 39, 32, 255);
+    g.lineWidth = 3;
+    g.roundRect(-w / 2, -h / 2, w, h, 15);
+    g.fill(); g.stroke();
+    g.fillColor = new Color(255, 220, 96, 255);
+    g.circle(-w * 0.28, h * 0.2, Math.min(15, w * 0.13));
+    g.fill();
+    node.setPosition(x, y, 0);
+    const numNode = this.mkLabel(node, `RuleNum${num}`, -w * 0.28, h * 0.2, num, 15, 38, 24);
+    this.styleStartLabel(numNode, new Color(40, 34, 28, 255), true);
+    const textNode = this.mkLabel(node, `RuleText${num}`, 0, -h * 0.18, text, 16, w - 14, 32);
+    this.styleStartLabel(textNode, new Color(42, 36, 30, 255), true);
+    return node;
+  }
+
+  private makeStartDoodles(parent: Node, vis: { width: number; height: number }, contentW: number): void {
+    const doodle = new Node('StartDoodles');
+    doodle.layer = 33554432;
+    doodle.parent = parent;
+    doodle.addComponent(UITransform).setContentSize(vis.width, vis.height);
+    const g = doodle.addComponent(Graphics);
+    // 右上角红章：REPLACED?
+    const stampX = contentW * 0.34;
+    const stampY = vis.height * 0.085;
+    g.strokeColor = new Color(211, 42, 38, 180);
+    g.lineWidth = 4;
+    g.roundRect(stampX - 58, stampY - 26, 116, 52, 8);
+    g.stroke();
+    g.moveTo(stampX - 48, stampY - 12);
+    g.lineTo(stampX + 48, stampY + 14);
+    g.stroke();
+
+    // 左下纸团涂鸦
+    const paperX = -contentW * 0.38;
+    const paperY = -vis.height * 0.235;
+    g.fillColor = new Color(255, 255, 255, 245);
+    g.strokeColor = new Color(44, 39, 34, 220);
+    g.lineWidth = 2;
+    g.circle(paperX, paperY, 13); g.fill(); g.stroke();
+    g.circle(paperX + 14, paperY + 5, 12); g.fill(); g.stroke();
+    g.circle(paperX + 4, paperY + 17, 10); g.fill(); g.stroke();
+    g.strokeColor = new Color(80, 160, 255, 180);
+    g.moveTo(paperX - 6, paperY + 6);
+    g.lineTo(paperX + 20, paperY + 2);
+    g.moveTo(paperX, paperY + 17);
+    g.lineTo(paperX + 24, paperY + 12);
+    g.stroke();
+
+    // 两条飞行轨迹，暗示“扔出去”
+    g.strokeColor = new Color(54, 46, 38, 110);
+    g.lineWidth = 3;
+    g.moveTo(paperX + 34, paperY + 12);
+    g.bezierCurveTo(-contentW * 0.15, -vis.height * 0.17, contentW * 0.08, -vis.height * 0.12, contentW * 0.22, -vis.height * 0.06);
+    g.stroke();
+  }
+
   /** 局结束：写战报、解锁/段位/存档、展示结算。 */
   private finishAndShowReport(): void {
     if (this.reported) return;
@@ -472,13 +860,19 @@ export class GameRunner extends Component {
 
     if (this.reportLabel) {
       const stars = '★'.repeat(report.stars) + '☆'.repeat(Math.max(0, 3 - report.stars));
-      const head = summarizeReport(report);
       const meme = buildReportText(this.session.profile, report, idx);
       const rank = this.session.rankLabel;
       const day = this.session.daysEmployed;
       const canRevive = report.result === 'lose' && !this.game.revived;
-      const reviveHint = canRevive ? ' [V]复活' : '';
-      this.reportLabel.string = `${stars}\n${meme}\n\n${head}\n段位：${rank} · 入职第${day}天\n[N]下一关 [R]重试${reviveHint} [B]返回选关`;
+      const verdict = report.result === 'lose' ? '被 AI 优化了' : '撑过这一轮';
+      const nextLine = report.result === 'lose'
+        ? `重试本关${canRevive ? ' / 复活一次' : ''}`
+        : (this.session.hasNext ? '进入下一关' : '本轮完成');
+      this.reportLabel.string =
+        `${verdict}\n${stars}\n\n${meme}\n\n` +
+        `峰值认可度：${Math.round(report.peakApproval)}  ·  用时：${report.timeUsedSec.toFixed(1)}s\n` +
+        `最高连击：${report.maxCombo}  ·  段位：${rank} / 第${day}轮反击\n\n` +
+        `${nextLine}\nR 重试   N 下一关   B 返回`;
       this.reportLabel.node.active = true;
     }
     if (this.nextBtn) this.nextBtn.active = this.session.hasNext;
@@ -535,14 +929,14 @@ export class GameRunner extends Component {
     this.propButtonNodes = this.propButtons.children.filter((child: Node) => /^Prop\d+$/.test(child.name));
     this.propButtonNodes.forEach((btn: Node, i: number) => {
       const type = GameRunner.PROP_TYPES[i];
-      // 文字标签：底部两行（名称 / 状态+次数），overflow 收缩防超宽
+      // 文字标签：底部两行（纸团意象 / 作用+次数），overflow 收缩防超宽
       const label = btn.getComponent(Label);
       if (label) {
         label.string = GameRunner.PROP_LABELS[i] ?? '';
-        label.fontSize = 20;
-        label.lineHeight = 22;
+        label.fontSize = 18;
+        label.lineHeight = 20;
         label.overflow = Label.Overflow.SHRINK;
-        label.horizontalAlign = 1;
+        label.horizontalAlign = 2;
         label.verticalAlign = 1;
       }
       // 图标 Sprite：运行时由 renderPropHUD 按 propSfFor 装载；没素材则隐藏、文字标签上移兜底
@@ -557,8 +951,9 @@ export class GameRunner extends Component {
         iconNode.setSiblingIndex(0); // 图标在文字之下层（先绘制），避免遮住状态文字
         this.propIconSprites[i] = icon;
       }
-      btn.on(Node.EventType.TOUCH_START, () => this.onPropDown(type));
-      btn.on(Node.EventType.TOUCH_END, () => this.onPropUp(type));
+      btn.on(Node.EventType.TOUCH_START, (event: EventTouch) => this.onPropDown(type, event));
+      btn.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => this.onPropMove(type, event));
+      btn.on(Node.EventType.TOUCH_END, (event: EventTouch) => this.onPropUp(type, event));
       btn.on(Node.EventType.TOUCH_CANCEL, () => this.onPropCancel(type));
     });
   }
@@ -569,18 +964,376 @@ export class GameRunner extends Component {
     this.reviveBtn?.on(Node.EventType.TOUCH_END, () => this.onRevive());
   }
 
-  private onPropDown(prop: PropType): void {
-    if (prop === PT.KissUp) this.game.useKissUp();
-    else this.game.beginCharge(prop);
+  private onPropDown(prop: PropType, event?: EventTouch): void {
+    if (prop === PT.KissUp) {
+      if (this.game.useKissUp()) this.animatePaperToRobot(prop);
+      this.punchButton(prop, true);
+      return;
+    }
+    if (this.game.beginCharge(prop)) {
+      this.aimStart = this.propSourcePoint(prop);
+      this.aimPoint = event ? this.pointFromPointer(event) : this.aimStart.clone();
+      this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
+      this.showPaperAim(prop);
+      this.aimingProp = prop;
+      this.updatePaperAim(event);
+      this.advanceTutorial(1, '拖向显示器里的任务卡');
+    } else {
+      this.setEventText(`${this.propDisplayName(prop)}暂时不能扔`);
+    }
     this.punchButton(prop, true);
   }
-  private onPropUp(prop: PropType): void {
-    if (prop !== PT.KissUp) this.game.release(prop);
+  private onPropMove(prop: PropType, event: EventTouch): void {
+    if (this.aimingProp !== prop) return;
+    this.updatePaperAim(event);
+    this.advanceTutorial(2, '松手投出纸团');
+  }
+  private onPropUp(prop: PropType, event?: EventTouch | EventMouse): void {
+    if (prop !== PT.KissUp) this.finishPaperThrow(prop, event);
     this.punchButton(prop, false);
   }
   private onPropCancel(prop: PropType): void {
+    if (this.aimingProp === prop) {
+      this.finishPaperThrow(prop);
+      return;
+    }
     if (prop !== PT.KissUp) this.game.cancel(prop);
     this.punchButton(prop, false);
+  }
+
+  private finishPaperThrow(prop: PropType, event?: EventTouch | EventMouse): void {
+    if (this.aimingProp !== prop) return;
+    if (event) this.updatePaperAim(event);
+    const slot = this.aimingSlot;
+    this.animatePaperThrow(prop, slot, () => this.game.releaseAtSlot(prop, slot));
+    this.clearPaperAim(false);
+    this.punchButton(prop, false);
+  }
+
+  private onGlobalTouchMove(event: EventTouch): void {
+    if (this.aimingProp === null) return;
+    this.updatePaperAim(event);
+    this.advanceTutorial(2, '松手投出纸团');
+  }
+
+  private onGlobalTouchEnd(event: EventTouch): void {
+    const prop = this.aimingProp;
+    if (prop === null) return;
+    this.onPropUp(prop, event);
+  }
+
+  private onGlobalTouchCancel(): void {
+    const prop = this.aimingProp;
+    if (prop === null) return;
+    this.game.cancel(prop);
+    this.clearPaperAim(true);
+    this.punchButton(prop, false);
+  }
+
+  private onGlobalMouseMove(event: EventMouse): void {
+    if (this.aimingProp === null) return;
+    this.updatePaperAim(event);
+    this.advanceTutorial(2, '松手投出纸团');
+  }
+
+  private onGlobalMouseUp(event: EventMouse): void {
+    const prop = this.aimingProp;
+    if (prop === null) return;
+    this.onPropUp(prop, event);
+  }
+
+  private propSourcePoint(prop: PropType): Vec3 {
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const btn = idx >= 0 ? this.propButtonNodes[idx] : null;
+    return btn ? this.nodePointInRoot(btn) : new Vec3(0, -240, 0);
+  }
+
+  private propDisplayName(prop: PropType): string {
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    return GameRunner.PROP_LABELS[idx] ?? '纸团';
+  }
+
+  private pointFromPointer(event: EventTouch | EventMouse): Vec3 {
+    const loc = event.getUILocation();
+    const ut = this.node.getComponent(UITransform);
+    if (!ut) return new Vec3(loc.x, loc.y, 0);
+    return ut.convertToNodeSpaceAR(new Vec3(loc.x, loc.y, 0));
+  }
+
+  private nodePointInRoot(node: Node): Vec3 {
+    const ut = this.node.getComponent(UITransform);
+    if (!ut) return node.worldPosition.clone();
+    return ut.convertToNodeSpaceAR(node.worldPosition);
+  }
+
+  private targetPointForSlot(slot: number): Vec3 {
+    const node = this.visualNodeAtSlot(slot) ?? this.slotNodes[slot];
+    return node ? this.nodePointInRoot(node) : new Vec3(0, 120, 0);
+  }
+
+  private slotFromAimPoint(point: Vec3): number {
+    if (this.slotNodes.length === 0) return 0;
+    let best = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < this.slotNodes.length; i++) {
+      const p = this.targetPointForSlot(i);
+      const dx = Math.abs(point.x - p.x);
+      if (dx < bestDist) {
+        best = i;
+        bestDist = dx;
+      }
+    }
+    return best;
+  }
+
+  private showPaperAim(prop: PropType): void {
+    this.clearPaperAim(true);
+    const paper = new Node('PaperWadAim');
+    paper.layer = 1 << 25;
+    paper.addComponent(UITransform).setContentSize(44, 44);
+    paper.addComponent(Graphics);
+    this.drawPaperWad(paper, prop, 1);
+    this.node.addChild(paper);
+    this.paperAimNode = paper;
+
+    const guide = new Node('PaperThrowGuide');
+    guide.layer = 1 << 25;
+    guide.addComponent(UITransform).setContentSize(1, 1);
+    guide.addComponent(Graphics);
+    this.node.addChild(guide);
+    guide.setSiblingIndex(Math.max(0, paper.getSiblingIndex() - 1));
+    this.aimGuideNode = guide;
+  }
+
+  private updatePaperAim(event?: EventTouch | EventMouse): void {
+    if (event) this.aimPoint = this.pointFromPointer(event);
+    this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
+    if (this.paperAimNode?.isValid) {
+      this.paperAimNode.setPosition(this.aimPoint.x, this.aimPoint.y, 0);
+      const stretch = Math.min(1.18, 0.96 + Math.abs(this.aimPoint.y - this.aimStart.y) / 900);
+      this.paperAimNode.setScale(stretch, 1 / stretch, 1);
+    }
+    this.drawAimGuide();
+  }
+
+  private drawAimGuide(): void {
+    const g = this.aimGuideNode?.getComponent(Graphics);
+    if (!g) return;
+    const prop = this.aimingProp;
+    const tuning = this.paperTuning(prop ?? PT.AddDemand);
+    const start = this.aimStart;
+    const end = this.targetPointForSlot(this.aimingSlot);
+    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight * 0.82, 0);
+    g.clear();
+    const idx = prop ? GameRunner.PROP_TYPES.indexOf(prop) : 0;
+    const base = GameRunner.PROP_COLORS[idx] ?? new Color(42, 38, 34);
+    g.fillColor = new Color(
+      Math.round(base.r * 0.25 + 42 * 0.75),
+      Math.round(base.g * 0.25 + 38 * 0.75),
+      Math.round(base.b * 0.25 + 34 * 0.75),
+      prop === PT.ThrowPot ? 210 : 170,
+    );
+    for (let i = 1; i <= tuning.guideDots; i++) {
+      const t = i / (tuning.guideDots + 1);
+      const x = (1 - t) * (1 - t) * start.x + 2 * (1 - t) * t * peak.x + t * t * end.x;
+      const y = (1 - t) * (1 - t) * start.y + 2 * (1 - t) * t * peak.y + t * t * end.y;
+      const r = tuning.guideDotRadius * (0.75 + t * 0.35);
+      g.circle(x, y, r);
+      g.fill();
+    }
+  }
+
+  private clearPaperAim(destroyPaper: boolean): void {
+    this.aimingProp = null;
+    this.aimGuideNode?.destroy();
+    this.aimGuideNode = null;
+    if (destroyPaper) {
+      this.paperAimNode?.destroy();
+    }
+    this.paperAimNode = null;
+  }
+
+  private animatePaperThrow(prop: PropType, slot: number, onArrive: () => void): void {
+    const paper = this.paperAimNode?.isValid ? this.paperAimNode : this.makePaperWadNode(prop, 'PaperWadThrow');
+    const tuning = this.paperTuning(prop);
+    const outcome = this.paperOutcome(prop, slot);
+    const start = this.aimPoint.clone();
+    const end = this.targetPointForSlot(slot);
+    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight, 0);
+    if (!paper.parent) this.node.addChild(paper);
+    paper.setPosition(start);
+    paper.setScale(tuning.startScale);
+    const op = paper.getComponent(UIOpacity) ?? paper.addComponent(UIOpacity);
+    op.opacity = 255;
+    const outDuration = tuning.duration * (prop === PT.ThrowPot ? 0.42 : 0.48);
+    const inDuration = Math.max(0.08, tuning.duration - outDuration);
+    tween(paper)
+      .to(outDuration, { position: peak, angle: tuning.spin * 0.52, scale: tuning.midScale }, { easing: 'quadOut' })
+      .to(inDuration, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn' })
+      .call(() => {
+        onArrive();
+        this.paperImpact(end, prop, outcome);
+        this.paperOutcomeText(end, prop, outcome);
+        this.settlePaperWad(paper, op, prop, outcome);
+      })
+      .start();
+  }
+
+  private animatePaperToRobot(prop: PropType): void {
+    const paper = this.makePaperWadNode(prop, 'PaperWadKissUp');
+    const tuning = this.paperTuning(prop);
+    const start = this.propSourcePoint(prop);
+    const end = this.charNode?.isValid ? this.nodePointInRoot(this.charNode) : new Vec3(0, -20, 0);
+    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight, 0);
+    this.node.addChild(paper);
+    paper.setPosition(start);
+    paper.setScale(tuning.startScale);
+    tween(paper)
+      .to(tuning.duration * 0.55, { position: peak, angle: tuning.spin * 0.42, scale: tuning.midScale }, { easing: 'quadOut' })
+      .to(tuning.duration * 0.45, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: 'backIn' })
+      .call(() => {
+        this.paperImpact(end, prop, 'hit');
+        this.paperOutcomeText(end, prop, 'hit');
+        const op = paper.getComponent(UIOpacity) ?? paper.addComponent(UIOpacity);
+        this.settlePaperWad(paper, op, prop, 'hit');
+      })
+      .start();
+  }
+
+  private paperTuning(prop: PropType): PaperTuning {
+    return GameRunner.PAPER_TUNING[prop] ?? GameRunner.PAPER_TUNING[PT.AddDemand];
+  }
+
+  private paperOutcome(prop: PropType, slot: number): PaperOutcome {
+    if (prop === PT.AddDemand) return 'hit';
+    if (prop === PT.ChangeDemand) {
+      const card = this.game.conveyor.slotAt(slot);
+      if (!card) return 'miss';
+      return card.state === CS.ActiveWhite ? 'hit' : 'invalid';
+    }
+    if (prop === PT.ThrowPot) {
+      return this.game.conveyor.hasCardsInRange(slot, 1) ? 'hit' : 'miss';
+    }
+    return 'hit';
+  }
+
+  private paperImpact(pos: Vec3, prop: PropType, outcome: PaperOutcome): void {
+    const ring = new Node('PaperImpact');
+    ring.layer = 1 << 25;
+    ring.addComponent(UITransform).setContentSize(64, 64);
+    const g = ring.addComponent(Graphics);
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = GameRunner.PROP_COLORS[idx] ?? new Color(255, 255, 255);
+    const miss = outcome !== 'hit';
+    g.strokeColor = miss
+      ? new Color(130, 125, 118, 150)
+      : new Color(base.r, base.g, base.b, prop === PT.ThrowPot ? 230 : 190);
+    g.lineWidth = miss ? 2 : prop === PT.ThrowPot ? 5 : 3;
+    g.circle(0, 0, miss ? 8 : prop === PT.ThrowPot ? 15 : 10);
+    g.stroke();
+    this.node.addChild(ring);
+    ring.setPosition(pos);
+    const op = ring.addComponent(UIOpacity);
+    op.opacity = miss ? 130 : prop === PT.ThrowPot ? 230 : 180;
+    const scale = miss ? 0.9 : prop === PT.ThrowPot ? 1.55 : prop === PT.ChangeDemand ? 1.35 : 1.2;
+    tween(ring)
+      .to(0.16, { scale: new Vec3(scale, scale, 1) }, { easing: 'quadOut' })
+      .call(() => { if (ring.isValid) ring.destroy(); })
+      .start();
+    tween(op).to(0.16, { opacity: 0 }, { easing: 'quadOut' }).start();
+  }
+
+  private paperOutcomeText(pos: Vec3, prop: PropType, outcome: PaperOutcome): void {
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = GameRunner.PROP_COLORS[idx] ?? new Color(255, 255, 255);
+    const text = this.paperOutcomeLabel(prop, outcome);
+    const color = outcome === 'hit' ? new Color(base.r, base.g, base.b, 255) : new Color(120, 115, 108, 255);
+    const node = new Node('PaperOutcomeText');
+    node.layer = 1 << 25;
+    node.addComponent(UITransform).setContentSize(96, 34);
+    const label = node.addComponent(Label);
+    label.string = text;
+    label.fontSize = outcome === 'hit' && prop === PT.ThrowPot ? 24 : 20;
+    label.lineHeight = label.fontSize + 4;
+    label.isBold = true;
+    label.color = color;
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+    this.node.addChild(node);
+    node.setPosition(pos.x, pos.y + 26, 0);
+    const op = node.addComponent(UIOpacity);
+    op.opacity = 230;
+    tween(node)
+      .by(0.38, { position: new Vec3(0, 22, 0) }, { easing: 'quadOut' })
+      .call(() => { if (node.isValid) node.destroy(); })
+      .start();
+    tween(op).delay(0.18).to(0.2, { opacity: 0 }, { easing: 'quadOut' }).start();
+  }
+
+  private paperOutcomeLabel(prop: PropType, outcome: PaperOutcome): string {
+    if (outcome === 'miss') return '没中';
+    if (outcome === 'invalid') return '无效';
+    if (prop === PT.AddDemand) return '+需求';
+    if (prop === PT.ChangeDemand) return '返工!';
+    if (prop === PT.ThrowPot) return '甩锅!';
+    return '拍中!';
+  }
+
+  private settlePaperWad(paper: Node, opacity: UIOpacity, prop: PropType, outcome: PaperOutcome): void {
+    if (!paper.isValid) return;
+    const hit = outcome === 'hit';
+    const squash = hit
+      ? prop === PT.ThrowPot ? new Vec3(0.95, 0.55, 1) : new Vec3(0.68, 0.46, 1)
+      : new Vec3(0.52, 0.36, 1);
+    tween(paper)
+      .to(0.06, { scale: squash }, { easing: 'quadOut' })
+      .delay(hit ? 0.08 : 0.03)
+      .to(0.12, { scale: new Vec3(0.18, 0.18, 1) }, { easing: 'quadIn' })
+      .call(() => { if (paper.isValid) paper.destroy(); })
+      .start();
+    tween(opacity)
+      .delay(hit ? 0.08 : 0.02)
+      .to(0.14, { opacity: 0 }, { easing: 'quadOut' })
+      .start();
+  }
+
+  private makePaperWadNode(prop: PropType, name: string): Node {
+    const node = new Node(name);
+    node.layer = 1 << 25;
+    node.addComponent(UITransform).setContentSize(44, 44);
+    node.addComponent(Graphics);
+    this.drawPaperWad(node, prop, 1);
+    return node;
+  }
+
+  private drawPaperWad(node: Node, prop: PropType, alpha: number): void {
+    const g = node.getComponent(Graphics);
+    if (!g) return;
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = GameRunner.PROP_COLORS[idx] ?? new Color(250, 246, 236);
+    const tint = idx === 0 ? new Color(248, 246, 238) : new Color(
+      Math.round(base.r * 0.30 + 248 * 0.70),
+      Math.round(base.g * 0.30 + 246 * 0.70),
+      Math.round(base.b * 0.30 + 238 * 0.70),
+      255,
+    );
+    g.clear();
+    g.fillColor = new Color(tint.r, tint.g, tint.b, Math.round(255 * alpha));
+    g.strokeColor = new Color(42, 38, 34, Math.round(230 * alpha));
+    g.lineWidth = 3;
+    g.circle(0, 0, 19);
+    g.fill();
+    g.stroke();
+    g.strokeColor = new Color(base.r, base.g, base.b, Math.round(210 * alpha));
+    g.lineWidth = 2;
+    g.moveTo(-10, 3);
+    g.lineTo(-2, 11);
+    g.lineTo(6, 2);
+    g.lineTo(13, 8);
+    g.moveTo(-11, -7);
+    g.lineTo(-1, -2);
+    g.lineTo(8, -10);
+    g.stroke();
   }
 
   /** 道具按钮按下/松开缩放反馈（不依赖 Sprite，Label 节点也有视觉反馈）。 */
@@ -608,43 +1361,32 @@ export class GameRunner extends Component {
       const st = this.game.prop.getState(type);
       const unlocked = this.game.prop.isUnlocked(type);
       const name = GameRunner.PROP_LABELS[i];
+      const action = GameRunner.PROP_ACTION_LABELS[i] ?? '';
       let line2: string;
       if (!unlocked) line2 = '未解锁';
       else if (st.uses <= 0) line2 = '已用尽';
       else if (st.ready) line2 = '就绪';
       else if (st.acquisition === 'cd') line2 = `${st.cdRemaining.toFixed(1)}s`;
       else line2 = `${Math.round(st.energy * 100)}%`;
-      const usesText = !unlocked || type === PT.KissUp ? '' : ` ×${st.uses}`;
+      const usesText = !unlocked || type === PT.KissUp ? '' : `×${st.uses}`;
       const sf = this.propSfFor(type);
       if (label) {
-        label.string = `${name}\n${line2}${usesText}`;
+        label.string = `${name}\n${action} ${line2}${usesText}`;
         label.color = !unlocked || st.uses <= 0 ? new Color(115, 110, 105, 255) : new Color(42, 38, 34, 255);
         // Label 就挂在按钮节点本身，不能再移动 label.node（会把整个按钮移回原点）。
-        label.horizontalAlign = sf ? 2 : 1;
+        label.horizontalAlign = 2;
         label.verticalAlign = 1;
       }
-      // 图标：有素材就显示并上移到按钮上半；没素材则隐藏，文字标签居中兜底
+      // 道具区改为“纸团弹药台”：旧功能图标只作为素材保留，不再盖在纸团堆上。
       const icon = this.propIconSprites[i];
       const btnUt = btn.getComponent(UITransform);
       const btnW = btnUt?.width ?? 140;
       const btnH = btnUt?.height ?? 96;
       if (icon) {
-        if (sf) {
-          // 顺序锁死（复刻卡牌 Sprite 的正常模式）：先 setContentSize 固定节点尺寸，
-          // 再 sizeMode=CUSTOM，最后赋 spriteFrame。CUSTOM 模式下赋值不会用原图覆盖节点尺寸。
-          const ut = icon.node.getComponent(UITransform);
-          if (ut) {
-            const iconW = Math.min(btnW * 0.48, btnH * 0.52);
-            const aspect = sf.originalSize.height > 0 ? sf.originalSize.width / sf.originalSize.height : 1;
-            ut.setContentSize(iconW, iconW / aspect);
-            icon.node.setPosition(-btnW * 0.22, btnH * 0.05, 0); // 图标靠左，文字在右侧
-          }
-          icon.sizeMode = Sprite.SizeMode.CUSTOM;
-          icon.spriteFrame = sf;
-          icon.enabled = true;
-        } else {
-          icon.enabled = false;
-        }
+        void sf;
+        void btnW;
+        void btnH;
+        icon.enabled = false;
       }
       this.drawPropButtonBackground(i, unlocked, st.uses > 0, st.ready);
     });
@@ -681,6 +1423,40 @@ export class GameRunner extends Component {
     g.roundRect(-w / 2, -h / 2, w, h, 16);
     g.fill();
     g.stroke();
+
+    const pileAlpha = inactive ? 120 : 245;
+    const paperFill = inactive
+      ? new Color(190, 186, 178, 210)
+      : new Color(
+        Math.round(base.r * 0.22 + 248 * 0.78),
+        Math.round(base.g * 0.22 + 246 * 0.78),
+        Math.round(base.b * 0.22 + 238 * 0.78),
+        pileAlpha,
+      );
+    const cx = -w * 0.28;
+    const cy = h * 0.02;
+    const r = Math.min(18, h * 0.18);
+    g.fillColor = paperFill;
+    g.strokeColor = inactive ? new Color(90, 86, 80, 130) : new Color(42, 38, 34, 230);
+    g.lineWidth = 2.5;
+    g.circle(cx - r * 0.42, cy - r * 0.18, r * 0.82);
+    g.fill();
+    g.stroke();
+    g.circle(cx + r * 0.28, cy - r * 0.08, r * 0.92);
+    g.fill();
+    g.stroke();
+    g.circle(cx - r * 0.02, cy + r * 0.46, r * 0.76);
+    g.fill();
+    g.stroke();
+    g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 220);
+    g.lineWidth = 2;
+    g.moveTo(cx - r * 0.82, cy + r * 0.10);
+    g.lineTo(cx - r * 0.18, cy + r * 0.55);
+    g.lineTo(cx + r * 0.44, cy - r * 0.02);
+    g.moveTo(cx - r * 0.46, cy - r * 0.48);
+    g.lineTo(cx + r * 0.28, cy - r * 0.24);
+    g.lineTo(cx + r * 0.66, cy - r * 0.66);
+    g.stroke();
   }
 
   /* ---------- 渲染 ---------- */
@@ -689,7 +1465,7 @@ export class GameRunner extends Component {
     const snap = this.game.getSnapshot();
 
     if (this.levelLabel) this.levelLabel.string = this.compactHeader
-      ? `第${this.session.currentIndex + 1}关 · ${this.session.rankLabel}`
+      ? `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`
       : '别让AI替代你';
     if (this.approvalLabel) this.approvalLabel.string = `认可度: ${Math.round(snap.approval)}`;
     if (this.zoneLabel) {
@@ -735,11 +1511,13 @@ export class GameRunner extends Component {
       const charging = this.game.prop.chargingProp !== null;
       this.scanIndicator.active = charging;
       if (charging) {
-        const idx = Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
+        const idx = this.aimingProp !== null
+          ? this.aimingSlot
+          : Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
         const target = this.slotNodes[idx];
         if (target) this.scanIndicator.setPosition(target.position.x, target.position.y, 0);
         // 蓄力进度可视化：指示器随 scanPos 0→1 放大，给"蓄满了"的直观反馈
-        const s = 0.6 + this.scanPos * 0.8;
+        const s = this.aimingProp !== null ? 1.18 : 0.6 + this.scanPos * 0.8;
         this.scanIndicator.setScale(s, s, 1);
       }
     }
@@ -1219,6 +1997,7 @@ export class GameRunner extends Component {
 
     this.layoutPropButtons(visSize.width, visSize.height);
     this.layoutLowerHud(visSize.width, visSize.height);
+    this.layoutTutorialHint();
   }
 
   /** 显示器内只保留一条任务流说明，填补空屏但不重绘显示器美术。 */
@@ -1261,7 +2040,7 @@ export class GameRunner extends Component {
       this.subtitleNode = node;
     }
     const label = this.subtitleNode.getComponent(Label)!;
-    label.string = `第${this.session.currentIndex + 1}关 · ${this.session.rankLabel}`;
+    label.string = `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`;
     label.fontSize = Math.min(20, Math.max(15, viewWidth * .045));
     label.lineHeight = label.fontSize + 5;
     this.subtitleNode.getComponent(UITransform)!.setContentSize(Math.min(viewWidth * .7, 460), 28);
