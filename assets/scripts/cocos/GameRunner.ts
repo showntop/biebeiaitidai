@@ -1891,19 +1891,27 @@ export class GameRunner extends Component {
       this.layoutHudLabel(this.levelLabel, 0, mainTitleY, Math.min(visSize.width * 0.72, 520), 36, 28);
       this.layoutSubtitle(visSize.width, screenTopY + Math.max(16, visSize.height * 0.02));
     }
-    if (this.levelLabel) { this.levelLabel.color = new Color(55, 48, 42, 255); this.levelLabel.isBold = true; }
+    if (this.levelLabel) {
+      this.levelLabel.color = new Color(45, 38, 32, 255);
+      this.levelLabel.isBold = true;
+      this.levelLabel.node.active = true;
+      this.levelLabel.fontSize = this.compactHeader ? 20 : 30;
+      this.levelLabel.lineHeight = (this.compactHeader ? 20 : 30) + 8;
+    }
     this.drawMonitorFrame(screenTopY, screenBottomY, screenWidthPx, visSize.width);
     // 认可度/分区信息已收敛到下方仪表盘面板；隐藏旧版浮动 Label
     if (this.approvalLabel) this.approvalLabel.node.active = false;
     if (this.zoneLabel) this.zoneLabel.node.active = false;
-    // 计时器移到标题栏右侧，字号比标题略小但足够清晰
+    // 计时器移到标题栏右侧，字号比标题略大加粗，亮白色
     if (this.timerLabel) {
       const timerX = Math.min(visSize.width * 0.38, screenWidthPx * 0.40);
       const timerY = this.compactHeader
         ? screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)))
         : screenTopY + Math.max(42, visSize.height * 0.05);
-      this.layoutHudLabel(this.timerLabel, timerX, timerY, screenWidthPx * 0.26, 40, 24);
+      this.layoutHudLabel(this.timerLabel, timerX, timerY, screenWidthPx * 0.30, 44, 28);
       this.timerLabel.node.active = true;
+      this.timerLabel.color = new Color(255, 252, 240, 255);
+      this.timerLabel.isBold = true;
     }
 
     // Belt（传送带卡槽）放在标题和状态行之间，卡牌始终限制在显示器内。
@@ -2020,6 +2028,12 @@ export class GameRunner extends Component {
     this.subtitleNode.active = this.uiState === 'playing';
   }
 
+  /** 仪表盘专用动态覆盖图层（每帧重绘，状态层不动底图） */
+  private hudBarFillNode: Node | null = null;
+  private hudScaleMarkNode: Node | null = null;
+  /** 文字动态覆盖层（每帧重绘：值、分区、事件） */
+  private hudTextLayer: Node | null = null;
+
   /** 统一仪表盘面板：认可度值 + 分区 + 四段色条 + 事件日志，单一圆角面板。 */
   private layoutLowerHud(viewWidth: number, viewHeight: number): void {
     if (!this.lowerHudNode) {
@@ -2028,14 +2042,32 @@ export class GameRunner extends Component {
       node.parent = this.node;
       node.addComponent(UITransform);
       node.addComponent(Graphics);
-      const value = this.makeHudLabel(node, 'ApprovalValue', '认可度 43', 26, new Color(38, 34, 30, 255));
+
+      // 静态层：面板纸底 + 四段色条
+      const value = this.makeHudLabel(node, 'ApprovalValue', '', 28, new Color(38, 34, 30, 255));
       value.isBold = true;
-      const zone = this.makeHudLabel(node, 'Zone', '危险!', 20, new Color(220, 60, 60, 255));
+      const zone = this.makeHudLabel(node, 'Zone', '', 22, new Color(220, 60, 60, 255));
       zone.isBold = true;
       const evt = this.makeHudLabel(node, 'Event', '', 15, new Color(72, 62, 54, 255));
       evt.overflow = Label.Overflow.CLAMP;
       this.makeHudLabel(node, 'Scale', '猎杀          良好          勉强          危险', 12, new Color(110, 100, 90, 255));
       this.lowerHudNode = node;
+
+      // 动态层：单独的 Graphics 子节点，每帧 clear+redraw，不会污染静态底图
+      const fill = new Node('HudBarFill');
+      fill.layer = 1 << 25;
+      fill.parent = node;
+      fill.addComponent(UITransform);
+      fill.addComponent(Graphics);
+      this.hudBarFillNode = fill;
+
+      // 刻度游标：当前值小三角
+      const mark = new Node('HudScaleMark');
+      mark.layer = 1 << 25;
+      mark.parent = node;
+      mark.addComponent(UITransform);
+      mark.addComponent(Graphics);
+      this.hudScaleMarkNode = mark;
     }
 
     const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + 150;
@@ -2095,6 +2127,16 @@ export class GameRunner extends Component {
     this.placeHudLabel(node, 'Scale', 0, barCY - barH / 2 - 12, barW, 20);
     this.placeHudLabel(node, 'Event', 0, -panelH / 2 + padBot + eventH / 2, panelW - 28, eventH);
 
+    // 动态覆盖层：与面板同坐标系，铺满整面板
+    if (this.hudBarFillNode) {
+      this.hudBarFillNode.getComponent(UITransform)!.setContentSize(panelW, panelH);
+      this.hudBarFillNode.setPosition(0, 0, 0);
+    }
+    if (this.hudScaleMarkNode) {
+      this.hudScaleMarkNode.getComponent(UITransform)!.setContentSize(panelW, panelH);
+      this.hudScaleMarkNode.setPosition(0, 0, 0);
+    }
+
     node.active = this.uiState === 'playing';
   }
 
@@ -2134,18 +2176,33 @@ export class GameRunner extends Component {
       label.color = zoneColor[zone] ?? new Color(45, 40, 35);
     }
 
-    // 动态覆盖进度条：approved 部分透明看到底色，未到部分蒙半透明灰色
-    const g = this.lowerHudNode.getComponent(Graphics);
-    if (!g || this.hudBarW <= 0) return;
+    // 动态覆盖图层：每帧 clear 后重绘，不会污染静态四段底色
+    if (!this.hudBarFillNode || this.hudBarW <= 0) return;
+    const fillG = this.hudBarFillNode.getComponent(Graphics);
+    if (!fillG) return;
     const bw = this.hudBarW;
     const bh = this.hudBarH;
     const bcy = this.hudBarCY;
     const pct = Math.max(0, Math.min(1, approval / 100));
-    const fillEnd = -bw / 2 + bw * pct;
-    // 蒙住右侧未覆盖区域
-    g.fillColor = new Color(50, 46, 40, 160);
-    g.rect(fillEnd, bcy - bh / 2 + 4, bw * (1 - pct) - 4, bh - 8);
-    g.fill();
+    fillG.clear();
+    // 已达标部分：蒙半透明黑色 = 让四段分区色变暗，提示"未达"
+    fillG.fillColor = new Color(40, 36, 32, 175);
+    fillG.rect(-bw / 2 + bw * pct, bcy - bh / 2 + 4, bw * (1 - pct) - 4, bh - 8);
+    fillG.fill();
+    // 当前值小三角游标
+    if (this.hudScaleMarkNode) {
+      const markG = this.hudScaleMarkNode.getComponent(Graphics);
+      if (markG) {
+        markG.clear();
+        const x = -bw / 2 + bw * pct;
+        markG.fillColor = new Color(30, 26, 22, 255);
+        markG.moveTo(x, bcy + bh / 2 + 2);
+        markG.lineTo(x - 7, bcy + bh / 2 + 14);
+        markG.lineTo(x + 7, bcy + bh / 2 + 14);
+        markG.close();
+        markG.fill();
+      }
+    }
   }
 
   /** 把 Belt 下的 6 个卡槽横向等距重新排布到指定区域内（居中）。 */
