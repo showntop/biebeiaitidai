@@ -1308,9 +1308,7 @@ export class GameRunner extends Component {
   }
 
   /**
-   * 纸团武器槽 HUD：每帧刷新 4 个槽位。
-   *  左半：纸团堆 Graphics（每类不同形状）。右半：大字次数 + 一行状态。
-   *  CD/能量：在按钮左右各画一段弧形进度，替代之前的纯文字秒数。
+   * 纸团武器槽 HUD：每帧刷新。视觉重心在大纸团 + 次数，CD 用纸团暗部表示。
    */
   private renderPropHUD(): void {
     if (!this.propButtons) return;
@@ -1319,37 +1317,34 @@ export class GameRunner extends Component {
       const label = btn.getComponent(Label);
       const st = this.game.prop.getState(type);
       const unlocked = this.game.prop.isUnlocked(type);
-      const action = GameRunner.PROP_ACTION_LABELS[i] ?? '';
+      const name = GameRunner.PROP_ACTION_LABELS[i] ?? GameRunner.PROP_LABELS[i];
       const uses = unlocked ? st.uses : 0;
       const kissUp = type === PT.KissUp;
-      let statusText: string;
-      let cdPct = 1; // 0=满CD, 1=就绪
-      if (!unlocked) { statusText = '锁'; cdPct = 0; }
-      else if (uses <= 0) { statusText = '空'; cdPct = 0; }
-      else if (st.ready) statusText = '就绪';
-      else if (st.acquisition === 'cd') {
-        statusText = `${st.cdRemaining.toFixed(1)}s`;
-        cdPct = 1 - st.cdRemaining / Math.max(1, st.cdDuration);
-      } else {
-        statusText = `${Math.round(st.energy * 100)}%`;
-        cdPct = st.energy;
+      const dim = !unlocked || uses <= 0;
+      let cdPct = 1;
+      let statusLine = '';
+      if (!unlocked) { statusLine = '未解锁'; cdPct = 0; }
+      else if (uses <= 0) { statusLine = '已用尽'; cdPct = 0; }
+      else if (st.ready) statusLine = '就绪';
+      else {
+        if (st.acquisition === 'cd') { cdPct = 1 - st.cdRemaining / Math.max(1, st.cdDuration); statusLine = `${st.cdRemaining.toFixed(1)}s`; }
+        else { cdPct = st.energy; statusLine = `${Math.round(st.energy * 100)}%`; }
       }
-      const countText = kissUp ? '' : (uses > 0 ? `×${uses}` : '');
+      const count = kissUp ? '' : (uses > 0 ? `×${uses}` : '');
       if (label) {
-        label.string = `${action}\n${countText}\n${statusText}`;
-        const dim = !unlocked || uses <= 0;
-        label.color = dim ? new Color(130, 123, 118, 255) : new Color(38, 34, 30, 255);
-        label.horizontalAlign = 2; // RIGHT
+        label.string = `${name}`;
+        label.color = dim ? new Color(140, 133, 128, 255) : new Color(34, 30, 27, 255);
+        label.horizontalAlign = 1; // CENTER
         label.verticalAlign = 1;
-        label.fontSize = Math.min(16, label.fontSize || 14);
-        label.lineHeight = label.fontSize + 3;
+        label.fontSize = Math.min(18, Math.max(14, (btn.getComponent(UITransform)?.width ?? 140) * 0.13));
+        label.overflow = Label.Overflow.SHRINK;
       }
-      this.drawPropButtonBackground(i, unlocked, uses > 0, st.ready, cdPct);
+      this.drawPropButtonBackground(i, unlocked, uses > 0, st.ready, cdPct, count, statusLine);
     });
   }
 
-  /** 纸团武器槽背景：底卡 + 差异化纸团 + CD 进度条。 */
-  private drawPropButtonBackground(index: number, unlocked: boolean, hasUses: boolean, ready: boolean, cdPct = 1): void {
+  /** 纸团武器槽：大纸团居中 + 次数叠在纸团上 + CD 用暗部表示 + 状态行。 */
+  private drawPropButtonBackground(index: number, unlocked: boolean, hasUses: boolean, ready: boolean, cdPct: number, count: string, statusLine: string): void {
     const bg = this.propButtonBackgrounds[index];
     if (!bg) return;
     const ut = bg.getComponent(UITransform);
@@ -1363,100 +1358,145 @@ export class GameRunner extends Component {
 
     g.clear();
 
-    // ── 底卡 ──
-    const fillM = inactive ? 0.88 : ready ? 0.70 : 0.80;
-    g.fillColor = new Color(
-      Math.round(base.r * (1 - fillM) + 250 * fillM),
-      Math.round(base.g * (1 - fillM) + 245 * fillM),
-      Math.round(base.b * (1 - fillM) + 235 * fillM),
-      255,
-    );
-    g.strokeColor = inactive ? new Color(130, 125, 118, 200) : ready ? base : new Color(base.r, base.g, base.b, 180);
-    g.lineWidth = ready ? 4 : 3;
+    // ── 底卡：圆角矩形 ──
+    g.fillColor = inactive
+      ? new Color(225, 220, 212, 255)
+      : new Color(Math.round(base.r * 0.08 + 248), Math.round(base.g * 0.08 + 244), Math.round(base.b * 0.08 + 235), 255);
+    g.strokeColor = inactive ? new Color(150, 145, 138, 200) : ready ? base : new Color(68, 62, 56, 255);
+    g.lineWidth = ready ? 3.5 : 2.5;
     g.roundRect(-w / 2, -h / 2, w, h, 16);
     g.fill();
     g.stroke();
 
-    // ── CD 小进度条（非就绪且有进度） ──
-    if (!ready && !inactive && cdPct > 0) {
-      const barPad = 6;
-      const barBH = 4;
-      const barW = w - barPad * 2;
-      const barY = -h / 2 + barBH + 4;
-      g.fillColor = new Color(200, 195, 186, 255);
-      g.rect(-barW / 2, barY - barBH / 2, barW, barBH);
-      g.fill();
-      g.fillColor = base;
-      g.rect(-barW / 2, barY - barBH / 2, barW * cdPct, barBH);
+    // ── 中心大纸团 ──
+    const cx = 0;
+    const cy = h * 0.1;
+    const r = Math.min(w * 0.30, h * 0.34);
+    const c = inactive ? new Color(190, 185, 180, 200) : new Color(
+      Math.round(base.r * 0.12 + 250 * 0.88),
+      Math.round(base.g * 0.12 + 247 * 0.88),
+      Math.round(base.b * 0.12 + 240 * 0.88),
+      250,
+    );
+    this.drawBigPaperPile(g, index, cx, cy, r, c, base, inactive);
+
+    // ── CD 暗部覆盖在纸团上 ──
+    if (!ready && !inactive) {
+      const cdAlpha = inactive ? 0 : 180;
+      g.fillColor = new Color(38, 34, 30, cdAlpha);
+      const clipBottom = cy - r;
+      const clipTop = cy + r;
+      const clipH = (clipTop - clipBottom) * cdPct;
+      g.rect(-w / 2, cy - r, w, clipH);
       g.fill();
     }
 
-    // ── 差异化纸团（左半） ──
-    const cx = -w * 0.28;
-    const cy = h * 0.02;
-    this.drawPaperPile(g, index, cx, cy, h, base, inactive);
+    // ── ×N 次数大字（叠在纸团上） ──
+    if (count) {
+      const ctLabel = bg.getChildByName('CountText')?.getComponent(Label)
+        ?? this.mkLabel(bg, 'CountText', 0, cy + r * 0.02, count, Math.min(28, Math.max(20, w * 0.20)), w, 34).getComponent(Label);
+      if (ctLabel) {
+        ctLabel.string = count;
+        ctLabel.color = inactive ? new Color(130, 125, 120, 200) : new Color(30, 26, 22, 230);
+        ctLabel.isBold = true;
+        ctLabel.horizontalAlign = 1;
+        ctLabel.verticalAlign = 1;
+        ctLabel.fontSize = Math.min(28, Math.max(20, w * 0.20));
+        const ctNode = ctLabel.node;
+        ctNode.setPosition(0, cy + r * 0.08, 0);
+        ctNode.getComponent(UITransform)!.setContentSize(w, 34);
+      }
+    }
 
-    // ── 状态图标 ──
+    // ── 一行状态：就绪 / 2.3s / 空 / 锁 ──
+    const statusNode = bg.getChildByName('StatusText');
+    if (!statusNode) {
+      const sn = this.mkLabel(bg, 'StatusText', 0, -h / 2 + 16, statusLine, 14, w - 10, 22);
+      const sl = sn.getComponent(Label);
+      if (sl) {
+        sl.horizontalAlign = 1;
+        sl.overflow = Label.Overflow.SHRINK;
+      }
+    }
+    const sl = bg.getChildByName('StatusText')?.getComponent(Label);
+    if (sl) {
+      sl.string = statusLine;
+      sl.color = ready ? base : inactive ? new Color(130, 125, 118, 200) : new Color(80, 74, 66, 255);
+      sl.fontSize = Math.min(16, Math.max(12, w * 0.11));
+    }
+
+    // ── 不可用图标 ──
     if (!unlocked) {
-      g.strokeColor = new Color(120, 114, 108, 200);
-      g.lineWidth = 3;
-      g.circle(cx, cy + 2, 10);
+      g.strokeColor = new Color(130, 124, 118, 200);
+      g.lineWidth = 2.5;
+      g.circle(cx, cy, r * 0.35);
       g.stroke();
-      g.rect(cx - 4, cy - 8, 8, 10);
+      g.rect(cx - r * 0.14, cy - r * 0.22, r * 0.28, r * 0.30);
       g.stroke();
     } else if (!hasUses) {
-      g.strokeColor = new Color(120, 114, 108, 180);
+      g.strokeColor = new Color(130, 124, 118, 180);
       g.lineWidth = 2;
-      g.moveTo(cx - 14, cy - 14); g.lineTo(cx + 14, cy + 14); g.stroke();
-      g.moveTo(cx + 14, cy - 14); g.lineTo(cx - 14, cy + 14); g.stroke();
+      g.moveTo(cx - r * 0.25, cy - r * 0.25);
+      g.lineTo(cx + r * 0.25, cy + r * 0.25);
+      g.stroke();
+      g.moveTo(cx + r * 0.25, cy - r * 0.25);
+      g.lineTo(cx - r * 0.25, cy + r * 0.25);
+      g.stroke();
     }
   }
 
-  /** 按道具类型画差异化纸团形状：0=圆纸团 1=皱纸团 2=咖啡团 3=便签。 */
-  private drawPaperPile(g: Graphics, index: number, cx: number, cy: number, h: number, base: Color, inactive: boolean): void {
-    const r = Math.min(19, h * 0.20);
-    const f = inactive
-      ? new Color(192, 188, 182, 200)
-      : new Color(Math.round(base.r * 0.16 + 248 * 0.84), Math.round(base.g * 0.16 + 246 * 0.84), Math.round(base.b * 0.16 + 238 * 0.84), 245);
-    const s = inactive ? new Color(100, 95, 90, 140) : new Color(42, 38, 34, 230);
+  /** 大纸团中心渲染：4 种不同形状，以 (cx, cy) 为中心，基准半径 r。 */
+  private drawBigPaperPile(g: Graphics, index: number, cx: number, cy: number, r: number, fillCol: Color, base: Color, inactive: boolean): void {
+    const s = inactive ? new Color(120, 114, 108, 140) : new Color(42, 38, 34, 230);
 
     if (index === 0) {
-      // 白纸团=加需求：三个圆纸团
-      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
-      g.circle(cx - r * 0.38, cy - r * 0.22, r * 0.82); g.fill(); g.stroke();
-      g.circle(cx + r * 0.32, cy - r * 0.10, r * 0.92); g.fill(); g.stroke();
-      g.circle(cx, cy + r * 0.48, r * 0.76); g.fill(); g.stroke();
-      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 200); g.lineWidth = 1.8;
-      g.moveTo(cx - r * 0.7, cy + r * 0.15); g.lineTo(cx - r * 0.15, cy + r * 0.55); g.lineTo(cx + r * 0.4, cy + r * 0.05); g.stroke();
+      // 白纸团=加需求：三个大圆纸团
+      g.fillColor = fillCol; g.strokeColor = s; g.lineWidth = 2.8;
+      g.circle(cx - r * 0.28, cy - r * 0.25, r * 0.58); g.fill(); g.stroke();
+      g.circle(cx + r * 0.22, cy - r * 0.08, r * 0.65); g.fill(); g.stroke();
+      g.circle(cx, cy + r * 0.32, r * 0.55); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 90 : 180); g.lineWidth = 1.5;
+      g.moveTo(cx - r * 0.5, cy + r * 0.05); g.lineTo(cx - r * 0.1, cy + r * 0.35); g.lineTo(cx + r * 0.3, cy); g.stroke();
     } else if (index === 1) {
-      // 紫纸团=改需求：六边形皱纸团
-      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
-      g.moveTo(cx - r * 0.8, cy - r * 0.3); g.lineTo(cx + r * 0.3, cy - r * 0.9); g.lineTo(cx + r * 0.9, cy - r * 0.1);
-      g.lineTo(cx + r * 0.7, cy + r * 0.6); g.lineTo(cx - r * 0.1, cy + r * 0.9); g.lineTo(cx - r * 0.9, cy + r * 0.15); g.close(); g.fill(); g.stroke();
-      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 200); g.lineWidth = 1.5;
-      g.moveTo(cx - r * 0.4, cy - r * 0.2); g.lineTo(cx + r * 0.2, cy + r * 0.3); g.stroke();
+      // 紫纸团=改需求：多边形皱纸团
+      g.fillColor = fillCol; g.strokeColor = s; g.lineWidth = 2.8;
+      g.moveTo(cx - r * 0.60, cy - r * 0.20); g.lineTo(cx + r * 0.20, cy - r * 0.65);
+      g.lineTo(cx + r * 0.65, cy - r * 0.05); g.lineTo(cx + r * 0.50, cy + r * 0.45);
+      g.lineTo(cx - r * 0.05, cy + r * 0.65); g.lineTo(cx - r * 0.65, cy + r * 0.10);
+      g.close(); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 90 : 180); g.lineWidth = 1.3;
+      g.moveTo(cx - r * 0.25, cy - r * 0.1); g.lineTo(cx + r * 0.15, cy + r * 0.2); g.stroke();
+      g.moveTo(cx + r * 0.3, cy - r * 0.3); g.lineTo(cx - r * 0.1, cy + r * 0.35); g.stroke();
     } else if (index === 2) {
-      // 咖啡团=甩锅：深色椭圆+咖啡渍点
-      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
-      g.circle(cx, cy - r * 0.1, r * 0.88); g.fill(); g.stroke();
-      g.circle(cx - r * 0.6, cy + r * 0.35, r * 0.62); g.fill(); g.stroke();
-      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 110 : 220); g.lineWidth = 1.5;
-      g.moveTo(cx - r * 0.5, cy - r * 0.3); g.lineTo(cx + r * 0.3, cy + r * 0.4); g.stroke();
-      g.fillColor = new Color(70, 48, 28, inactive ? 80 : 180);
-      g.circle(cx + r * 0.3, cy - r * 0.2, r * 0.12); g.fill();
-      g.circle(cx - r * 0.2, cy - r * 0.5, r * 0.08); g.fill();
+      // 咖啡团=甩锅：椭圆深色纸团+咖啡渍
+      g.fillColor = fillCol; g.strokeColor = s; g.lineWidth = 2.8;
+      g.circle(cx, cy - r * 0.05, r * 0.62); g.fill(); g.stroke();
+      g.circle(cx - r * 0.40, cy + r * 0.22, r * 0.44); g.fill(); g.stroke();
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 100 : 200); g.lineWidth = 1.5;
+      g.moveTo(cx - r * 0.35, cy - r * 0.2); g.lineTo(cx + r * 0.2, cy + r * 0.25); g.stroke();
+      g.fillColor = new Color(70, 48, 28, inactive ? 70 : 170);
+      g.circle(cx + r * 0.25, cy - r * 0.15, r * 0.10); g.fill();
+      g.circle(cx - r * 0.15, cy - r * 0.35, r * 0.07); g.fill();
+      // 咖啡杯沿印
+      g.strokeColor = new Color(110, 80, 55, inactive ? 60 : 150); g.lineWidth = 1.5;
+      g.circle(cx - r * 0.05, cy + r * 0.15, r * 0.22); g.stroke();
     } else {
-      // 粉便签=拍马屁：方形便签+折角+横线
-      g.fillColor = f; g.strokeColor = s; g.lineWidth = 2.5;
-      g.moveTo(cx - r * 0.85, cy - r * 0.70); g.lineTo(cx + r * 0.70, cy - r * 0.70); g.lineTo(cx + r * 0.70, cy + r * 0.50);
-      g.lineTo(cx + r * 0.20, cy + r * 0.50); g.lineTo(cx - r * 0.10, cy + r * 0.80); g.lineTo(cx - r * 0.85, cy + r * 0.80); g.close(); g.fill(); g.stroke();
-      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 90 : 200); g.lineWidth = 1.5;
-      g.moveTo(cx + r * 0.20, cy + r * 0.50); g.lineTo(cx - r * 0.10, cy + r * 0.80); g.stroke();
-      g.fillColor = f; g.strokeColor = s; g.lineWidth = 1.5;
-      g.moveTo(cx + r * 0.70, cy + r * 0.50); g.lineTo(cx + r * 0.20, cy + r * 0.50); g.lineTo(cx + r * 0.70, cy + r * 0.20); g.close(); g.fill(); g.stroke();
-      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 80 : 160); g.lineWidth = 1;
-      g.moveTo(cx - r * 0.5, cy + r * 0.1); g.lineTo(cx + r * 0.2, cy + r * 0.1); g.stroke();
-      g.moveTo(cx - r * 0.5, cy + r * 0.3); g.lineTo(cx + r * 0.1, cy + r * 0.3); g.stroke();
+      // 粉便签=拍马屁：方形便签+折角
+      g.fillColor = fillCol; g.strokeColor = s; g.lineWidth = 2.8;
+      g.moveTo(cx - r * 0.60, cy - r * 0.45); g.lineTo(cx + r * 0.45, cy - r * 0.45);
+      g.lineTo(cx + r * 0.45, cy + r * 0.35); g.lineTo(cx + r * 0.10, cy + r * 0.35);
+      g.lineTo(cx - r * 0.10, cy + r * 0.55); g.lineTo(cx - r * 0.60, cy + r * 0.55);
+      g.close(); g.fill(); g.stroke();
+      // 折角
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 80 : 180); g.lineWidth = 1.5;
+      g.moveTo(cx + r * 0.10, cy + r * 0.35); g.lineTo(cx - r * 0.10, cy + r * 0.55); g.stroke();
+      g.fillColor = fillCol; g.strokeColor = s; g.lineWidth = 1.5;
+      g.moveTo(cx + r * 0.45, cy + r * 0.35); g.lineTo(cx + r * 0.10, cy + r * 0.35);
+      g.lineTo(cx + r * 0.45, cy + r * 0.10); g.close(); g.fill(); g.stroke();
+      // 横线
+      g.strokeColor = new Color(base.r, base.g, base.b, inactive ? 70 : 140); g.lineWidth = 1;
+      g.moveTo(cx - r * 0.3, cy + r * 0.05); g.lineTo(cx + r * 0.15, cy + r * 0.05); g.stroke();
+      g.moveTo(cx - r * 0.3, cy + r * 0.20); g.lineTo(cx + r * 0.05, cy + r * 0.20); g.stroke();
     }
   }
 
@@ -2288,14 +2328,14 @@ export class GameRunner extends Component {
   }
 
   /** 底部独立操作区：4 个按钮固定贴屏幕最底部（标准手游拇指热区），并为微信 home indicator 留足安全距离。
-   *  按钮高度加高一档以容纳图标 + 两行文字（视觉规范§3 道具按钮 160×80 比例方向）。 */
+   *  按钮高度加高一档以容纳大纸团。 */
   private layoutPropButtons(viewWidth: number, viewHeight: number): void {
     if (!this.propButtons || this.propButtonNodes.length === 0) return;
     const horizontalPadding = Math.max(28, viewWidth * 0.04);
     const gap = Math.max(12, viewWidth * 0.016);
     const totalW = Math.min(viewWidth - horizontalPadding * 2, 920);
     const btnW = (totalW - gap * (this.propButtonNodes.length - 1)) / this.propButtonNodes.length;
-    const btnH = Math.min(132, Math.max(104, viewHeight * 0.075));
+    const btnH = Math.min(160, Math.max(130, viewHeight * 0.09));
     const startX = -totalW / 2 + btnW / 2;
     // 固定贴底部，留安全距离避开 home indicator
     const y = -viewHeight / 2 + Math.max(250, viewHeight * 0.16);
