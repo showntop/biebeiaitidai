@@ -1425,24 +1425,7 @@ export class GameRunner extends Component {
     if (this.levelLabel) this.levelLabel.string = this.compactHeader
       ? `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`
       : '别让AI替代你';
-    if (this.approvalLabel) this.approvalLabel.string = `认可度: ${Math.round(snap.approval)}`;
-    if (this.zoneLabel) {
-      const zoneText: Record<string, string> = {
-        hunt: '猎杀区',
-        good: '状态良好',
-        ok: '勉强',
-        danger: '危险!',
-      };
-      this.zoneLabel.string = zoneText[snap.zone] ?? snap.zone;
-      // 分区色对齐视觉规范§1.3：猎杀紫/良好绿/勉强黄/危险红
-      const colors: Record<string, Color> = {
-        hunt: new Color(100, 80, 255),
-        good: new Color(80, 180, 80),
-        ok: new Color(200, 200, 80),
-        danger: new Color(220, 60, 60),
-      };
-      this.zoneLabel.color = colors[snap.zone] ?? Color.WHITE;
-    }
+    // 认可度/分区已收敛到仪表盘面板，不再更新旧浮动 Label
     if (this.timerLabel) {
       const remain = Math.max(0, snap.duration - snap.elapsed);
       const resultText: Record<string, string> = {
@@ -1888,7 +1871,6 @@ export class GameRunner extends Component {
     const monitorPadding = Math.max(24, visSize.width * 0.035);
     const hudTopY = screenTopY - monitorPadding;
     const hudBottomY = screenBottomY + monitorPadding;
-    const statInsetX = Math.min(visSize.width * 0.34, screenWidthPx * 0.36);
 
     // 标题区遵守真实安全区。空间不足时退化成单行关卡标题，绝不被刘海/胶囊裁切。
     const safe = sys.getSafeAreaRect(false);
@@ -1905,12 +1887,19 @@ export class GameRunner extends Component {
       this.layoutSubtitle(visSize.width, screenTopY + Math.max(16, visSize.height * 0.02));
     }
     if (this.levelLabel) { this.levelLabel.color = new Color(55, 48, 42, 255); this.levelLabel.isBold = true; }
-    this.layoutMonitorMeta(screenTopY, screenWidthPx, visSize.width);
-    // 状态行上移到显示器内部安全带，避开角色天线与头部。
-    const statY = hudBottomY + Math.min(64, (screenTopY - screenBottomY) * 0.14);
-    this.layoutHudLabel(this.approvalLabel, -statInsetX, statY, screenWidthPx * 0.28, 36, 19);
-    this.layoutHudLabel(this.timerLabel, 0, statY, screenWidthPx * 0.22, 36, 19);
-    this.layoutHudLabel(this.zoneLabel, statInsetX, statY, screenWidthPx * 0.28, 36, 19);
+    this.drawMonitorFrame(screenTopY, screenBottomY, screenWidthPx, visSize.width);
+    // 认可度/分区信息已收敛到下方仪表盘面板；隐藏旧版浮动 Label
+    if (this.approvalLabel) this.approvalLabel.node.active = false;
+    if (this.zoneLabel) this.zoneLabel.node.active = false;
+    // 计时器移到标题栏右侧
+    if (this.timerLabel) {
+      const timerX = Math.min(visSize.width * 0.38, screenWidthPx * 0.40);
+      const timerY = this.compactHeader
+        ? screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)))
+        : screenTopY + Math.max(42, visSize.height * 0.05);
+      this.layoutHudLabel(this.timerLabel, timerX, timerY, screenWidthPx * 0.20, 36, 19);
+      this.timerLabel.node.active = true;
+    }
 
     // Belt（传送带卡槽）放在标题和状态行之间，卡牌始终限制在显示器内。
     if (this.beltNode) {
@@ -1958,27 +1947,53 @@ export class GameRunner extends Component {
     this.layoutTutorialHint();
   }
 
-  /** 显示器内只保留一条任务流说明，填补空屏但不重绘显示器美术。 */
-  private layoutMonitorMeta(screenTopY: number, screenWidth: number, viewWidth: number): void {
+  /** 显示器外壳：在屏幕区域外绘一圈深色边框 + 顶部「AI 任务监视器」标签。 */
+  private drawMonitorFrame(screenTopY: number, screenBottomY: number, screenWidth: number, viewWidth: number): void {
+    const screenH = screenTopY - screenBottomY;
     if (!this.monitorMetaNode) {
-      const node = new Node('MonitorMeta');
+      const node = new Node('MonitorFrame');
       node.layer = 1 << 25;
       node.parent = this.node;
       node.addComponent(UITransform);
-      const label = node.addComponent(Label);
-      label.string = 'AI 显示器 · 任务流';
-      label.color = new Color(220, 220, 214, 235);
-      label.horizontalAlign = 1;
-      label.verticalAlign = 1;
-      label.isBold = true;
-      label.overflow = Label.Overflow.SHRINK;
+      node.addComponent(Graphics);
       this.monitorMetaNode = node;
     }
+    const bezelPad = Math.max(12, viewWidth * 0.018);
+    const frameW = screenWidth + bezelPad * 2;
+    const frameH = screenH + bezelPad * 2;
+    const frameY = (screenTopY + screenBottomY) / 2;
+    const ut = this.monitorMetaNode.getComponent(UITransform)!;
+    ut.setContentSize(frameW + 20, frameH + 60);
+    this.monitorMetaNode.setPosition(0, frameY, 0);
+    const g = this.monitorMetaNode.getComponent(Graphics)!;
+    g.clear();
+    // 显示器外壳（左上局部坐标原点）
+    g.fillColor = new Color(55, 54, 50, 255);
+    g.strokeColor = new Color(28, 26, 24, 255);
+    g.lineWidth = 4;
+    g.roundRect(-frameW / 2, -frameH / 2, frameW, frameH, 18);
+    g.fill();
+    g.stroke();
+    // 屏幕区域（略亮，区分于外壳）
+    g.fillColor = new Color(34, 34, 31, 255);
+    g.roundRect(-screenWidth / 2, -screenH / 2, screenWidth, screenH, 8);
+    g.fill();
+    // 顶部绿色电源指示灯
+    g.fillColor = new Color(60, 220, 60, 220);
+    g.circle(frameW / 2 - 14, frameH / 2 + 18, 5);
+    g.fill();
+    // 顶部标签
+    if (!this.monitorMetaNode.getComponent(Label)) {
+      this.monitorMetaNode.addComponent(Label);
+    }
     const label = this.monitorMetaNode.getComponent(Label)!;
-    label.fontSize = Math.min(18, Math.max(14, viewWidth * 0.04));
+    label.string = 'AI 任务监视器';
+    label.fontSize = Math.min(16, Math.max(12, viewWidth * 0.033));
     label.lineHeight = label.fontSize + 4;
-    this.monitorMetaNode.getComponent(UITransform)!.setContentSize(Math.min(screenWidth * 0.6, 380), 28);
-    this.monitorMetaNode.setPosition(0, screenTopY - Math.max(24, viewWidth * 0.055), 0);
+    label.color = new Color(190, 188, 178, 230);
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+    label.isBold = true;
     this.monitorMetaNode.active = this.uiState === 'playing';
   }
 
@@ -2006,55 +2021,80 @@ export class GameRunner extends Component {
     this.subtitleNode.active = this.uiState === 'playing';
   }
 
-  /** 下方认可度与事件区：采用同一宽度、中心线和间距，和道具区形成清晰的三段式结构。 */
+  /** 统一仪表盘面板：认可度值 + 分区 + 四段色条 + 事件日志，单一圆角面板。 */
   private layoutLowerHud(viewWidth: number, viewHeight: number): void {
     if (!this.lowerHudNode) {
       const node = new Node('LowerHud');
       node.layer = 1 << 25;
       node.parent = this.node;
       node.addComponent(UITransform);
-      const graphics = node.addComponent(Graphics);
-      const value = this.makeHudLabel(node, 'ApprovalValue', '认可度 40', 18, new Color(45, 40, 35, 255));
+      node.addComponent(Graphics);
+      const value = this.makeHudLabel(node, 'ApprovalValue', '认可度 43', 26, new Color(38, 34, 30, 255));
       value.isBold = true;
-      const zone = this.makeHudLabel(node, 'Zone', '当前：良好', 16, new Color(45, 40, 35, 255));
+      const zone = this.makeHudLabel(node, 'Zone', '危险!', 20, new Color(220, 60, 60, 255));
       zone.isBold = true;
-      this.makeHudLabel(node, 'Scale', '0        18        49        69       100', 13, new Color(55, 50, 45, 255));
-      this.makeHudLabel(node, 'Event', this.lastEventText, 16, new Color(55, 50, 45, 255));
-      graphics.clear();
+      const evt = this.makeHudLabel(node, 'Event', '', 15, new Color(72, 62, 54, 255));
+      evt.overflow = Label.Overflow.CLAMP;
+      this.makeHudLabel(node, 'Scale', '猎杀          良好          勉强          危险', 12, new Color(110, 100, 90, 255));
       this.lowerHudNode = node;
     }
+
     const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + 150;
     const btnH = Math.min(132, Math.max(104, viewHeight * 0.075));
-    const barY = btnY + btnH / 2 + Math.max(160, viewHeight * 0.18);
-    const width = Math.min(viewWidth * 0.9, 720);
-    const barH = Math.max(34, Math.min(48, viewHeight * 0.046));
+    const panelY = btnY + btnH / 2 + Math.max(145, viewHeight * 0.17);
+    const panelW = Math.min(viewWidth * 0.88, 680);
+    const barH = Math.max(38, Math.min(50, viewHeight * 0.050));
+    const valueH = 40;
+    const eventH = 30;
+    const padTop = 18;
+    const padBot = 12;
+    const gap = 8;
+    const panelH = padTop + valueH + gap + barH + gap + 22 + gap + eventH + padBot;
+
     const node = this.lowerHudNode;
     node.setSiblingIndex(this.node.children.length - 1);
-    node.getComponent(UITransform)!.setContentSize(width, barH + 115);
-    node.setPosition(0, barY, 0);
+    node.getComponent(UITransform)!.setContentSize(panelW, panelH);
+    node.setPosition(0, panelY, 0);
+
     const g = node.getComponent(Graphics)!;
     g.clear();
-    // 认可度条
-    g.fillColor = new Color(252, 247, 238, 255);
+    // 面板底纸
+    g.fillColor = new Color(252, 246, 237, 255);
     g.strokeColor = new Color(38, 34, 30, 255);
     g.lineWidth = 3;
-    g.roundRect(-width / 2, -barH / 2, width, barH, 12);
-    g.fill(); g.stroke();
-    const colors = [new Color(111, 76, 225, 255), new Color(78, 174, 74, 255), new Color(245, 199, 52, 255), new Color(231, 61, 47, 255)];
-    const ratios = [.18, .31, .20, .31]; let x = -width / 2 + 4;
-    ratios.forEach((ratio, index) => { const w = (width - 8) * ratio; g.fillColor = colors[index]; g.rect(x, -barH / 2 + 4, w, barH - 8); g.fill(); x += w; });
-    // 事件条与进度条同宽、左边缘对齐。
-    const eventH = 38;
-    const eventY = barY - (barH / 2 + 70);
-    g.fillColor = new Color(252, 247, 238, 250);
+    g.roundRect(-panelW / 2, -panelH / 2, panelW, panelH, 16);
+    g.fill();
+    g.stroke();
+
+    // 认可度条（本地坐标，相对于面板中心）
+    const barW = panelW - 40;
+    const barCY = panelH / 2 - padTop - valueH - gap - barH / 2;
+    g.fillColor = new Color(240, 234, 224, 255);
     g.strokeColor = new Color(48, 43, 38, 255);
     g.lineWidth = 2;
-    g.roundRect(-width / 2, eventY - barY - eventH / 2, width, eventH, 9);
-    g.fill(); g.stroke();
-    this.placeHudLabel(node, 'ApprovalValue', -width * .27, barH + 16, 120, 28);
-    this.placeHudLabel(node, 'Zone', width * .27, barH + 16, 120, 28);
-    this.placeHudLabel(node, 'Scale', 0, -barH / 2 - 18, width, 24);
-    this.placeHudLabel(node, 'Event', 0, eventY - barY, width - 22, eventH - 4);
+    g.roundRect(-barW / 2, barCY - barH / 2, barW, barH, 10);
+    g.fill();
+    g.stroke();
+
+    // 四段分区色
+    const sc = [new Color(111, 76, 225, 255), new Color(78, 174, 74, 255), new Color(245, 199, 52, 255), new Color(231, 61, 47, 255)];
+    const sr = [0.18, 0.31, 0.20, 0.31];
+    let sx = -barW / 2 + 4;
+    const inset = 4;
+    for (let i = 0; i < 4; i++) {
+      const sw = (barW - 8) * sr[i];
+      g.fillColor = sc[i];
+      g.rect(sx, barCY - barH / 2 + inset, sw, barH - inset * 2);
+      g.fill();
+      sx += sw;
+    }
+
+    // 标签位置
+    this.placeHudLabel(node, 'ApprovalValue', -barW * 0.16, panelH / 2 - padTop - valueH / 2 + 2, panelW * 0.38, valueH);
+    this.placeHudLabel(node, 'Zone', barW * 0.24, panelH / 2 - padTop - valueH / 2 + 2, panelW * 0.22, valueH);
+    this.placeHudLabel(node, 'Scale', 0, barCY - barH / 2 - 12, barW, 20);
+    this.placeHudLabel(node, 'Event', 0, -panelH / 2 + padBot + eventH / 2, panelW - 28, eventH);
+
     node.active = this.uiState === 'playing';
   }
 
@@ -2079,11 +2119,18 @@ export class GameRunner extends Component {
   private updateLowerHud(approval: number, zone: string): void {
     if (!this.lowerHudNode) return;
     const value = this.lowerHudNode.getChildByName('ApprovalValue')?.getComponent(Label);
-    if (value) value.string = `认可度 ${approval}`;
+    if (value) value.string = `认可度 ← ${approval} →`;
     const label = this.lowerHudNode.getChildByName('Zone')?.getComponent(Label);
     if (label) {
-      const map: Record<string, string> = { hunt: '猎杀', good: '良好', ok: '勉强', danger: '危险' };
-      label.string = `当前：${map[zone] ?? zone}`;
+      const map: Record<string, string> = { hunt: '猎杀!', good: '良好', ok: '勉强', danger: '危险!' };
+      const zoneColor: Record<string, Color> = {
+        hunt: new Color(100, 80, 255),
+        good: new Color(80, 180, 80),
+        ok: new Color(200, 180, 60),
+        danger: new Color(220, 60, 60),
+      };
+      label.string = map[zone] ?? zone;
+      label.color = zoneColor[zone] ?? new Color(45, 40, 35);
     }
   }
 
