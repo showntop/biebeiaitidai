@@ -265,30 +265,26 @@ export class FxLayer {
   }
 
   /**
-   * 旧处理区卡片在队列换档前克隆一份，原地"被显示器吞没"消失。
+   * 旧处理区卡片在队列换档前克隆一份。
    *
-   * 不用 Mask/裁剪（反复实测在本项目引擎版本下不可靠，且会连带误裁其他卡槽）。
-   * 改用最基础可靠的 scale.x 收缩模拟裁剪效果：
-   *   - 卡片左边缘（vanishX，"吞没点"）全程固定不动
-   *   - scale.x 从 1 线性缩到 0，position.x 同步从 base.x 线性移到 vanishX
-   *   - 因为 position.x(t) = vanishX + cardW·scale.x(t)/2 是关于 t 的线性关系，
-   *     两个独立的线性 tween（相同 duration + easing）天然同步，无需逐帧手动计算。
-   *   - 视觉上呈现：完整(scale=1) → 2/3 → 1/2 → 1/3 → 完全消失(scale=0)，
-   *     整张卡（含 Graphics 背景 + 图标 + 权重文字，因为都是子节点跟随父节点缩放）
-   *     像被压扁吞进显示器一样收窄至消失。
+   * ghost 与其余卡片同属 Belt，从 slot0 中心向左线性移动一整张卡宽(cardW)，
+   * 被 Belt 自身的矩形 Mask 逐段裁切：完整 → 2/3 → 1/2 → 1/3 → 完全离开。
+   *
+   * 关键：ghost 的左边缘初始就贴在 Mask 左边界（slot0 左边缘 = -beltW/2），
+   * 所以移动过程中左半部分持续被 Mask 裁掉，右半部分逐渐缩窄直至完全消失。
+   * 之前只移动 gap(≈一格间距) 远不够滑出 Mask，所以看起来"碰到边缘就瞬间消失"。
    */
   private spawnOutgoingGhost(gap: number): void {
     const head = this.slots[0];
     const belt = head?.parent;
     if (!head?.isValid || !belt?.isValid) return;
-
     // 清理上一轮可能残留的 ghost（连续快速出队时防止重叠堆积）
     belt.children.forEach((c: Node) => {
       if (c.name === 'OutgoingCardGhost') c.destroy();
     });
 
     const base = this.slotBases[0]?.clone() ?? head.position.clone();
-    const duration = Math.max(0.32, this.getShiftDurationSec() * 0.9);
+    const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
     const headUt = head.getComponent(UITransform);
     const cardW = headUt?.width ?? Math.abs(gap);
     if (cardW <= 0) return;
@@ -297,20 +293,20 @@ export class FxLayer {
     ghost.name = 'OutgoingCardGhost';
     ghost.layer = head.layer;
     ghost.parent = belt;
-    ghost.setSiblingIndex(belt.children.length - 1); // 顶层，不被其他卡槽遮挡
+    ghost.setSiblingIndex(belt.children.length - 1);
     ghost.setPosition(base);
     ghost.setScale(new Vec3(1, 1, 1));
     const opacity = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
     opacity.opacity = 255;
 
-    const vanishX = base.x - cardW / 2; // 卡片左边缘 = "吞没点"，全程固定
-    Tween.stopAllByTarget(ghost);
+    // 向左移动一整张卡宽（不是 gap），让 ghost 完全滑出 Belt Mask 裁剪区。
+    // slot0 左边缘 = -beltW/2 = Mask 左边界，ghost 从 slot0 中心向左移动 cardW，
+    // 左边缘从 -beltW/2 移到 -beltW/2 - cardW，右边缘从 -beltW/2 + cardW 移到 -beltW/2，
+    // 全程被 Mask 逐段裁切：完整 → 2/3 → 1/2 → 1/3 → 完全离开。
+    const travel = cardW;
     tween(ghost)
-      .to(duration, { scale: new Vec3(0, 1, 1) }, { easing: 'linear' })
+      .to(duration, { position: new Vec3(base.x - travel, base.y, base.z) }, { easing: 'linear' })
       .call(() => { if (ghost.isValid) ghost.destroy(); })
-      .start();
-    tween(ghost)
-      .to(duration, { position: new Vec3(vanishX, base.y, base.z) }, { easing: 'linear' })
       .start();
   }
 

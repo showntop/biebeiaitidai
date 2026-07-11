@@ -987,10 +987,8 @@ export class GameRunner extends Component {
       const beltW = Math.min(screenWidthPx * 0.92, visSize.width * 0.9);
       const beltH = Math.max(92, Math.min((screenTopY - screenBottomY) * 0.42, 150));
       beltUt.setContentSize(beltW, beltH);
-      // 不用 Mask 裁剪（在本项目/引擎版本下不可靠，且 shift 动画中移动的卡片会被误裁）。
-      // 出队"被显示器吞没"效果改用 FxLayer.spawnOutgoingGhost 的逐帧收窄矩形实现，不依赖 Mask。
-      const oldMask = this.beltNode.getComponent(Mask);
-      if (oldMask) oldMask.destroy();
+      const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
+      mask.type = Mask.Type.RECT;
       this.layoutBeltSlots(beltW, beltH);
     }
 
