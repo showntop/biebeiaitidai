@@ -69,7 +69,6 @@ export class GameRunner extends Component {
   /** 显示器外的顶部/底部 HUD。保持显示器背景与内屏节点不被重绘。 */
   private subtitleNode: Node | null = null;
   private lowerHudNode: Node | null = null;
-  private monitorMetaNode: Node | null = null;
 
   private session!: Session;
   private game!: Game;
@@ -648,7 +647,6 @@ export class GameRunner extends Component {
     if (this.charNode) this.charNode.active = v;
     if (this.subtitleNode) this.subtitleNode.active = v;
     if (this.lowerHudNode) this.lowerHudNode.active = v;
-    if (this.monitorMetaNode) this.monitorMetaNode.active = v;
     if (this.tutorialRoot) this.tutorialRoot.active = v && this.shouldShowTutorial();
   }
 
@@ -1977,7 +1975,6 @@ export class GameRunner extends Component {
       this.levelLabel.fontSize = this.compactHeader ? 20 : 30;
       this.levelLabel.lineHeight = (this.compactHeader ? 20 : 30) + 8;
     }
-    this.drawMonitorFrame(screenTopY, screenBottomY, screenWidthPx, visSize.width);
     // 认可度/分区信息已收敛到下方仪表盘面板；隐藏旧版浮动 Label
     if (this.approvalLabel) this.approvalLabel.node.active = false;
     if (this.zoneLabel) this.zoneLabel.node.active = false;
@@ -2038,51 +2035,6 @@ export class GameRunner extends Component {
     this.layoutLowerHud(visSize.width, visSize.height);
     this.layoutTutorialHint();
   }
-
-  /** 显示器外壳：在屏幕区域外绘一圈深色边框 + 顶部「AI 任务监视器」标签。 */
-  private drawMonitorFrame(screenTopY: number, screenBottomY: number, screenWidth: number, viewWidth: number): void {
-    const screenH = screenTopY - screenBottomY;
-    if (!this.monitorMetaNode) {
-      const node = new Node('MonitorFrame');
-      node.layer = 1 << 25;
-      node.parent = this.node;
-      node.addComponent(UITransform);
-      node.addComponent(Graphics);
-      this.monitorMetaNode = node;
-    }
-    const bezelPad = Math.max(12, viewWidth * 0.018);
-    const frameW = screenWidth + bezelPad * 2;
-    const frameH = screenH + bezelPad * 2;
-    const frameY = (screenTopY + screenBottomY) / 2;
-    const ut = this.monitorMetaNode.getComponent(UITransform)!;
-    ut.setContentSize(frameW + 20, frameH + 60);
-    this.monitorMetaNode.setPosition(0, frameY, 0);
-    const g = this.monitorMetaNode.getComponent(Graphics)!;
-    g.clear();
-    // 只画边框，不填充内部——否则盖住传送带卡片
-    g.strokeColor = new Color(28, 26, 24, 255);
-    g.lineWidth = 4;
-    g.roundRect(-frameW / 2, -frameH / 2, frameW, frameH, 16);
-    g.stroke();
-    // 顶部绿色电源指示灯
-    g.fillColor = new Color(60, 220, 60, 220);
-    g.circle(frameW / 2 - 14, frameH / 2 + 18, 5);
-    g.fill();
-    // 顶部标签
-    if (!this.monitorMetaNode.getComponent(Label)) {
-      this.monitorMetaNode.addComponent(Label);
-    }
-    const label = this.monitorMetaNode.getComponent(Label)!;
-    label.string = 'AI 任务监视器';
-    label.fontSize = Math.min(16, Math.max(12, viewWidth * 0.033));
-    label.lineHeight = label.fontSize + 4;
-    label.color = new Color(190, 188, 178, 230);
-    label.horizontalAlign = 1;
-    label.verticalAlign = 1;
-    label.isBold = true;
-    this.monitorMetaNode.active = this.uiState === 'playing';
-  }
-
   /** 副标题固定在主标题与显示器之间，不进入显示器内屏。 */
   private layoutSubtitle(viewWidth: number, y: number): void {
     if (!this.subtitleNode) {
