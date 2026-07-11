@@ -1963,13 +1963,13 @@ export class GameRunner extends Component {
     const hudTopY = screenTopY - monitorPadding;
     const hudBottomY = screenBottomY + monitorPadding;
 
-    // 标题区：紧贴安全区下方，确保不会被刘海/胶囊裁切
+    // 标题区：放在显示器上方 50px 处的墙面区
     const safe = sys.getSafeAreaRect(false);
     const safeTopY = safe.y + safe.height - visSize.height / 2;
     const headerGap = safeTopY - screenTopY;
     this.compactHeader = headerGap < Math.max(66, visSize.height * 0.078);
-    // 标题放在安全区下 12px，倒计时同行
-    const titleY = safeTopY - Math.max(24, visSize.height * 0.03);
+    // 标题 Y 紧贴安全区下方 + 副标题在标题下方（标题在视觉上更高的位置）
+    const titleY = safeTopY - Math.max(40, visSize.height * 0.045);
 
     // 隐藏场景旧节点，改用代码动态创建（避免编辑器绑定问题）
     if (this.levelLabel) this.levelLabel.node.active = false;
@@ -1983,6 +1983,7 @@ export class GameRunner extends Component {
       this.gameTitleNode.layer = 1 << 25;
       this.gameTitleNode.parent = this.node;
       this.gameTitleNode.addComponent(UITransform);
+      this.gameTitleNode.addComponent(Graphics);
       this.gameTitleNode.addComponent(Label);
     }
     const titleLabel = this.gameTitleNode.getComponent(Label)!;
@@ -1990,8 +1991,18 @@ export class GameRunner extends Component {
     titleLabel.verticalAlign = 1;
     titleLabel.overflow = Label.Overflow.SHRINK;
     titleLabel.isBold = true;
-    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 520), 44);
+    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.85, 580), 48);
     this.gameTitleNode.setPosition(0, titleY, 0);
+    // 背景纸片让标题在墙面上更突出
+    const tg = this.gameTitleNode.getComponent(Graphics)!;
+    tg.clear();
+    tg.fillColor = new Color(255, 247, 232, 230);
+    tg.strokeColor = new Color(38, 34, 30, 200);
+    tg.lineWidth = 2;
+    const tw = Math.min(visSize.width * 0.85, 580);
+    tg.roundRect(-tw / 2, -24, tw, 48, 14);
+    tg.fill();
+    tg.stroke();
 
     if (!this.compactHeader) this.layoutSubtitle(visSize.width, titleY - Math.max(30, visSize.height * 0.035));
 
