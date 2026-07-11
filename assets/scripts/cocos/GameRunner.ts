@@ -986,18 +986,11 @@ export class GameRunner extends Component {
       // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度
       const beltW = Math.min(screenWidthPx * 0.92, visSize.width * 0.9);
       const beltH = Math.max(92, Math.min((screenTopY - screenBottomY) * 0.42, 150));
-      // Mask 裁剪矩形：左边缘 = slot0 左边缘，右边缘 = slotN 右边缘 + 一整个"卡片间距"
-      // （shift/入队动画中新卡从右侧移入的位移量 = slotW + gap，必须留够这个余量，
-      //  否则新卡移动过程中还没到位就被裁掉一块——这正是之前"入队改坏"的根因）。
-      // anchorX = beltW / (2 * maskW) 让 rect 左边缘精确 = -beltW/2 = slot0 左边缘
-      const n = this.slotNodes.length || 1;
-      const slotGap = 8;
-      const slotPitch = (beltW - slotGap * (n - 1)) / n + slotGap; // 单格宽度 + 间隙 = 移动一档的距离
-      const maskW = beltW + slotPitch;
-      beltUt.setContentSize(maskW, beltH);
-      beltUt.setAnchorPoint(beltW / (2 * maskW), 0.5);
-      const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
-      mask.type = Mask.Type.RECT;
+      beltUt.setContentSize(beltW, beltH);
+      // 不用 Mask 裁剪（在本项目/引擎版本下不可靠，且 shift 动画中移动的卡片会被误裁）。
+      // 出队"被显示器吞没"效果改用 FxLayer.spawnOutgoingGhost 的逐帧收窄矩形实现，不依赖 Mask。
+      const oldMask = this.beltNode.getComponent(Mask);
+      if (oldMask) oldMask.destroy();
       this.layoutBeltSlots(beltW, beltH);
     }
 
