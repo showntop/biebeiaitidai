@@ -72,9 +72,18 @@ export class FxLayer {
       if (first?.isValid && last?.isValid && firstUt && lastUt) {
         const left = first.position.x - firstUt.width / 2;
         const right = last.position.x + lastUt.width / 2;
+        const w = right - left;
+        const h = Math.max(firstUt.height, lastUt.height) + 4;
         const ut = this.exitClip.getComponent(UITransform);
-        if (ut) ut.setContentSize(right - left, Math.max(firstUt.height, lastUt.height) + 4);
+        if (ut) ut.setContentSize(w, h);
         this.exitClip.setPosition((left + right) / 2, first.position.y, 0);
+        // 重绘 Graphics 模板矩形
+        const g = this.exitClip.getComponent(Graphics);
+        if (g) {
+          g.clear();
+          g.rect(-w / 2, -h / 2, w, h);
+          g.fill();
+        }
       }
     }
   }
@@ -329,25 +338,36 @@ export class FxLayer {
 
     const clip = new Node('ExitClip');
     clip.layer = UI_2D;
-    clip.parent = belt;
-    clip.setSiblingIndex(belt.children.length - 1); // 顶层，ghost 不被其他节点遮挡
 
     const first = this.slots[0];
     const last = this.slots[this.slots.length - 1];
     const firstUt = first?.getComponent(UITransform);
     const lastUt = last?.getComponent(UITransform);
+    let w = 200, h = 120, cx = 0, cy = 0;
     if (first?.isValid && last?.isValid && firstUt && lastUt) {
       const left = first.position.x - firstUt.width / 2;
       const right = last.position.x + lastUt.width / 2;
-      const w = right - left;
-      const h = Math.max(firstUt.height, lastUt.height) + 4;
-      const ut = clip.addComponent(UITransform);
-      ut.setContentSize(w, h);
-      clip.setPosition((left + right) / 2, first.position.y, 0);
+      w = right - left;
+      h = Math.max(firstUt.height, lastUt.height) + 4;
+      cx = (left + right) / 2;
+      cy = first.position.y;
     }
 
+    const ut = clip.addComponent(UITransform);
+    ut.setContentSize(w, h);
+    clip.setPosition(cx, cy, 0);
+
+    // GRAPHICS_STENCIL：Graphics 画矩形 = 可见区域；矩形外被裁剪
+    // 比 RECT 更可靠（RECT 动态创建时模板缓冲可能不初始化）
+    const g = clip.addComponent(Graphics);
+    g.rect(-w / 2, -h / 2, w, h);
+    g.fill();
+
     const mask = clip.addComponent(Mask);
-    mask.type = Mask.Type.RECT;
+    mask.type = Mask.Type.GRAPHICS_STENCIL;
+
+    clip.parent = belt;
+    clip.setSiblingIndex(belt.children.length - 1); // 顶层，ghost 不被其他节点遮挡
 
     this.exitClip = clip;
     return clip;
