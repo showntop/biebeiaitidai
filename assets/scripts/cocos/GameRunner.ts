@@ -66,6 +66,9 @@ export class GameRunner extends Component {
   private bgFillNode: Node | null = null;
   private bgNode: Node | null = null;
   private charNode: Node | null = null;
+  /** 动态创建的游戏标题和倒计时（不依赖场景绑定节点） */
+  private gameTitleNode: Node | null = null;
+  private gameTimerNode: Node | null = null;
   /** 显示器外的顶部/底部 HUD。保持显示器背景与内屏节点不被重绘。 */
   private subtitleNode: Node | null = null;
   private lowerHudNode: Node | null = null;
@@ -637,11 +640,9 @@ export class GameRunner extends Component {
     if (this.beltNode) this.beltNode.active = v;
     if (this.propButtons) this.propButtons.active = v;
     if (this.scanIndicator) this.scanIndicator.active = v;
-    if (this.approvalLabel) this.approvalLabel.node.active = v;
-    if (this.zoneLabel) this.zoneLabel.node.active = v;
-    if (this.timerLabel) this.timerLabel.node.active = v;
-    if (this.levelLabel) this.levelLabel.node.active = v;
-    // 美术资源（背景/角色）跟随游戏 UI 一起隐藏，避免选关页/结算页时穿透显示
+    if (this.gameTitleNode) this.gameTitleNode.active = v;
+    if (this.gameTimerNode) this.gameTimerNode.active = v;
+    // 美术资源（背景/角色）跟随游戏 UI 一起隐藏
     if (this.bgFillNode) this.bgFillNode.active = v;
     if (this.bgNode) this.bgNode.active = v;
     if (this.charNode) this.charNode.active = v;
@@ -1503,21 +1504,29 @@ export class GameRunner extends Component {
   private render(): void {
     const snap = this.game.getSnapshot();
 
-    if (this.levelLabel) this.levelLabel.string = this.compactHeader
-      ? `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`
-      : '别让AI替代你';
-    // 认可度/分区已收敛到仪表盘面板，不再更新旧浮动 Label
-    if (this.timerLabel) {
-      this.timerLabel.color = new Color(240, 235, 225, 255);
+    // ── 标题：动态节点 ──
+    if (this.gameTitleNode) {
+      const tl = this.gameTitleNode.getComponent(Label)!;
+      tl.string = this.compactHeader
+        ? `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`
+        : '别让AI替代你';
+      tl.fontSize = this.compactHeader ? 22 : 32;
+      tl.lineHeight = tl.fontSize + 8;
+      tl.color = new Color(38, 32, 26, 255);
+      tl.isBold = true;
+    }
+    // ── 计时器：动态节点，黑字加粗 ──
+    if (this.gameTimerNode) {
+      const tl = this.gameTimerNode.getComponent(Label)!;
       const remain = Math.max(0, snap.duration - snap.elapsed);
-      const resultText: Record<string, string> = {
-        'win-survive': '生存通关',
-        'win-hunt': '猎杀通关',
-        lose: '被淘汰',
-      };
-      this.timerLabel.string = this.game.over
-        ? `${remain.toFixed(1)}s · ${resultText[this.game.result] ?? this.game.result}`
+      const resultText: Record<string, string> = { 'win-survive': '通关', 'win-hunt': '猎杀', lose: '淘汰' };
+      tl.string = this.game.over
+        ? `${remain.toFixed(1)}s ${resultText[this.game.result] ?? ''}`
         : `${remain.toFixed(1)}s`;
+      tl.fontSize = this.compactHeader ? 22 : 34;
+      tl.lineHeight = tl.fontSize + 4;
+      tl.color = new Color(40, 34, 28, 255);
+      tl.isBold = true;
     }
     this.updateLowerHud(Math.round(snap.approval), snap.zone);
 
@@ -1954,41 +1963,56 @@ export class GameRunner extends Component {
     const hudTopY = screenTopY - monitorPadding;
     const hudBottomY = screenBottomY + monitorPadding;
 
-    // 标题区遵守真实安全区。空间不足时退化成单行关卡标题，绝不被刘海/胶囊裁切。
+    // 标题区遵守真实安全区。
     const safe = sys.getSafeAreaRect(false);
     const safeTopY = safe.y + safe.height - visSize.height / 2;
     const headerGap = safeTopY - screenTopY;
     this.compactHeader = headerGap < Math.max(66, visSize.height * 0.078);
-    if (this.compactHeader) {
-      const compactY = screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)));
-      this.layoutHudLabel(this.levelLabel, 0, compactY, Math.min(visSize.width * 0.62, 420), 28, 17);
-      if (this.subtitleNode) this.subtitleNode.active = false;
-    } else {
-      const mainTitleY = screenTopY + Math.max(42, visSize.height * 0.05);
-      this.layoutHudLabel(this.levelLabel, 0, mainTitleY, Math.min(visSize.width * 0.72, 520), 36, 28);
-      this.layoutSubtitle(visSize.width, screenTopY + Math.max(16, visSize.height * 0.02));
-    }
-    if (this.levelLabel) {
-      this.levelLabel.color = new Color(45, 38, 32, 255);
-      this.levelLabel.isBold = true;
-      this.levelLabel.node.active = true;
-      this.levelLabel.fontSize = this.compactHeader ? 20 : 30;
-      this.levelLabel.lineHeight = (this.compactHeader ? 20 : 30) + 8;
-    }
-    // 认可度/分区信息已收敛到下方仪表盘面板；隐藏旧版浮动 Label
+    const titleY = this.compactHeader
+      ? screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)))
+      : screenTopY + Math.max(42, visSize.height * 0.05);
+
+    // 隐藏场景旧节点，改用代码动态创建（避免编辑器绑定问题）
+    if (this.levelLabel) this.levelLabel.node.active = false;
+    if (this.timerLabel) this.timerLabel.node.active = false;
     if (this.approvalLabel) this.approvalLabel.node.active = false;
     if (this.zoneLabel) this.zoneLabel.node.active = false;
-    // 计时器移到标题栏右侧，字号比标题略大加粗，亮白色
-    if (this.timerLabel) {
-      const timerX = Math.min(visSize.width * 0.38, screenWidthPx * 0.40);
-      const timerY = this.compactHeader
-        ? screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)))
-        : screenTopY + Math.max(42, visSize.height * 0.05);
-      this.layoutHudLabel(this.timerLabel, timerX, timerY, screenWidthPx * 0.30, 44, 28);
-      this.timerLabel.node.active = true;
-      this.timerLabel.color = new Color(255, 252, 240, 255);
-      this.timerLabel.isBold = true;
+
+    // ── 动态标题 ──
+    if (!this.gameTitleNode) {
+      this.gameTitleNode = new Node('GameTitle');
+      this.gameTitleNode.layer = 1 << 25;
+      this.gameTitleNode.parent = this.node;
+      this.gameTitleNode.addComponent(UITransform);
+      this.gameTitleNode.addComponent(Label);
     }
+    const titleLabel = this.gameTitleNode.getComponent(Label)!;
+    titleLabel.horizontalAlign = 1; // CENTER
+    titleLabel.verticalAlign = 1;
+    titleLabel.overflow = Label.Overflow.SHRINK;
+    titleLabel.isBold = true;
+    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 520), 44);
+    this.gameTitleNode.setPosition(0, titleY, 0);
+
+    if (!this.compactHeader) this.layoutSubtitle(visSize.width, screenTopY + Math.max(16, visSize.height * 0.02));
+
+    // ── 动态计时器 ──
+    if (!this.gameTimerNode) {
+      this.gameTimerNode = new Node('GameTimer');
+      this.gameTimerNode.layer = 1 << 25;
+      this.gameTimerNode.parent = this.node;
+      this.gameTimerNode.addComponent(UITransform);
+      this.gameTimerNode.addComponent(Label);
+    }
+    const timerLabel = this.gameTimerNode.getComponent(Label)!;
+    timerLabel.horizontalAlign = 2; // RIGHT
+    timerLabel.verticalAlign = 1;
+    timerLabel.overflow = Label.Overflow.SHRINK;
+    timerLabel.isBold = true;
+    const timerW = Math.min(visSize.width * 0.28, 240);
+    const timerX = Math.min(visSize.width * 0.36, screenWidthPx * 0.38);
+    this.gameTimerNode.getComponent(UITransform)!.setContentSize(timerW, 44);
+    this.gameTimerNode.setPosition(timerX, titleY, 0);
 
     // Belt（传送带卡槽）放在标题和状态行之间，卡牌始终限制在显示器内。
     if (this.beltNode) {
