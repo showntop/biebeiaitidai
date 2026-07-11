@@ -1,4 +1,4 @@
-import { tween, Tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics, instantiate } from 'cc';
+import { tween, Tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics } from 'cc';
 import type { EventBus } from '../core/EventBus';
 import type { GameEvents, HitQuality, ApprovalZone } from '../core/types';
 
@@ -46,7 +46,7 @@ export class FxLayer {
     private root: Node,
     private slots: Node[],
     private approvalLabel: Label | null,
-    private getShiftDurationSec: () => number = () => 0.46,
+    private getSlotVisual: (slot: number) => Node | null = () => null,
   ) {
     this.rootBase = root.position.clone();
     if (approvalLabel && approvalLabel.isValid) this.approvalBaseColor = approvalLabel.color.clone();
@@ -94,7 +94,6 @@ export class FxLayer {
     this.on('PropUnavailable', () => this.fxMiss());
     this.on('PropCanceled', () => this.fxCancel());
     this.on('AIHit', ({ quality }) => this.fxAIHit(quality));
-    this.on('CardShifted', ({ outgoing }) => this.fxConveyorShift(!!outgoing));
   }
 
   private on<K extends keyof GameEvents>(name: K, fn: (p: GameEvents[K]) => void): void {
@@ -104,7 +103,7 @@ export class FxLayer {
   /* ---------- 道具命中 ---------- */
 
   private fxCardHit(slot: number, quality: HitQuality): void {
-    const node = this.slots[slot];
+    const node = this.getSlotVisual(slot) ?? this.slots[slot];
     if (!node || !node.isValid) return;
 
     const punch = quality === 'perfect' ? 1.5 : 1.25;
@@ -244,81 +243,6 @@ export class FxLayer {
     this.floatText(perfect ? '完美拍中!' : '拍中!', 0, 40, new Color(255, 200, 220), 0.8);
   }
 
-  /** 传送带主视觉：整排卡片线性左移。
-   *  关键：先设 opacity=0 再跳到右边，避免"跳位+换内容"在同一帧被看到（突然刷新）。
-   *  然后边滑边淡入，给"从右向左连续移动"的感觉。 */
-  private fxConveyorShift(hasOutgoingCard: boolean): void {
-    if (this.slots.length < 2) return;
-    const gap = (this.slotBases[1]?.x ?? this.slots[1].position.x) - (this.slotBases[0]?.x ?? this.slots[0].position.x);
-    if (!Number.isFinite(gap) || Math.abs(gap) < 1) return;
-    const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
-    if (hasOutgoingCard) this.spawnOutgoingGhost(gap);
-    this.slots.forEach((slot, index) => {
-      if (!slot?.isValid) return;
-      Tween.stopAllByTarget(slot);
-      const base = this.slotBases[index]?.clone() ?? slot.position.clone();
-      const opacity = slot.getComponent(UIOpacity) ?? slot.addComponent(UIOpacity);
-      Tween.stopAllByTarget(opacity);
-      // 先设不可见，再跳位 — render() 会在不可见状态下更新内容，用户看不到"刷新"
-      opacity.opacity = 0;
-      slot.setPosition(base.x + gap, base.y, base.z);
-      slot.setScale(new Vec3(1, 1, 1));
-      // 滑动 + 淡入（前 30% 时间淡入，后面完全可见）
-      tween(opacity).to(duration * 0.3, { opacity: 255 }).start();
-      tween(slot).to(duration, { position: base }, { easing: 'linear' }).start();
-    });
-  }
-
-  /**
-   * 旧处理区卡片在队列换档前克隆一份，向左滑出同时逐渐淡出。
-   *
-   * 不依赖 Belt Mask（3.8 对动态 instantiate 子节点不裁剪）。
-   * 用单个 tween + onUpdate 回调同步控制 position 和 opacity：
-   *   - ghost 向左移动一整张卡宽
-   *   - opacity 从 255 线性降到 0（跟移动同步）
-   *   - 视觉上：卡片向左滑出，同时逐渐变透明，完整→3/4可见→1/2→1/4→消失
-   */
-  private spawnOutgoingGhost(gap: number): void {
-    const head = this.slots[0];
-    const belt = head?.parent;
-    if (!head?.isValid || !belt?.isValid) return;
-    // 清理上一轮残留
-    belt.children.forEach((c: Node) => {
-      if (c.name === 'OutgoingCardGhost') c.destroy();
-    });
-
-    const base = this.slotBases[0]?.clone() ?? head.position.clone();
-    const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
-    const headUt = head.getComponent(UITransform);
-    const cardW = headUt?.width ?? Math.abs(gap);
-    if (cardW <= 0) return;
-
-    const ghost = instantiate(head);
-    ghost.name = 'OutgoingCardGhost';
-    ghost.layer = head.layer;
-    ghost.parent = belt;
-    ghost.setSiblingIndex(belt.children.length - 1);
-    ghost.setPosition(base);
-    ghost.setScale(new Vec3(1, 1, 1));
-    const op = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
-    op.opacity = 255;
-
-    // 单个 tween + onUpdate：position 和 opacity 同步，不会互相干扰
-    Tween.stopAllByTarget(ghost);
-    const endX = base.x - cardW;
-    tween(ghost)
-      .to(duration, { position: new Vec3(endX, base.y, base.z) }, {
-        easing: 'linear',
-        onUpdate: (target: Node, ratio: number) => {
-          // ratio: 0→1，opacity 从 255 线性降到 0
-          const o = target.getComponent(UIOpacity);
-          if (o) o.opacity = Math.max(0, Math.round(255 * (1 - ratio)));
-        },
-      })
-      .call(() => { if (ghost.isValid) ghost.destroy(); })
-      .start();
-  }
-
   private flyResolvedCard(text: string, color: Color, target: Vec3): void {
     const startNode = this.slots[0] ?? this.approvalLabel?.node;
     if (!startNode?.isValid) return;
@@ -334,7 +258,13 @@ export class FxLayer {
     g.roundRect(-33, -23, 66, 46, 10);
     g.fill();
     g.stroke();
-    const label = node.addComponent(Label);
+    // Graphics 和 Label 都是可渲染组件，Cocos 不允许挂在同一节点。
+    const labelNode = new Node('ResolvedCardValue');
+    labelNode.layer = UI_2D;
+    labelNode.parent = node;
+    labelNode.addComponent(UITransform).setContentSize(66, 46);
+    labelNode.setPosition(0, 0, 0);
+    const label = labelNode.addComponent(Label);
     label.string = text;
     label.fontSize = 24;
     label.lineHeight = 28;

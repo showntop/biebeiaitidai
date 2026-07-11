@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, tween, Tween, Vec3, input, Input, EventKeyboard, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -12,6 +12,14 @@ import type { Card, PropType } from '../core/types';
 import { FxLayer } from './FxLayer';
 
 const { ccclass, property } = _decorator;
+
+interface CardVisual {
+  node: Node;
+  slotIndex: number;
+  signature: string;
+  moving: boolean;
+  pendingCard: Card | null;
+}
 
 /**
  * Cocos 表现层薄壳 —— 持有 core.Session + core.Game，只做：驱动 tick、转发输入、按 Session 状态渲染。
@@ -58,6 +66,11 @@ export class GameRunner extends Component {
   private slotNodes: Node[] = [];
   /** 每个卡槽的 Graphics 背景节点（代码画圆角矩形底）。创建/定位见 ensureSlotBackgrounds / layoutBeltSlots。 */
   private slotBackgrounds: Node[] = [];
+  /**
+   * 卡片视觉按 card.id 持有，不再按槽位复用。
+   * 这是保证“移动中内容不换卡”和出口物理裁切的核心。
+   */
+  private cardVisuals = new Map<number, CardVisual>();
   private propButtonNodes: Node[] = [];
   private propButtonBackgrounds: Node[] = [];
   private propIconSprites: (Sprite | null)[] = [];
@@ -66,8 +79,6 @@ export class GameRunner extends Component {
   private uiState: 'select' | 'playing' | 'result' = 'select';
   private levelSelectRoot: Node | null = null;
   private fx: FxLayer | null = null;
-  /** CardShifted 那一帧跳过 renderSlot/drawCardBackground，避免"跳位+换内容"在同一帧被看到 */
-  private shiftFrameSkip = false;
   private eventUnsubs: Array<() => void> = [];
   private lastEventText = '事件 · 等待下一条任务';
   private compactHeader = false;
@@ -212,6 +223,7 @@ export class GameRunner extends Component {
     input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
     this.fx?.dispose();
+    this.resetCardVisuals();
     this.clearEventFeed();
   }
 
@@ -258,6 +270,7 @@ export class GameRunner extends Component {
 
   /** 用 Session 当前关开新一局。 */
   private startGame(): void {
+    this.resetCardVisuals();
     const idx = this.session.currentIndex;
     const seed = (Date.now() % 100000) ^ ((idx + 1) * 2654435761); // 每关/每次尝试不同
     this.game = new Game(getLevel(idx), new SeededRng(seed >>> 0), this.session.allowedPropsFor(idx));
@@ -276,7 +289,7 @@ export class GameRunner extends Component {
       this.node,
       this.slotNodes,
       this.approvalLabel,
-      () => BalanceConfig.phases[this.game.phase].slotPeriodSec,
+      (slot) => this.visualNodeAtSlot(slot),
     );
     this.bindEventFeed();
     // 视觉层：挂背景和（有素材就挂，没有不影响 Label 兜底跑）
@@ -293,7 +306,6 @@ export class GameRunner extends Component {
       this.game.bus.on('PropUnavailable', ({ prop }) => this.setEventText(`${propName(prop)}暂时无法使用`)),
       this.game.bus.on('BossIncoming', () => this.setEventText('Boss 临检正在接近')),
       this.game.bus.on('KissUpFreeze', ({ durationSec }) => this.setEventText(`拍马屁生效 · 传送带暂停 ${durationSec.toFixed(1)}s`)),
-      this.game.bus.on('CardShifted', () => { this.shiftFrameSkip = true; }),
     );
   }
 
@@ -712,17 +724,12 @@ export class GameRunner extends Component {
 
     const cards = this.game.conveyor.cards;
     this.ensureSlotBackgrounds();
-    // CardShifted 那一帧跳过内容更新（图标/文字/背景色），因为 fxConveyorShift
-    // 正在把 slot 跳到右边 + opacity=0，内容更新在下一帧（opacity 淡入中）执行更平滑
-    if (this.shiftFrameSkip) {
-      this.shiftFrameSkip = false;
-    } else {
-      for (let i = 0; i < this.slotNodes.length; i++) {
-        const c = cards[i] ?? null;
-        this.drawCardBackground(i, c);
-        this.renderSlot(this.slotNodes[i], c, i);
-      }
+    // 槽位只作为固定坐标和底层占位；真实卡片由 cardVisuals 按 id 独立渲染。
+    for (let i = 0; i < this.slotNodes.length; i++) {
+      this.drawCardBackground(i, null);
+      this.renderSlot(this.slotNodes[i], null, i);
     }
+    this.syncCardVisuals(cards);
 
     if (this.scanIndicator) {
       const charging = this.game.prop.chargingProp !== null;
@@ -763,27 +770,40 @@ export class GameRunner extends Component {
   private drawCardBackground(slotIndex: number, card: Card | null): void {
     const bg = this.slotBackgrounds[slotIndex];
     if (!bg) return;
+    this.drawCardBackgroundNode(bg, card);
+  }
+
+  /** 同一绘制逻辑同时服务固定占位槽和按 id 生成的真实卡片节点。 */
+  private drawCardBackgroundNode(bg: Node, card: Card | null): void {
     const ut = bg.getComponent(UITransform);
     const g = bg.getComponent(Graphics);
     if (!ut || !g) return;
     const w = ut.width;
     const h = ut.height;
     if (w <= 0 || h <= 0) return;
-    const base = card
-      ? (GameRunner.CARD_BORDER_COLORS[card.category] ?? GameRunner.CARD_BORDER_COLORS.routine)
-      : (GameRunner.QUEUE_PREVIEW_COLORS[slotIndex % GameRunner.QUEUE_PREVIEW_COLORS.length] ?? new Color(120, 120, 120));
-    const muted = !card;
-    const mix = muted ? 0.76 : 0.66;
+    if (!card) {
+      // 空槽仅保留中性轮廓，避免入场卡与“预览图标”叠在一起产生内容变形。
+      g.clear();
+      g.fillColor = new Color(245, 241, 232, 28);
+      g.strokeColor = new Color(225, 220, 210, 76);
+      g.lineWidth = 2;
+      g.roundRect(-w / 2, -h / 2, w, h, 13);
+      g.fill();
+      g.stroke();
+      return;
+    }
+    const base = GameRunner.CARD_BORDER_COLORS[card.category] ?? GameRunner.CARD_BORDER_COLORS.routine;
+    const mix = 0.66;
     const fill = new Color(
       Math.round(base.r * (1 - mix) + 250 * mix),
       Math.round(base.g * (1 - mix) + 246 * mix),
       Math.round(base.b * (1 - mix) + 238 * mix),
-      muted ? 220 : 255,
+      255,
     );
     g.clear();
     g.fillColor = fill;
-    g.strokeColor = new Color(base.r, base.g, base.b, muted ? 190 : 255);
-    g.lineWidth = muted ? 2.5 : 3.5;
+    g.strokeColor = new Color(base.r, base.g, base.b, 255);
+    g.lineWidth = 3.5;
     g.roundRect(-w / 2, -h / 2, w, h, 13);
     g.fill();
     g.stroke();
@@ -798,16 +818,8 @@ export class GameRunner extends Component {
 
     // 无卡：预览占位图标 + 空底（drawCardBackground 已处理空槽半透底）
     if (!card) {
-      const previewKey = GameRunner.QUEUE_PREVIEW_ART_KEYS[slotIndex % GameRunner.QUEUE_PREVIEW_ART_KEYS.length];
-      const preview = this.artSprites.get(previewKey) ?? null;
-      if (preview) {
-        sprite.spriteFrame = preview;
-        sprite.color = new Color(255, 255, 255, 210);
-        sprite.enabled = true;
-      } else {
-        sprite.spriteFrame = null;
-        sprite.enabled = false;
-      }
+      sprite.spriteFrame = null;
+      sprite.enabled = false;
       if (label) { label.enabled = false; }
       return;
     }
@@ -840,6 +852,184 @@ export class GameRunner extends Component {
       label.verticalAlign = 1; // bottom
       label.horizontalAlign = 1; // center
     }
+  }
+
+  /**
+   * 将逻辑队列同步到按 card.id 持有的视觉节点。
+   *
+   * 重要约束：节点在移动期间不重绘。如果同一张卡在移动中被改需求，
+   * 新状态会在到达下一槽后再刷新；绝不会在半路换成另一张卡。
+   */
+  private syncCardVisuals(cards: readonly (Card | null)[]): void {
+    if (!this.beltNode || this.slotNodes.length < 2) return;
+    const liveIds = new Set<number>();
+
+    cards.forEach((card, slotIndex) => {
+      if (!card) return;
+      liveIds.add(card.id);
+      const snapshot = this.copyCard(card);
+      const signature = this.cardSignature(snapshot);
+      let visual = this.cardVisuals.get(card.id);
+
+      if (!visual) {
+        visual = this.createCardVisual(snapshot, slotIndex);
+        this.cardVisuals.set(card.id, visual);
+        return;
+      }
+
+      if (visual.signature !== signature) {
+        if (visual.moving) visual.pendingCard = snapshot;
+        else this.paintCardVisual(visual, snapshot);
+      }
+
+      if (visual.slotIndex !== slotIndex) this.moveCardVisual(visual, slotIndex, this.shiftDuration());
+    });
+
+    // 从逻辑队列移除的 slot0 卡片不直接销毁：继续左移，由 Belt Mask 逐像素裁掉。
+    for (const [id, visual] of Array.from(this.cardVisuals.entries())) {
+      if (liveIds.has(id)) continue;
+      this.cardVisuals.delete(id);
+      if (visual.slotIndex === 0) this.exitCardVisual(visual);
+      else this.destroyCardVisual(visual);
+    }
+  }
+
+  /** 创建一张真实卡片的独立节点；入口卡从屏幕右外侧线性进入。 */
+  private createCardVisual(card: Card, slotIndex: number): CardVisual {
+    const template = this.slotNodes[Math.min(slotIndex, this.slotNodes.length - 1)];
+    const node = instantiate(template);
+    node.name = `CardVisual-${card.id}`;
+    node.parent = this.beltNode!;
+    node.setSiblingIndex(this.beltNode!.children.length - 1);
+    node.active = true;
+    node.setScale(1, 1, 1);
+
+    const visual: CardVisual = {
+      node,
+      slotIndex,
+      signature: '',
+      moving: false,
+      pendingCard: null,
+    };
+    this.paintCardVisual(visual, card);
+
+    const target = this.slotPosition(slotIndex);
+    const last = this.slotNodes.length - 1;
+    if (slotIndex === last) {
+      const gap = this.slotGap();
+      node.setPosition(target.x + gap, target.y, target.z);
+      this.moveCardVisual(visual, slotIndex, this.entryDuration(), true);
+    } else {
+      node.setPosition(target);
+    }
+    return visual;
+  }
+
+  /** 重绘同一 card.id 的状态，不改变位置和节点身份。 */
+  private paintCardVisual(visual: CardVisual, card: Card): void {
+    if (!visual.node.isValid) return;
+    const bg = visual.node.children.find((child) => !!child.getComponent(Graphics));
+    if (bg) this.drawCardBackgroundNode(bg, card);
+    this.renderSlot(visual.node, card, visual.slotIndex);
+    visual.signature = this.cardSignature(card);
+    visual.pendingCard = null;
+  }
+
+  /** 槽位变化时始终从当前位置线性移到新槽，不瞬移、不缩放、不渐变。 */
+  private moveCardVisual(visual: CardVisual, slotIndex: number, duration: number, force = false): void {
+    const node = visual.node;
+    if (!node.isValid) return;
+    if (!force && visual.slotIndex === slotIndex) return;
+    const target = this.slotPosition(slotIndex);
+    Tween.stopAllByTarget(node);
+    node.setScale(1, 1, 1);
+    visual.slotIndex = slotIndex;
+    visual.moving = true;
+    tween(node)
+      .to(duration, { position: target }, { easing: 'linear' })
+      .call(() => {
+        if (!node.isValid) return;
+        node.setPosition(target);
+        visual.moving = false;
+        if (visual.pendingCard) this.paintCardVisual(visual, visual.pendingCard);
+      })
+      .start();
+  }
+
+  /**
+   * 出口使用“卡片宽度”作为完整移出距离：
+   * 0%=完整，25%=裁左 1/4，50%=只剩右半，75%=只剩右 1/4，100%=完全移出。
+   */
+  private exitCardVisual(visual: CardVisual): void {
+    const node = visual.node;
+    if (!node.isValid) return;
+    const start = node.position.clone();
+    const cardW = node.getComponent(UITransform)?.width ?? Math.max(1, this.slotGap() - 8);
+    const target = new Vec3(start.x - cardW, start.y, start.z);
+    // 与整条履带保持同一像素速度；卡宽小于槽距，因此完全移出会略早于一次换档结束。
+    const duration = this.shiftDuration() * Math.min(1, cardW / this.slotGap());
+    Tween.stopAllByTarget(node);
+    node.setScale(1, 1, 1);
+    visual.moving = true;
+    tween(node)
+      .to(duration, { position: target }, { easing: 'linear' })
+      .call(() => this.destroyCardVisual(visual))
+      .start();
+  }
+
+  private destroyCardVisual(visual: CardVisual): void {
+    if (!visual.node.isValid) return;
+    Tween.stopAllByTarget(visual.node);
+    visual.node.destroy();
+  }
+
+  private resetCardVisuals(): void {
+    for (const visual of this.cardVisuals.values()) this.destroyCardVisual(visual);
+    this.cardVisuals.clear();
+  }
+
+  /** 屏幕尺寸变化时重新吸附到对应槽位，避免保留旧分辨率坐标。 */
+  private relayoutCardVisuals(): void {
+    for (const visual of this.cardVisuals.values()) {
+      if (!visual.node.isValid) continue;
+      Tween.stopAllByTarget(visual.node);
+      visual.node.setPosition(this.slotPosition(visual.slotIndex));
+      visual.node.setScale(1, 1, 1);
+      visual.moving = false;
+      if (visual.pendingCard) this.paintCardVisual(visual, visual.pendingCard);
+    }
+  }
+
+  private visualNodeAtSlot(slotIndex: number): Node | null {
+    for (const visual of this.cardVisuals.values()) {
+      if (visual.slotIndex === slotIndex && visual.node.isValid) return visual.node;
+    }
+    return null;
+  }
+
+  private slotPosition(slotIndex: number): Vec3 {
+    return this.slotNodes[slotIndex]?.position.clone() ?? new Vec3();
+  }
+
+  private slotGap(): number {
+    if (this.slotNodes.length < 2) return 1;
+    return Math.max(1, Math.abs(this.slotNodes[1].position.x - this.slotNodes[0].position.x));
+  }
+
+  private shiftDuration(): number {
+    return Math.max(0.48, BalanceConfig.phases[this.game.phase].slotPeriodSec * 0.92);
+  }
+
+  private entryDuration(): number {
+    return Math.max(0.48, Math.min(0.82, BalanceConfig.phases[this.game.phase].slotPeriodSec * 0.72));
+  }
+
+  private copyCard(card: Card): Card {
+    return { ...card };
+  }
+
+  private cardSignature(card: Card): string {
+    return `${card.id}:${card.category}:${card.state}:${card.weight}:${card.isThreat ? 1 : 0}`;
   }
 
   /** 队列图标使用独立子节点，避免与槽位本身的 Label 渲染器争用同一节点。 */
@@ -997,7 +1187,7 @@ export class GameRunner extends Component {
       const beltH = Math.max(92, Math.min((screenTopY - screenBottomY) * 0.42, 150));
       beltUt.setContentSize(beltW, beltH);
       const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
-      mask.type = Mask.Type.RECT;
+      mask.type = Mask.Type.GRAPHICS_RECT;
       this.layoutBeltSlots(beltW, beltH);
     }
 
@@ -1189,6 +1379,7 @@ export class GameRunner extends Component {
       }
     });
     this.fx?.refreshSlotBases();
+    this.relayoutCardVisuals();
   }
 
   /** 统一 HUD 标签的命中盒、字号和位置。 */
