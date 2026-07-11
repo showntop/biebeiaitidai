@@ -615,7 +615,7 @@ export class GameRunner extends Component {
       const label = rankInfo.getComponent(Label);
       if (label) {
         const day = this.session.daysEmployed;
-        label.string = `第${this.session.profile.highestUnlockedLevel + 1}轮反击 · 入职第${day}天`;
+        label.string = `第${this.session.profile.highestUnlockedLevel + 1}轮反击 · 坚守第${day}天`;
         label.color = new Color(96, 80, 62, 255);
         label.isBold = false;
       }
