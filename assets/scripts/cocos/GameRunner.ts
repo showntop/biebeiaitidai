@@ -66,6 +66,8 @@ export class GameRunner extends Component {
   private uiState: 'select' | 'playing' | 'result' = 'select';
   private levelSelectRoot: Node | null = null;
   private fx: FxLayer | null = null;
+  /** CardShifted 那一帧跳过 renderSlot/drawCardBackground，避免"跳位+换内容"在同一帧被看到 */
+  private shiftFrameSkip = false;
   private eventUnsubs: Array<() => void> = [];
   private lastEventText = '事件 · 等待下一条任务';
   private compactHeader = false;
@@ -291,6 +293,7 @@ export class GameRunner extends Component {
       this.game.bus.on('PropUnavailable', ({ prop }) => this.setEventText(`${propName(prop)}暂时无法使用`)),
       this.game.bus.on('BossIncoming', () => this.setEventText('Boss 临检正在接近')),
       this.game.bus.on('KissUpFreeze', ({ durationSec }) => this.setEventText(`拍马屁生效 · 传送带暂停 ${durationSec.toFixed(1)}s`)),
+      this.game.bus.on('CardShifted', () => { this.shiftFrameSkip = true; }),
     );
   }
 
@@ -709,10 +712,16 @@ export class GameRunner extends Component {
 
     const cards = this.game.conveyor.cards;
     this.ensureSlotBackgrounds();
-    for (let i = 0; i < this.slotNodes.length; i++) {
-      const c = cards[i] ?? null;
-      this.drawCardBackground(i, c);
-      this.renderSlot(this.slotNodes[i], c, i);
+    // CardShifted 那一帧跳过内容更新（图标/文字/背景色），因为 fxConveyorShift
+    // 正在把 slot 跳到右边 + opacity=0，内容更新在下一帧（opacity 淡入中）执行更平滑
+    if (this.shiftFrameSkip) {
+      this.shiftFrameSkip = false;
+    } else {
+      for (let i = 0; i < this.slotNodes.length; i++) {
+        const c = cards[i] ?? null;
+        this.drawCardBackground(i, c);
+        this.renderSlot(this.slotNodes[i], c, i);
+      }
     }
 
     if (this.scanIndicator) {
