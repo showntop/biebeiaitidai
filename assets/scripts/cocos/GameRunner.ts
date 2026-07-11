@@ -86,6 +86,10 @@ export class GameRunner extends Component {
   private propButtonNodes: Node[] = [];
   private propButtonBackgrounds: Node[] = [];
   private propIconSprites: (Sprite | null)[] = [];
+  /** 仪表盘面板内认可度条的本地坐标缓存（updateLowerHud 动态覆盖用） */
+  private hudBarW = 0;
+  private hudBarCY = 0;
+  private hudBarH = 0;
   private aimingProp: PropType | null = null;
   private aimingSlot = 0;
   private aimStart = new Vec3();
@@ -1427,6 +1431,7 @@ export class GameRunner extends Component {
       : '别让AI替代你';
     // 认可度/分区已收敛到仪表盘面板，不再更新旧浮动 Label
     if (this.timerLabel) {
+      this.timerLabel.color = new Color(240, 235, 225, 255);
       const remain = Math.max(0, snap.duration - snap.elapsed);
       const resultText: Record<string, string> = {
         'win-survive': '生存通关',
@@ -1804,7 +1809,7 @@ export class GameRunner extends Component {
   private static readonly CHAR_ASPECT = 646 / 927; // 宽/高
   /** 角色整体上下微调。正=上移，负=下移，单位=背景图高度的比例（0.05=下移5%背景高）。
    *  改这一个值就能调角色位置，不用动其他代码。 */
-  private static readonly CHAR_Y_OFFSET = -0.12;
+  private static readonly CHAR_Y_OFFSET = -0.08;
 
   /** 挂背景 + 角色 Sprite，位置按背景图实测比例动态计算（不再猜固定像素）。
    *  背景按宽度等比完整显示，绝不再用 cover 裁掉显示器两侧；超长屏多出的底部区域用背景底色延伸，
@@ -1891,13 +1896,13 @@ export class GameRunner extends Component {
     // 认可度/分区信息已收敛到下方仪表盘面板；隐藏旧版浮动 Label
     if (this.approvalLabel) this.approvalLabel.node.active = false;
     if (this.zoneLabel) this.zoneLabel.node.active = false;
-    // 计时器移到标题栏右侧
+    // 计时器移到标题栏右侧，字号比标题略小但足够清晰
     if (this.timerLabel) {
       const timerX = Math.min(visSize.width * 0.38, screenWidthPx * 0.40);
       const timerY = this.compactHeader
         ? screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)))
         : screenTopY + Math.max(42, visSize.height * 0.05);
-      this.layoutHudLabel(this.timerLabel, timerX, timerY, screenWidthPx * 0.20, 36, 19);
+      this.layoutHudLabel(this.timerLabel, timerX, timerY, screenWidthPx * 0.26, 40, 24);
       this.timerLabel.node.active = true;
     }
 
@@ -1930,8 +1935,8 @@ export class GameRunner extends Component {
         this.charNode.setSiblingIndex(2);
         this.charNode.active = this.uiState === 'playing';
       }
-      // 角色占屏宽 56%，是视觉主体
-      const charDisplayH = Math.min(visSize.width * 0.56, visSize.height * 0.35);
+      // 角色占屏宽 46%（减小以让桌子显得更宽，键盘完整放在桌面）
+      const charDisplayH = Math.min(visSize.width * 0.46, visSize.height * 0.32);
       const charDisplayW = charDisplayH * GameRunner.CHAR_ASPECT; // 646:927 不是正方形
       const charUt = this.charNode.getComponent(UITransform)!;
       charUt.setContentSize(charDisplayW, charDisplayH);
@@ -1967,17 +1972,11 @@ export class GameRunner extends Component {
     this.monitorMetaNode.setPosition(0, frameY, 0);
     const g = this.monitorMetaNode.getComponent(Graphics)!;
     g.clear();
-    // 显示器外壳（左上局部坐标原点）
-    g.fillColor = new Color(55, 54, 50, 255);
+    // 只画边框，不填充内部——否则盖住传送带卡片
     g.strokeColor = new Color(28, 26, 24, 255);
     g.lineWidth = 4;
-    g.roundRect(-frameW / 2, -frameH / 2, frameW, frameH, 18);
-    g.fill();
+    g.roundRect(-frameW / 2, -frameH / 2, frameW, frameH, 16);
     g.stroke();
-    // 屏幕区域（略亮，区分于外壳）
-    g.fillColor = new Color(34, 34, 31, 255);
-    g.roundRect(-screenWidth / 2, -screenH / 2, screenWidth, screenH, 8);
-    g.fill();
     // 顶部绿色电源指示灯
     g.fillColor = new Color(60, 220, 60, 220);
     g.circle(frameW / 2 - 14, frameH / 2 + 18, 5);
@@ -2069,6 +2068,7 @@ export class GameRunner extends Component {
     // 认可度条（本地坐标，相对于面板中心）
     const barW = panelW - 40;
     const barCY = panelH / 2 - padTop - valueH - gap - barH / 2;
+    this.hudBarW = barW; this.hudBarCY = barCY; this.hudBarH = barH;
     g.fillColor = new Color(240, 234, 224, 255);
     g.strokeColor = new Color(48, 43, 38, 255);
     g.lineWidth = 2;
@@ -2118,6 +2118,7 @@ export class GameRunner extends Component {
 
   private updateLowerHud(approval: number, zone: string): void {
     if (!this.lowerHudNode) return;
+    // 更新数值与分区文字
     const value = this.lowerHudNode.getChildByName('ApprovalValue')?.getComponent(Label);
     if (value) value.string = `认可度 ← ${approval} →`;
     const label = this.lowerHudNode.getChildByName('Zone')?.getComponent(Label);
@@ -2132,6 +2133,19 @@ export class GameRunner extends Component {
       label.string = map[zone] ?? zone;
       label.color = zoneColor[zone] ?? new Color(45, 40, 35);
     }
+
+    // 动态覆盖进度条：approved 部分透明看到底色，未到部分蒙半透明灰色
+    const g = this.lowerHudNode.getComponent(Graphics);
+    if (!g || this.hudBarW <= 0) return;
+    const bw = this.hudBarW;
+    const bh = this.hudBarH;
+    const bcy = this.hudBarCY;
+    const pct = Math.max(0, Math.min(1, approval / 100));
+    const fillEnd = -bw / 2 + bw * pct;
+    // 蒙住右侧未覆盖区域
+    g.fillColor = new Color(50, 46, 40, 160);
+    g.rect(fillEnd, bcy - bh / 2 + 4, bw * (1 - pct) - 4, bh - 8);
+    g.fill();
   }
 
   /** 把 Belt 下的 6 个卡槽横向等距重新排布到指定区域内（居中）。 */
