@@ -17,6 +17,99 @@
 
 ---
 
+## 卡牌/按钮 = 代码画底 + 纯图标（架构级优化，务必先看）
+
+> **起因**：实测发现卡牌(资产2)、道具按钮(资产3)当前都是 AI 把「圆角矩形边框 + 填充底 + 居中图标」整张烤死成一张图（每张 150~600KB）。这有三个硬伤：① AI 出图的圆角半径/边框粗细/内边距**不可能像素级一致**，8 张卡牌排在一起会参差不齐；② 换主题色 / 调圆角必须重新出图；③ 体积大、复用性差（同图标没法用于不同尺寸的技能栏/通知）。
+
+**新原则（推荐，从此为准）：卡牌和按钮的「背景框」由 Cocos 代码用 `Graphics` 组件运行时绘制，美术资产只出「纯图标」（透明底、无卡片、无边框、无填充）。**
+
+分层结构：
+```
+卡牌节点 = Graphics(代码画圆角矩形底：fillColor 填充 + borderColor 描边)
+         + Sprite(图标子节点，居中，只有这一层是美术图)
+         + Label(权重数字，代码叠加)
+```
+
+**收益**：
+- **几何 100% 一致**：圆角半径、边框粗细、图标内边距全由常量控制，8 张卡天生对齐。
+- **换肤零成本**：改一行颜色常量即可，不重新出图。
+- **图标资产极简**：AI 只画「纯符号」，提示词简单、出错率低（不用再纠结卡片比例/圆角）。
+- **体积/复用**：纯图标 ~50KB，且同图标可用于任意尺寸场景。
+
+**代码实现示意**（GameRunner 接入时按此模式）：
+```typescript
+// 卡牌配置：背景色由代码持有，icon 只是纯符号 SpriteFrame
+const CARD_STYLE = {
+  routine:  { border: '#50A0FF', fill: '#F5F0E8', icon: 'card-doc-blue-a' },
+  urgent:   { border: '#FFB428', fill: '#F5F0E8', icon: 'card-alarm' },
+  proposal: { border: '#3CC8DC', fill: '#F5F0E8', icon: 'card-idea' },
+  meeting:  { border: '#787878', fill: '#F5F0E8', icon: 'card-coffee' },
+  // ...
+};
+
+function drawCardBg(g: Graphics, style: CardStyle, w: number, h: number): void {
+  const r = 16;                       // 圆角半径（全局统一）
+  g.clear();
+  g.roundRect(-w / 2, -h / 2, w, h, r);
+  g.fillColor = new Color().fromHEX(style.fill);
+  g.fill();
+  g.lineWidth = 4;                    // 边框粗细（全局统一）
+  g.strokeColor = new Color().fromHEX(style.border);
+  g.roundRect(-w / 2, -h / 2, w, h, r);
+  g.stroke();
+}
+```
+
+> **例外**：本策略针对「规则形状底 + 图标」类资产（卡牌、技能按钮、事件日志图标）。角色/背景/特效等**不规则/整图**资产不适用，仍按各自章节走。
+
+---
+
+## 免费开源图标库（可替代 AI 出图标，优先考虑）
+
+> 卡牌/道具的图标本质都是「文档/文件夹/靶心/灯泡/闹钟/咖啡杯/锅/爱心」这类**通用扁平符号**，开源图标库里现成一大把，比 AI 出图**更规整、风格更统一、零版权风险、SVG 可无损缩放**。除非需要很特定的原创符号，否则优先用开源图标。
+
+**推荐来源（均可商用，注意各自 license）**：
+
+| 图标库 | 授权 | 风格 | 地址 | 适配度 |
+|---|---|---|---|---|
+| **Lucide** | ISC（可商用免署名） | 描边线性、统一 24px 网格 | lucide.dev | ★★★★★ 最推荐，风格最统一 |
+| **Tabler Icons** | MIT | 描边线性、4000+ 图标 | tabler.io/icons | ★★★★★ 数量多 |
+| **Material Symbols** | Apache 2.0 | 可切描边/填充/圆角 | fonts.google.com/icons | ★★★★ 谷歌出品 |
+| **Phosphor** | MIT | 多种粗细/填充风格 | phosphoricons.com | ★★★★ 风格多样 |
+| **Iconify** | 各图标原 license | 聚合上百套，一站搜 | icon-sets.iconify.design | ★★★★ 搜索神器 |
+| **Remix Icon** | Apache 2.0 | 线性+填充双版本 | remixicon.com | ★★★★ 国产、中文友好 |
+| **Font Awesome Free** | CC BY 4.0（需署名）| 经典图标集 | fontawesome.com | ★★★ 免费版需署名 |
+
+**本作图标 → 开源图标对应建议**（以 Lucide 为例，其它库同名或近似）：
+
+| 卡牌/道具 | 含义 | Lucide 图标名 |
+|---|---|---|
+| card-routine | 常规文档 | `file-text` |
+| card-report / card-document | 汇报/文档 | `folder` / `files` |
+| card-key | 关键/靶心 | `target` |
+| card-proposal | 提案/灯泡 | `lightbulb` |
+| card-urgent | 紧急/闹钟 | `alarm-clock` |
+| card-meeting | 会议/咖啡 | `coffee` |
+| card-boss | 老板/审查 | `search` / `user-round-search` |
+| prop-add-demand | 加需求 | `file-plus` |
+| prop-change-demand | 改需求 | `refresh-cw` / `undo-2` |
+| prop-throw-pot | 丢锅 | `cooking-pot` |
+| prop-kiss-up | 拍马屁 | `heart` |
+| icon-event-log | 事件日志 | `clipboard-list` |
+
+**用法（两条路）**：
+1. **下载 SVG → 转 PNG**：从图标库下载 SVG，用统一颜色（如白色/深灰），命令行批量转 PNG 后放入 `assets/resources/art/cards|props/`：
+   ```bash
+   # 需要 rsvg-convert（brew install librsvg）或 ImageMagick
+   rsvg-convert -w 256 -h 256 file-text.svg -o card-routine.png
+   ```
+   图标本身即透明底，无需抠图。配合上面「代码画底」策略，卡牌背景色/边框都由代码上色，图标只需**单色**即可。
+2. **Iconify 一站搜**：在 icon-sets.iconify.design 搜关键词（如 "coffee"），可直接导出指定颜色/尺寸的 PNG/SVG，最省事。
+
+> **决策建议**：卡牌/道具/日志图标这 16 个通用符号，**建议直接用 Lucide 或 Tabler**（风格统一、省时省钱），只把「角色/背景/特效」交给 AI 出图。图标统一用单色，颜色和卡片框都交给代码，视觉最协调。
+
+---
+
 ## 抠图 / 透明底统一策略（全量 review 后新增，务必先看）
 
 > 起因：资产0（角色）实测发现"transparent/light-gray background"这类写法在 AI 出图时不可靠（容易输出棋盘格占位图、或干脆忽略变成实色底），改用绿幕色键后效果显著变好。这里把这个经验推广到全部资产，并纠正一处关键冲突。
@@ -178,22 +271,27 @@ Nothing else changes. No text outside the screen.
 
 ## 资产 2｜卡牌 ×8（权重数字由代码叠加，不要画进图）
 
-- **工具**：即梦 / GPT-image
-- **参考图**：风格参考 = 【紧急任务卡样张】
-- **尺寸**：1024×1024
-- **提示词模板**（`{色}`/`{符号}` 见下表）：
+> **⚠️ v4 架构级修正（强烈推荐先看文档开头两节）**：卡牌**不再整张出图**。卡片的「圆角矩形边框 + 填充底」改由 **Cocos `Graphics` 代码运行时绘制**（见开头「卡牌/按钮 = 代码画底 + 纯图标」），美术层**只需一个纯图标**（透明底、单色、无卡片框）。
+> - **首选：直接用开源图标**（见开头「免费开源图标库」）——文档/文件夹/靶心/灯泡/闹钟/咖啡杯这些都是通用符号，Lucide/Tabler 现成、更规整、零版权风险，**无需 AI 出图**。对应图标名见开头对照表。
+> - **次选：AI 只画纯图标**（若要原创风格），用下方"纯图标版"提示词，不要再画卡片框和背景色。
+> - `{色}`（边框色）现在是**代码常量**（`CARD_STYLE.border`），不进图片。
+
+**纯图标版提示词**（AI 出原创图标时用；`{符号}` 见下表）：
 ```
-Flat cartoon vector game asset, bold clean outlines, minimal flat color, no gradients,
+Flat cartoon vector ICON only, bold clean outlines, minimal flat single-color, no gradients,
 casual WeChat mini-game art direction, high readability.
 
-A game card icon: a rounded-corner rectangle card with a {色} border, centered minimal flat
-symbol of {符号}, no text in image. Plain solid CHROMA-KEY GREEN background (pure flat #00FF00
-greenscreen, evenly lit, no gradient, no texture), for clean background removal via color-key.
+A centered minimal flat symbol of {符号}, ONLY the icon itself — NO card, NO rounded rectangle,
+NO border frame, NO background panel. Single solid color icon. Plain solid CHROMA-KEY GREEN
+background (pure flat #00FF00 greenscreen, evenly lit, no gradient), for clean color-key removal.
+No text.
 ```
 
 > **v2 修正**：符号改成 `视觉UI设计规范.md` §8.1 实测已锁定、辨识度验证过的版本（文档/文件夹/靶心/灯泡/闹钟/咖啡杯），与出图参考图保持一致。
 >
 > **v3 修正**：背景从"Transparent background"改为**绿幕 `#00FF00` + 色键抠图**（原因见文档开头「抠图/透明底统一策略」）——直接要求 AI 出透明底不可靠，绿幕更稳。已核对卡牌8色都不接近绿色，抠图安全。
+>
+> **v4 修正**：卡片框改代码画，只出纯图标（首选开源图标）。原"整卡出图"提示词已废弃。
 
 | 文件名 | {色} | {符号} |
 |---|---|---|
@@ -210,32 +308,32 @@ greenscreen, evenly lit, no gradient, no texture), for clean background removal 
 
 ## 资产 3｜道具 ×4
 
-- **工具**：即梦 / GPT-image
+> **⚠️ v3 架构级修正（同资产2）**：道具按钮**不再整张出图**。「圆角方按钮底」改由 **Cocos `Graphics` 代码绘制**，美术层**只需纯图标**（透明底、单色、无按钮框）。
+> - **首选：开源图标**（见开头「免费开源图标库」）——加需求=`file-plus`、改需求=`refresh-cw`、丢锅=`cooking-pot`、拍马屁=`heart`，Lucide/Tabler 现成，无需 AI。
+> - **次选：AI 只画纯图标**，用下方"纯图标版"提示词，不要再画按钮底。
+
+- **工具**：开源图标库（首选）/ 即梦 / GPT-image
 - **参考图**：风格参考 = 【道具样张(丢锅)】
-- **尺寸**：1024×1024（圆角方按钮底 + 符号居中）
+- **尺寸**：256×256（纯图标）
 
 > **v2 修正**：① 补上遗漏的 `no gradients`（原提示词是清单里唯一没写"无渐变"的资产，和 §4 铁律不符）；② 背景从"Transparent background"改为**绿幕 `#00FF00` + 色键抠图**（原因见文档开头「抠图/透明底统一策略」），已核对道具4色（蓝/紫/红/粉）都不接近绿色，抠图安全。
+>
+> **v3 修正**：按钮底改代码画，只出纯图标（首选开源图标）。
 
-**prop-add-demand（加需求）**
+**纯图标版提示词**（AI 出原创图标时用；`{符号}` 换成下表英文）：
 ```
-Flat cartoon vector game asset, bold clean outlines, minimal flat color, no gradients, casual
-WeChat mini-game style. A round-cornered square skill button icon, centered symbol: a crumpled
-paper document being inserted from the side with motion lines. Plain solid CHROMA-KEY GREEN
-background (pure flat #00FF00 greenscreen), no text.
+Flat cartoon vector ICON only, bold clean outlines, minimal flat single-color, no gradients,
+casual WeChat mini-game style. A centered symbol of {符号}, ONLY the icon itself — NO button,
+NO rounded square, NO frame, NO background panel. Single solid color. Plain solid CHROMA-KEY
+GREEN background (pure flat #00FF00 greenscreen), no text.
 ```
-**prop-change-demand（改需求）**
-```
-...centered symbol: a circular rewind/flip arrow around a document (meaning "redo/rework")...
-```
-**prop-throw-pot（丢锅）**
-```
-...centered symbol: a flying cooking pot with motion speed lines...
-```
-**prop-kiss-up（拍马屁）**
-```
-...centered symbol: a pink heart with a lipstick mark...
-```
-（每条前面都带同一句 `Flat cartoon vector game asset, bold clean outlines, minimal flat color, no gradients, casual WeChat mini-game style. A round-cornered square skill button icon,` + 结尾 `Plain solid CHROMA-KEY GREEN background (pure flat #00FF00 greenscreen), no text.`）
+
+| 文件名 | {符号} | 开源图标(Lucide) |
+|---|---|---|
+| `prop-add-demand`（加需求） | a crumpled paper document being inserted from the side with motion lines | `file-plus` |
+| `prop-change-demand`（改需求） | a circular rewind/flip arrow around a document (meaning "redo/rework") | `refresh-cw` / `undo-2` |
+| `prop-throw-pot`（丢锅） | a flying cooking pot with motion speed lines | `cooking-pot` |
+| `prop-kiss-up`（拍马屁） | a pink heart with a lipstick mark | `heart` |
 
 ---
 
