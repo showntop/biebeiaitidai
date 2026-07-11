@@ -266,64 +266,40 @@ export class FxLayer {
 
   /**
    * 旧处理区卡片在队列换档前克隆一份，挂到 Belt 下向左滑出。
-   *
-   * 不用 Mask（3.8 动态创建不可靠）。改为在 slot0 左侧放一个跟显示器屏幕同色的
-   * "遮挡片"（cover），ghost 滑入 cover 区域时被视觉遮住，效果等同于裁剪：
-   * 完整 → 2/3 → 1/2 → 1/3 → 完全离开。
+   * Belt 已有 Mask（GameRunner.ensureBeltMask 设的 RECT），ghost 滑出 Belt 左边缘
+   * 时被 Mask 裁剪：完整 → 2/3 → 1/2 → 1/3 → 完全离开。
    */
   private spawnOutgoingGhost(gap: number): void {
     const head = this.slots[0];
     const belt = head?.parent;
     if (!head?.isValid || !belt?.isValid) return;
 
-    // 清理上一轮残留的 ghost / cover
+    // 清理上一轮残留
     belt.children.forEach((c: Node) => {
-      if (c.name === 'OutgoingCardGhost' || c.name === 'ExitCover') c.destroy();
+      if (c.name === 'OutgoingCardGhost') c.destroy();
     });
 
     const base = this.slotBases[0]?.clone() ?? head.position.clone();
     const duration = Math.max(0.28, this.getShiftDurationSec() * 0.98);
     const headUt = head.getComponent(UITransform);
     const cardW = headUt?.width ?? Math.abs(gap);
-    const cardH = headUt?.height ?? 100;
     if (cardW <= 0) return;
 
-    // --- ghost：克隆 slot0（含 Graphics 背景 + 图标 + 权重文字） ---
     const ghost = instantiate(head);
     ghost.name = 'OutgoingCardGhost';
     ghost.layer = head.layer;
     ghost.parent = belt;
+    ghost.setSiblingIndex(belt.children.length - 1);
     ghost.setPosition(base);
     ghost.setScale(new Vec3(1, 1, 1));
-    const ghostOp = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
-    ghostOp.opacity = 255;
+    const op = ghost.getComponent(UIOpacity) ?? ghost.addComponent(UIOpacity);
+    op.opacity = 255;
 
-    // --- cover：显示器屏幕同色矩形，盖在 slot0 左侧 ---
-    // 颜色 #3C3A37 = ENV_DARK（显示器外壳/屏幕暗色），跟背景融为一体
-    const cover = new Node('ExitCover');
-    cover.layer = UI_2D;
-    cover.parent = belt;
-    const coverW = cardW * 3; // 足够宽，覆盖 ghost 整个滑出路径
-    const coverUt = cover.addComponent(UITransform);
-    coverUt.setContentSize(coverW, cardH + 8);
-    coverUt.setAnchorPoint(1, 0.5); // 右边缘对齐 slot0 左边缘
-    const beltLeft = base.x - cardW / 2;
-    cover.setPosition(beltLeft, base.y, 0);
-    const coverG = cover.addComponent(Graphics);
-    coverG.fillColor = new Color(60, 58, 55, 255); // #3C3A37
-    coverG.rect(-coverW, -(cardH + 8) / 2, coverW, cardH + 8);
-    coverG.fill();
-    // cover 在 ghost 之上（后添加 = 更高 sibling index = 更上层渲染）
-    cover.setSiblingIndex(belt.children.length - 1);
-
-    // --- 动画：ghost 向左滑出，被 cover 遮住 ---
+    // 向左滑出 cardW × 1.2（完全离开 Belt Mask 裁剪区）
     const travel = cardW * 1.2;
     tween(ghost)
       .to(duration, { position: new Vec3(base.x - travel, base.y, base.z) }, { easing: 'linear' })
-      .call(() => {
-        if (ghost.isValid) ghost.destroy();
-        if (cover.isValid) cover.destroy();
-      })
+      .call(() => { if (ghost.isValid) ghost.destroy(); })
       .start();
   }
 

@@ -986,7 +986,12 @@ export class GameRunner extends Component {
       // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度
       const beltW = Math.min(screenWidthPx * 0.92, visSize.width * 0.9);
       const beltH = Math.max(92, Math.min((screenTopY - screenBottomY) * 0.42, 150));
-      beltUt.setContentSize(beltW, beltH);
+      // Mask 裁剪矩形：左边缘 = slot0 左边缘，右边缘 = slotN 右边缘 + 一格 gap（shift 动画余量）
+      // anchorX = beltW / (2 * maskW) 让 rect 左边缘精确 = -beltW/2 = slot0 左边缘
+      const slotGap = 8;
+      const maskW = beltW + slotGap;
+      beltUt.setContentSize(maskW, beltH);
+      beltUt.setAnchorPoint(beltW / (2 * maskW), 0.5);
       const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
       mask.type = Mask.Type.RECT;
       this.layoutBeltSlots(beltW, beltH);
