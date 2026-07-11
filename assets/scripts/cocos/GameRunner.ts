@@ -1963,14 +1963,13 @@ export class GameRunner extends Component {
     const hudTopY = screenTopY - monitorPadding;
     const hudBottomY = screenBottomY + monitorPadding;
 
-    // 标题区遵守真实安全区。
+    // 标题区：紧贴安全区下方，确保不会被刘海/胶囊裁切
     const safe = sys.getSafeAreaRect(false);
     const safeTopY = safe.y + safe.height - visSize.height / 2;
     const headerGap = safeTopY - screenTopY;
     this.compactHeader = headerGap < Math.max(66, visSize.height * 0.078);
-    const titleY = this.compactHeader
-      ? screenTopY + Math.max(13, Math.min(28, Math.max(13, headerGap * 0.5)))
-      : screenTopY + Math.max(42, visSize.height * 0.05);
+    // 标题放在安全区下 12px，倒计时同行
+    const titleY = safeTopY - Math.max(24, visSize.height * 0.03);
 
     // 隐藏场景旧节点，改用代码动态创建（避免编辑器绑定问题）
     if (this.levelLabel) this.levelLabel.node.active = false;
@@ -1994,7 +1993,7 @@ export class GameRunner extends Component {
     this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 520), 44);
     this.gameTitleNode.setPosition(0, titleY, 0);
 
-    if (!this.compactHeader) this.layoutSubtitle(visSize.width, screenTopY + Math.max(16, visSize.height * 0.02));
+    if (!this.compactHeader) this.layoutSubtitle(visSize.width, titleY - Math.max(30, visSize.height * 0.035));
 
     // ── 动态计时器 ──
     if (!this.gameTimerNode) {
