@@ -244,7 +244,9 @@ export class FxLayer {
     this.floatText(perfect ? '完美拍中!' : '拍中!', 0, 40, new Color(255, 200, 220), 0.8);
   }
 
-  /** 传送带主视觉：整排卡片线性左移，入口/出口由 Belt 的矩形遮罩裁切。 */
+  /** 传送带主视觉：整排卡片线性左移。
+   *  关键：先设 opacity=0 再跳到右边，避免"跳位+换内容"在同一帧被看到（突然刷新）。
+   *  然后边滑边淡入，给"从右向左连续移动"的感觉。 */
   private fxConveyorShift(hasOutgoingCard: boolean): void {
     if (this.slots.length < 2) return;
     const gap = (this.slotBases[1]?.x ?? this.slots[1].position.x) - (this.slotBases[0]?.x ?? this.slots[0].position.x);
@@ -255,11 +257,14 @@ export class FxLayer {
       if (!slot?.isValid) return;
       Tween.stopAllByTarget(slot);
       const base = this.slotBases[index]?.clone() ?? slot.position.clone();
-      slot.setPosition(base.x + gap, base.y, base.z);
-      slot.setScale(new Vec3(1, 1, 1));
       const opacity = slot.getComponent(UIOpacity) ?? slot.addComponent(UIOpacity);
       Tween.stopAllByTarget(opacity);
-      opacity.opacity = 255;
+      // 先设不可见，再跳位 — render() 会在不可见状态下更新内容，用户看不到"刷新"
+      opacity.opacity = 0;
+      slot.setPosition(base.x + gap, base.y, base.z);
+      slot.setScale(new Vec3(1, 1, 1));
+      // 滑动 + 淡入（前 30% 时间淡入，后面完全可见）
+      tween(opacity).to(duration * 0.3, { opacity: 255 }).start();
       tween(slot).to(duration, { position: base }, { easing: 'linear' }).start();
     });
   }
