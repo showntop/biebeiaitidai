@@ -29,8 +29,8 @@ SCREEN_TOP = 0.06
 SCREEN_BOTTOM = 0.22
 SCREEN_LEFT = 0.12
 SCREEN_RIGHT = 0.88
-DESK_TOP = 0.42
-DESK_BOTTOM = 0.55
+DESK_TOP = 0.32     # 桌子从 32% 开始（原 42%，提前 10% 让桌面更宽）
+DESK_BOTTOM = 0.58  # 桌子到 58%（原 55%，加深让键盘有地方放）
 STAND_WIDTH_RATIO = 0.05  # 支架宽度占图片宽度的比例
 
 # 描边宽度

@@ -1795,11 +1795,11 @@ export class GameRunner extends Component {
 
   /** 背景图比例常量（白底AI图纯抠透明，无插入，角色可稍挡显示器底部）。
    *  显示器内屏：y ∈ [24.3%, 59.3%]；桌面线：y = 62.7%。 */
-  private static readonly BG_SCREEN_TOP = 0.243;
-  private static readonly BG_SCREEN_BOTTOM = 0.593;
-  private static readonly BG_SCREEN_LEFT = 0.035;
-  private static readonly BG_SCREEN_RIGHT = 0.964;
-  private static readonly BG_DESK_TOP = 0.627;
+  private static readonly BG_SCREEN_TOP = 0.06;
+  private static readonly BG_SCREEN_BOTTOM = 0.22;
+  private static readonly BG_SCREEN_LEFT = 0.12;
+  private static readonly BG_SCREEN_RIGHT = 0.88;
+  private static readonly BG_DESK_TOP = 0.32;
 
   /** 角色图实测比例常量（char-back.png 已裁掉透明边距，646×927，PIL alpha>128 逐行扫描）：
    *  头顶(天线顶) y=0%；键盘前沿(最宽处) y=58.3%。
@@ -1809,7 +1809,7 @@ export class GameRunner extends Component {
   private static readonly CHAR_ASPECT = 646 / 927; // 宽/高
   /** 角色整体上下微调。正=上移，负=下移，单位=背景图高度的比例（0.05=下移5%背景高）。
    *  改这一个值就能调角色位置，不用动其他代码。 */
-  private static readonly CHAR_Y_OFFSET = -0.08;
+  private static readonly CHAR_Y_OFFSET = -0.03;
 
   /** 挂背景 + 角色 Sprite，位置按背景图实测比例动态计算（不再猜固定像素）。
    *  背景按宽度等比完整显示，绝不再用 cover 裁掉显示器两侧；超长屏多出的底部区域用背景底色延伸，
