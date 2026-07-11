@@ -305,9 +305,11 @@ export class FxLayer {
   }
 
   /**
-   * 在 Belt 节点上加 Mask（GRAPHICS_STENCIL），裁剪区域 = 传送带范围 + 右侧多一格 gap
-   * （给 shift 动画中右移的卡片留空间）。Belt 是场景树已有节点，渲染管线已初始化，
-   * Mask 在这里能可靠工作（动态创建的新节点上 Mask 经常不初始化模板缓冲）。
+   * 在 Belt 节点上加 Mask（RECT），裁剪区域精确对齐传送带左边缘。
+   *
+   * 关键：UITransform 的 anchorX 控制裁剪矩形的左边缘位置。默认 anchor (0.5, 0.5)
+   * 让 rect 居中于原点，但传送带是非对称的（右侧多一格 gap 给 shift 动画），
+   * 所以需要算出正确的 anchorX，让 rect 左边缘 = slot0 左边缘。
    */
   private ensureBeltMask(): void {
     if (this.beltMaskReady) return;
@@ -320,35 +322,30 @@ export class FxLayer {
     const lastUt = last?.getComponent(UITransform);
     if (!first?.isValid || !last?.isValid || !firstUt || !lastUt) return;
 
-    // 计算裁剪区域：从 slot0 左边缘到 slotN 右边缘 + 一格 gap（shift 动画余量）
-    const gap = this.slots.length > 1
+    const slotGap = this.slots.length > 1
       ? Math.abs(this.slots[1].position.x - this.slots[0].position.x)
       : firstUt.width + 8;
+    // 裁剪区域：左边缘 = slot0 左边缘，右边缘 = slotN 右边缘 + 一格 gap（shift 动画余量）
     const left = first.position.x - firstUt.width / 2;
-    const right = last.position.x + lastUt.width / 2 + gap;
+    const right = last.position.x + lastUt.width / 2 + slotGap;
     const w = right - left;
     const h = Math.max(firstUt.height, lastUt.height) + 4;
 
-    // 确保 Belt 有 UITransform（Mask 依赖 contentSize 做裁剪矩形）
     let ut = belt.getComponent(UITransform);
     if (!ut) ut = belt.addComponent(UITransform);
+    // anchorX = -left / w → rect 左边缘精确对齐 slot0 左边缘
+    // rect 范围: [-anchorX*w, (1-anchorX)*w] = [left, right]
     ut.setContentSize(w, h);
-    // Belt 的 anchor 默认 (0.5, 0.5)，rect 居中于 Belt position。
-    // slots 在 layoutBeltSlots 中围绕 X=0 对称排布，所以 Belt position 的 X 应为 0
-    // 或接近 0。这里不改动 Belt position，只设 contentSize。
+    ut.setAnchorPoint(-left / w, 0.5);
 
-    // GRAPHICS_STENCIL：Graphics 画矩形 = 可见区域；矩形外被裁剪
-    let g = belt.getComponent(Graphics);
-    if (!g) g = belt.addComponent(Graphics);
-    g.clear();
-    g.rect(-w / 2, -h / 2, w, h);
-    g.fill();
+    // 删掉可能干扰的 Graphics（之前 GRAPHICS_STENCIL 方案残留）
+    const oldG = belt.getComponent(Graphics);
+    if (oldG) oldG.destroy();
 
+    // Mask RECT：用 UITransform 的 contentSize + anchor 做裁剪矩形，不需要 Graphics
     let mask = belt.getComponent(Mask);
-    if (!mask) {
-      mask = belt.addComponent(Mask);
-      mask.type = Mask.Type.GRAPHICS_STENCIL;
-    }
+    if (!mask) mask = belt.addComponent(Mask);
+    mask.type = Mask.Type.RECT;
 
     this.beltMaskReady = true;
   }
