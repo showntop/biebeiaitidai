@@ -2378,24 +2378,41 @@ export class GameRunner extends Component {
     const surfaceG = this.monitorSurfaceNode.getComponent(Graphics)!;
     surfaceG.clear();
     const surfaceRadius = 14;
-    // 深灰标题栏信息价值低且压缩内屏空间，降级为一条细状态灯带（保留"设备感"）。
-    const surfaceHeaderH = 16;
+    // 屏面顶栏：窗口三点 + 右侧极简"运行中"信号条，交代这是一块 AI 工作屏，撑住顶部视觉。
+    const surfaceHeaderH = 30;
     surfaceG.fillColor = new Color(246, 238, 225, 255);
     surfaceG.strokeColor = new Color(88, 78, 68, 210);
     surfaceG.lineWidth = 2.5;
     surfaceG.roundRect(-surfaceW / 2, -surfaceH / 2, surfaceW, surfaceH, surfaceRadius);
     surfaceG.fill(); surfaceG.stroke();
-    surfaceG.fillColor = new Color(88, 78, 68, 36);
+    // 顶栏底带
+    surfaceG.fillColor = new Color(88, 78, 68, 30);
     surfaceG.roundRect(-surfaceW / 2 + 3, surfaceH / 2 - surfaceHeaderH, surfaceW - 6, surfaceHeaderH - 3, surfaceRadius * 0.6);
     surfaceG.fill();
-    // 左上角三颗小指示灯（琥珀主色 + 两颗墨灰），代替整条文字标题。
-    const lampY = surfaceH / 2 - surfaceHeaderH / 2 - 1;
-    const lampColors = [new Color(244, 172, 32, 255), new Color(136, 126, 112, 255), new Color(136, 126, 112, 255)];
+    // 顶栏下分隔线
+    surfaceG.strokeColor = new Color(88, 78, 68, 70);
+    surfaceG.lineWidth = 1.5;
+    surfaceG.moveTo(-surfaceW / 2 + 8, surfaceH / 2 - surfaceHeaderH);
+    surfaceG.lineTo(surfaceW / 2 - 8, surfaceH / 2 - surfaceHeaderH);
+    surfaceG.stroke();
+    // 左侧窗口三点（琥珀 + 两颗墨灰）
+    const lampY = surfaceH / 2 - surfaceHeaderH / 2;
+    const lampColors = [new Color(244, 172, 32, 255), new Color(150, 140, 126, 255), new Color(150, 140, 126, 255)];
     lampColors.forEach((c, i) => {
       surfaceG.fillColor = c;
-      surfaceG.circle(-surfaceW / 2 + 18 + i * 14, lampY, 3.2);
+      surfaceG.circle(-surfaceW / 2 + 20 + i * 16, lampY, 4);
       surfaceG.fill();
     });
+    // 右侧"运行中"信号条：三根递增短竖条 + 一颗琥珀点。
+    const sigX = surfaceW / 2 - 46;
+    [6, 10, 14].forEach((barH, i) => {
+      surfaceG.fillColor = new Color(120, 108, 94, 210);
+      surfaceG.roundRect(sigX + i * 7, lampY - barH / 2, 4, barH, 2);
+      surfaceG.fill();
+    });
+    surfaceG.fillColor = new Color(244, 172, 32, 255);
+    surfaceG.circle(surfaceW / 2 - 18, lampY, 4);
+    surfaceG.fill();
 
     // 桌面陈设是独立真素材：补足办公室叙事，同时中央 48% 保持透明给机器人与弹道。
     const decorSf = this.artSprites.get('desk-decor');
@@ -2450,20 +2467,39 @@ export class GameRunner extends Component {
       lbl.overflow = Label.Overflow.SHRINK;
       lbl.color = new Color(70, 60, 50, 255);
     }
-    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.62, 440), 50);
-    // 标题略偏左，给右侧计时器铭牌让位，两者同一行同一水平线。
-    this.gameTitleNode.setPosition(-visSize.width * 0.06, titleY, 0);
+    // 主标题：墙面上方居中大字。
+    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 460), 44);
+    this.gameTitleNode.setPosition(0, titleY, 0);
     const tl = this.gameTitleNode.getComponent(Label)!;
-    tl.string = `别让AI替代你 · 第${this.session.currentIndex + 1}关`;
-    tl.fontSize = 30;
-    tl.lineHeight = tl.fontSize + 6;
+    tl.string = '别让AI替代你';
+    tl.fontSize = 32;
+    tl.lineHeight = tl.fontSize + 4;
     tl.color = new Color(48, 40, 34, 255);
 
-    // 独立副标题已合并进主标题，彻底移��被显示器边框遮挡的问题节点。
-    if (this.subtitleNode) {
-      this.subtitleNode.destroy();
-      this.subtitleNode = null;
+    // 副标题：主标题正下方一行，关卡 + 关卡名；弱化字号与颜色，与主标题形成清晰层级。
+    if (!this.subtitleNode) {
+      this.subtitleNode = new Node('GameSubtitle');
+      this.subtitleNode.layer = 1 << 25;
+      this.subtitleNode.parent = this.node;
+      this.subtitleNode.addComponent(UITransform);
+      const sub = this.subtitleNode.addComponent(Label);
+      sub.fontFamily = 'PingFang SC';
+      sub.horizontalAlign = 1;
+      sub.verticalAlign = 1;
+      sub.isBold = true;
+      sub.overflow = Label.Overflow.SHRINK;
     }
+    const subtitleY = titleY - 30;
+    this.subtitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 460), 26);
+    this.subtitleNode.setPosition(0, subtitleY, 0);
+    const subLabel = this.subtitleNode.getComponent(Label)!;
+    const rawTitle = getLevel(this.session.currentIndex).title ?? '';
+    const missionName = rawTitle.includes('·') ? rawTitle.split('·').slice(-1)[0] : rawTitle;
+    subLabel.string = `第${this.session.currentIndex + 1}关 · ${missionName || '替代警报'}`;
+    subLabel.fontSize = 17;
+    subLabel.lineHeight = 21;
+    subLabel.color = new Color(122, 106, 90, 255);
+    this.subtitleNode.active = this.uiState === 'playing';
 
     // ── 动态计时器 ──
     if (!this.gameTimerNode) {
@@ -2483,7 +2519,9 @@ export class GameRunner extends Component {
     const plateH = 54;
     const timerX = visSize.width / 2 - plateW / 2 - Math.max(22, visSize.width * 0.045);
     this.gameTimerNode.getComponent(UITransform)!.setContentSize(plateW - 18, 42);
-    this.gameTimerNode.setPosition(timerX + 4, titleY, 0);
+    // 计时器与"主标题+副标题"两行块的视觉中线对齐。
+    const timerY = titleY - 14;
+    this.gameTimerNode.setPosition(timerX + 4, timerY, 0);
     if (!this.timerPlateNode) {
       this.timerPlateNode = new Node('TimerPlate');
       this.timerPlateNode.layer = 1 << 25;
@@ -2492,7 +2530,7 @@ export class GameRunner extends Component {
       this.timerPlateNode.addComponent(Graphics);
     }
     this.timerPlateNode.getComponent(UITransform)!.setContentSize(plateW, plateH);
-    this.timerPlateNode.setPosition(timerX, titleY, 0);
+    this.timerPlateNode.setPosition(timerX, timerY, 0);
     this.timerPlateNode.setSiblingIndex(Math.max(0, this.gameTimerNode.getSiblingIndex() - 1));
     const plateG = this.timerPlateNode.getComponent(Graphics)!;
     plateG.clear();
@@ -2530,6 +2568,49 @@ export class GameRunner extends Component {
       const beltW = Math.min(screenWidthPx * 0.94, visSize.width * 0.92);
       const beltH = Math.max(170, Math.min((screenTopY - screenBottomY) * 0.80, 230));
       beltUt.setContentSize(beltW, beltH);
+
+      // ── 传送带凹槽机箱 ──
+      // 6 张卡横排导致卡片被宽度限制、无法靠放大填满高屏，于是把传送带嵌进一个
+      // 占满内屏的凹槽面板：给传送带明确容器 + 屏内层次，彻底消除"空荡荡"的观感。
+      // 画在 surfaceG（屏面 Graphics）上，位于卡片与轨道之下。
+      const surfaceCenterY = (screenTopY + screenBottomY) / 2;
+      const beltLocalY = beltY - surfaceCenterY;
+      const trayW = surfaceW * 0.93;
+      const trayTopLocal = surfaceH / 2 - surfaceHeaderH - 10;
+      const trayBottomLocal = -surfaceH / 2 + 12;
+      const trayH = trayTopLocal - trayBottomLocal;
+      // 投影
+      surfaceG.fillColor = new Color(96, 84, 72, 38);
+      surfaceG.roundRect(-trayW / 2 + 3, trayBottomLocal - 4, trayW, trayH, 18);
+      surfaceG.fill();
+      // 凹槽面板：略深冷调米色，与屏面拉开层次
+      surfaceG.fillColor = new Color(236, 228, 212, 255);
+      surfaceG.strokeColor = new Color(122, 110, 95, 135);
+      surfaceG.lineWidth = 2;
+      surfaceG.roundRect(-trayW / 2, trayBottomLocal, trayW, trayH, 18);
+      surfaceG.fill(); surfaceG.stroke();
+      // 顶部内阴影，制造凹陷深度
+      surfaceG.fillColor = new Color(120, 108, 94, 40);
+      surfaceG.roundRect(-trayW / 2 + 7, trayTopLocal - 18, trayW - 14, 15, 8);
+      surfaceG.fill();
+      // 极淡横向扫描纹，赋予"屏幕"质感（卡片会覆盖大部分，弱到几乎无干扰）
+      surfaceG.strokeColor = new Color(122, 110, 95, 15);
+      surfaceG.lineWidth = 1;
+      for (let ly = trayBottomLocal + 14; ly < trayTopLocal - 20; ly += 13) {
+        surfaceG.moveTo(-trayW / 2 + 12, ly);
+        surfaceG.lineTo(trayW / 2 - 12, ly);
+      }
+      surfaceG.stroke();
+      // 琥珀扫描线：位于卡片上方留白，呼应"AI 正在扫描任务"的叙事
+      const scanY = trayTopLocal - 26;
+      surfaceG.fillColor = new Color(244, 172, 32, 30);
+      surfaceG.roundRect(-trayW / 2 + 12, scanY - 3, trayW - 24, 6, 3);
+      surfaceG.fill();
+      surfaceG.fillColor = new Color(244, 172, 32, 72);
+      surfaceG.roundRect(-trayW / 2 + 12, scanY - 1, trayW - 24, 2, 1);
+      surfaceG.fill();
+      void beltLocalY;
+
       if (!this.conveyorTrackNode) {
         this.conveyorTrackNode = new Node('ConveyorTrack');
         this.conveyorTrackNode.layer = LAYER_2D;
@@ -2633,6 +2714,7 @@ export class GameRunner extends Component {
     // 资源异步加载可能发生在入口页停留期间；动态创建的 HUD 必须再次服从页面状态。
     const playing = this.uiState === 'playing';
     if (this.gameTitleNode) this.gameTitleNode.active = playing;
+    if (this.subtitleNode) this.subtitleNode.active = playing;
     if (this.gameTimerNode) this.gameTimerNode.active = playing;
     if (this.timerPlateNode) this.timerPlateNode.active = playing;
     if (this.monitorLabelNode) this.monitorLabelNode.active = playing;
