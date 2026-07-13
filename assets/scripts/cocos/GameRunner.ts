@@ -123,19 +123,20 @@ export class GameRunner extends Component {
   private tutorialDone = false;
   private fx: FxLayer | null = null;
   private eventUnsubs: Array<() => void> = [];
-  private lastEventText = '事件 · 等待下一条任务';
+  private lastEventText = '';
   private compactHeader = false;
 
   private static readonly PROP_LABELS = ['白纸团', '紫纸团', '咖啡团', '粉便签'];
   private static readonly PROP_ACTION_LABELS = ['加需求', '改需求', '甩锅', '拍马屁'];
   private static readonly PROP_TYPES: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
 
-  /** 道具按钮主色（视觉规范§1.4 + UI稿：蓝/紫/红/粉，高饱和强对比）。 */
+  /** 道具按钮主色：收敛到 胡桃木/琥珀 暖色家族，甩锅保留警示红族。
+   *  功能区分靠图标 + 键帽底部细色带，不再整面换高饱和糖果色。 */
   private static readonly PROP_COLORS: ReadonlyArray<Readonly<Color>> = [
-    new Color(68, 150, 236),   // 加需求：降一点荧光感的玩具蓝
-    new Color(160, 86, 224),   // 改需求：偏暖紫，避免刺眼蓝紫
-    new Color(226, 64, 54),    // 丢锅：漫画红，和警戒红同族
-    new Color(238, 86, 142),   // 拍马屁：莓粉，比荧光粉更稳
+    new Color(168, 124, 88),   // 加需求：胡桃木
+    new Color(196, 152, 64),   // 改需求：琥珀
+    new Color(198, 92, 70),    // 甩锅：暖警示红（与危险红同族、低饱和）
+    new Color(168, 124, 88),   // 拍马屁：胡桃木（粉便签图标已承担识别）
   ];
   /** 道具 key → artSprites 索引名（与 props/ 目录文件名约定一致）。 */
   private static readonly PROP_ART_KEYS = ['prop-add-demand', 'prop-change-demand', 'prop-throw-pot', 'prop-kiss-up'];
@@ -204,8 +205,6 @@ export class GameRunner extends Component {
     document: 'task-card-accent-normal',
     boss: 'task-card-accent-boss',
   };
-  private static readonly PROP_BUTTON_ART_KEYS = ['btn-add-requirement-wide', 'btn-change-requirement-wide', 'btn-throw-pot-wide', 'btn-kiss-up-wide'];
-  private static readonly PROP_LOCKED_BUTTON_ART_KEYS = ['btn-add-requirement-locked-wide', 'btn-change-requirement-locked-wide', 'btn-throw-pot-locked-wide', 'btn-kiss-up-locked-wide'];
   /** 空槽也显示即将到来的任务预览，避免队列退化成一排 "---"。 */
   private static readonly QUEUE_PREVIEW_ART_KEYS = ['card-doc-blue-a', 'card-doc-stack', 'card-target', 'card-idea', 'card-alarm', 'card-coffee'];
   private static readonly QUEUE_PREVIEW_COLORS: ReadonlyArray<Readonly<Color>> = [
@@ -429,19 +428,15 @@ export class GameRunner extends Component {
     this.beginTutorialIfNeeded();
   }
 
-  /** 事件区只呈现对玩家有意义的最新结果，避免长期显示无效占位文案。 */
+  /** 命中/认可度/Boss 等即时反馈全部由 FxLayer 飘字承担；
+   *  HUD 提示行只保留教学引导文案，命中后清空，避免变成第二个控制台。 */
   private bindEventFeed(): void {
     this.clearEventFeed();
-    const propName = (prop: PropType): string => GameRunner.PROP_LABELS[GameRunner.PROP_TYPES.indexOf(prop)] ?? '道具';
     this.eventUnsubs.push(
-      this.game.bus.on('CardHit', ({ prop, slot, quality }) => {
-        this.setEventText(`${propName(prop)}命中第${slot + 1}格 · ${quality === 'perfect' ? '精准' : '已处理'}`);
+      this.game.bus.on('CardHit', () => {
+        this.setEventText('');
         this.completeTutorial();
       }),
-      this.game.bus.on('ApprovalChanged', ({ delta }) => this.setEventText(`认可度 ${delta > 0 ? '+' : ''}${delta}`)),
-      this.game.bus.on('PropUnavailable', ({ prop }) => this.setEventText(`${propName(prop)}暂时无法使用`)),
-      this.game.bus.on('BossIncoming', () => this.setEventText('Boss 临检正在接近')),
-      this.game.bus.on('KissUpFreeze', ({ durationSec }) => this.setEventText(`拍马屁生效 · 传送带暂停 ${durationSec.toFixed(1)}s`)),
     );
   }
 
@@ -452,11 +447,6 @@ export class GameRunner extends Component {
 
   private setEventText(text: string): void {
     this.lastEventText = text.replace(/^事件\s*[·:：]\s*/, '');
-  }
-
-  private missionTitle(index = this.session.currentIndex): string {
-    const title = getLevel(index).title ?? '';
-    return title.includes('·') ? title.split('·').slice(1).join('·') : title || '替代警报';
   }
 
   private shouldShowTutorial(): boolean {
@@ -807,7 +797,7 @@ export class GameRunner extends Component {
     const label = labelNode.getComponent(Label);
     if (label) {
       label.isBold = true;
-      label.color = Color.WHITE;
+      label.color = UiTokens.color.inkDeep;
       label.lineHeight = 32;
       label.horizontalAlign = 1;
       label.verticalAlign = 1;
@@ -1026,8 +1016,8 @@ export class GameRunner extends Component {
     labelNode.addComponent(UITransform).setContentSize(w - 12, h - 6);
     const lbl = labelNode.addComponent(Label);
     lbl.string = text;
-    const darkText = base.r + base.g + base.b > 470;
-    UiPainter.label(lbl, 19, darkText ? UiTokens.color.ink : Color.WHITE, true);
+    // 键帽面已统一为纸色系，文字一律用深墨保证对比。
+    UiPainter.label(lbl, 19, UiTokens.color.inkDeep, true);
     lbl.horizontalAlign = 1;
     lbl.verticalAlign = 1;
     btn.on(Node.EventType.TOUCH_END, () => { btn.setScale(1, 1, 1); onTap(); });
@@ -1683,7 +1673,6 @@ export class GameRunner extends Component {
         status: statusLine,
         count,
         icon: this.propSfFor(type),
-        background: this.propButtonSfFor(i, state),
       });
     });
   }
@@ -1845,14 +1834,12 @@ export class GameRunner extends Component {
   private render(): void {
     const snap = this.game.getSnapshot();
 
-    // ── 标题：动态节点 ──
+    // ── 标题：主标题 + 关卡号合并成一条，去掉会被显示器压住的独立副标题 ──
     if (this.gameTitleNode) {
       const tl = this.gameTitleNode.getComponent(Label);
       if (tl) {
-        tl.string = this.compactHeader
-          ? `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`
-          : '别让AI替代你';
-        tl.fontSize = this.compactHeader ? 26 : 36;
+        tl.string = `别让AI替代你 · 第${this.session.currentIndex + 1}关`;
+        tl.fontSize = 30;
         tl.lineHeight = tl.fontSize + 6;
         tl.color = new Color(48, 40, 34, 255);
         tl.isBold = true;
@@ -1940,22 +1927,38 @@ export class GameRunner extends Component {
       baseSprite.enabled = false;
       accentSprite.enabled = false;
       g.clear();
-      const radius = Math.min(13, Math.max(9, w * 0.18));
+      // 空槽 = 虚线描边"幽灵槽"：实心灰块看起来像素材加载失败，
+      // 虚线轮廓 + 极淡底传达"这里会来卡片"的预期，且不与真卡抢视觉。
       const foot = Math.max(5, Math.min(8, h * 0.08));
-      g.fillColor = new Color(52, 46, 39, 28);
-      g.roundRect(-w / 2 + 3, -h / 2 - foot - 1, w - 6, h - 4, radius + 2);
+      const gx = -w / 2 + 7;
+      const gy = -h / 2 + 7;
+      const gw = w - 14;
+      const gh = h - foot - 14;
+      g.fillColor = new Color(225, 216, 202, 30);
+      g.roundRect(gx, gy, gw, gh, Math.min(12, w * 0.16));
       g.fill();
-      g.fillColor = new Color(225, 216, 202, 92);
-      g.strokeColor = new Color(72, 63, 54, 58);
+      g.strokeColor = new Color(72, 63, 54, 60);
       g.lineWidth = 2;
-      g.roundRect(-w / 2 + 5, -h / 2 + 5, w - 10, h - foot - 10, radius);
-      g.fill();
-      g.stroke();
-      g.strokeColor = new Color(255, 250, 241, 58);
-      g.lineWidth = 1;
-      g.moveTo(-w / 2 + radius, h / 2 - foot - 13);
-      g.lineTo(w / 2 - radius, h / 2 - foot - 13);
-      g.stroke();
+      const dash = 7;
+      const gapLen = 6;
+      const dashLine = (x1: number, y1: number, x2: number, y2: number) => {
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const steps = Math.max(1, Math.floor(len / (dash + gapLen)));
+        const ux = (x2 - x1) / len;
+        const uy = (y2 - y1) / len;
+        for (let s = 0; s < steps; s++) {
+          const sx = x1 + ux * s * (dash + gapLen);
+          const sy = y1 + uy * s * (dash + gapLen);
+          g.moveTo(sx, sy);
+          g.lineTo(sx + ux * dash, sy + uy * dash);
+        }
+        g.stroke();
+      };
+      const inset = 4;
+      dashLine(gx + inset, gy, gx + gw - inset, gy);
+      dashLine(gx + gw, gy + inset, gx + gw, gy + gh - inset);
+      dashLine(gx + gw - inset, gy + gh, gx + inset, gy + gh);
+      dashLine(gx, gy + gh - inset, gx, gy + inset);
       return;
     }
     const baseFrame = this.artSprites.get('task-card-base') ?? null;
@@ -2093,7 +2096,7 @@ export class GameRunner extends Component {
     }
   }
 
-  /** 创建一张真实卡片的独立节点；入口卡从屏幕右外侧线性进入。 */
+  /** 创建一张真实卡片的独立��点；入口卡从屏幕右外侧线性进入。 */
   private createCardVisual(card: Card, slotIndex: number): CardVisual {
     const template = this.slotNodes[Math.min(slotIndex, this.slotNodes.length - 1)];
     const node = instantiate(template);
@@ -2255,7 +2258,7 @@ export class GameRunner extends Component {
     return iconNode.getComponent(Sprite)!;
   }
 
-  /** 卡牌类别 → SpriteFrame 映射（null = 没素材，走 Label 兜底）。 */
+  /** 卡牌类别 → SpriteFrame ��射（null = 没素材，走 Label 兜底）。 */
   private cardSfFor(cat: Card['category']): SpriteFrame | null {
     const key = GameRunner.CARD_ART_KEYS[cat] ?? `card-${cat}`;
     return this.artSprites.get(key) ?? this.artSprites.get(`card-${cat}`) ?? null;
@@ -2277,13 +2280,6 @@ export class GameRunner extends Component {
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     if (idx < 0) return null;
     return this.artSprites.get(GameRunner.PROP_ART_KEYS[idx]) ?? null;
-  }
-
-  private propButtonSfFor(index: number, state: KeycapState): SpriteFrame | null {
-    const key = state === 'locked'
-      ? GameRunner.PROP_LOCKED_BUTTON_ART_KEYS[index]
-      : GameRunner.PROP_BUTTON_ART_KEYS[index];
-    return key ? (this.artSprites.get(key) ?? null) : null;
   }
 
   /** 背景图比例常量（白底AI图纯抠透明，无插入，角色可稍挡显示器底部）。
@@ -2382,22 +2378,24 @@ export class GameRunner extends Component {
     const surfaceG = this.monitorSurfaceNode.getComponent(Graphics)!;
     surfaceG.clear();
     const surfaceRadius = 14;
-    const surfaceHeaderH = Math.max(34, Math.min(44, surfaceH * 0.18));
+    // 深灰标题栏信息价值低且压缩内屏空间，降级为一条细状态灯带（保留"设备感"）。
+    const surfaceHeaderH = 16;
     surfaceG.fillColor = new Color(246, 238, 225, 255);
     surfaceG.strokeColor = new Color(88, 78, 68, 210);
     surfaceG.lineWidth = 2.5;
     surfaceG.roundRect(-surfaceW / 2, -surfaceH / 2, surfaceW, surfaceH, surfaceRadius);
     surfaceG.fill(); surfaceG.stroke();
-    surfaceG.fillColor = new Color(84, 80, 73, 255);
-    surfaceG.roundRect(-surfaceW / 2, surfaceH / 2 - surfaceHeaderH, surfaceW, surfaceHeaderH, surfaceRadius);
+    surfaceG.fillColor = new Color(88, 78, 68, 36);
+    surfaceG.roundRect(-surfaceW / 2 + 3, surfaceH / 2 - surfaceHeaderH, surfaceW - 6, surfaceHeaderH - 3, surfaceRadius * 0.6);
     surfaceG.fill();
-    surfaceG.rect(-surfaceW / 2, surfaceH / 2 - surfaceHeaderH - surfaceRadius, surfaceW, surfaceRadius + 1);
-    surfaceG.fill();
-    surfaceG.strokeColor = new Color(88, 78, 68, 180);
-    surfaceG.lineWidth = 2;
-    surfaceG.moveTo(-surfaceW / 2, surfaceH / 2 - surfaceHeaderH);
-    surfaceG.lineTo(surfaceW / 2, surfaceH / 2 - surfaceHeaderH);
-    surfaceG.stroke();
+    // 左上角三颗小指示灯（琥珀主色 + 两颗墨灰），代替整条文字标题。
+    const lampY = surfaceH / 2 - surfaceHeaderH / 2 - 1;
+    const lampColors = [new Color(244, 172, 32, 255), new Color(136, 126, 112, 255), new Color(136, 126, 112, 255)];
+    lampColors.forEach((c, i) => {
+      surfaceG.fillColor = c;
+      surfaceG.circle(-surfaceW / 2 + 18 + i * 14, lampY, 3.2);
+      surfaceG.fill();
+    });
 
     // 桌面陈设是独立真素材：补足办公室叙事，同时中央 48% 保持透明给机器人与弹道。
     const decorSf = this.artSprites.get('desk-decor');
@@ -2452,17 +2450,20 @@ export class GameRunner extends Component {
       lbl.overflow = Label.Overflow.SHRINK;
       lbl.color = new Color(70, 60, 50, 255);
     }
-    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.68, 470), 50);
-    this.gameTitleNode.setPosition(0, titleY, 0);
+    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.62, 440), 50);
+    // 标题略偏左，给右侧计时器铭牌让位，两者同一行同一水平线。
+    this.gameTitleNode.setPosition(-visSize.width * 0.06, titleY, 0);
     const tl = this.gameTitleNode.getComponent(Label)!;
-    tl.string = this.compactHeader
-      ? `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`
-      : '别让AI替代你';
-    tl.fontSize = this.compactHeader ? 26 : 36;
+    tl.string = `别让AI替代你 · 第${this.session.currentIndex + 1}关`;
+    tl.fontSize = 30;
     tl.lineHeight = tl.fontSize + 6;
     tl.color = new Color(48, 40, 34, 255);
 
-    if (!this.compactHeader) this.layoutSubtitle(visSize.width, titleY - Math.max(36, visSize.height * 0.04));
+    // 独立副标题已合并进主标题，彻底移��被显示器边框遮挡的问题节点。
+    if (this.subtitleNode) {
+      this.subtitleNode.destroy();
+      this.subtitleNode = null;
+    }
 
     // ── 动态计时器 ──
     if (!this.gameTimerNode) {
@@ -2512,80 +2513,22 @@ export class GameRunner extends Component {
     plateG.circle(-plateW / 2 + 15, plateH / 2 - 13, 4);
     plateG.fill();
 
-    // 显示器内标题栏与左右方向标注分层，贴近目标图的实体 UI。
-    if (!this.monitorLabelNode) {
-      this.monitorLabelNode = new Node('MonitorFlowLabel');
-      this.monitorLabelNode.layer = 1 << 25;
-      this.monitorLabelNode.parent = this.node;
-      this.monitorLabelNode.addComponent(UITransform);
-      const ml = this.monitorLabelNode.addComponent(Label);
-      ml.fontFamily = 'PingFang SC';
-      ml.horizontalAlign = 1;
-      ml.verticalAlign = 1;
-      ml.isBold = true;
-      ml.overflow = Label.Overflow.SHRINK;
-      ml.color = new Color(238, 235, 228, 255);
-    }
-    const monitorLabel = this.monitorLabelNode.getComponent(Label)!;
-    monitorLabel.string = 'AI显示器 · 任务流';
-    monitorLabel.fontSize = Math.min(21, Math.max(16, visSize.width * 0.034));
-    monitorLabel.lineHeight = monitorLabel.fontSize + 4;
-    monitorLabel.color = new Color(240, 237, 230, 255);
-    this.monitorLabelNode.getComponent(UITransform)!.setContentSize(surfaceW * 0.72, surfaceHeaderH);
-    this.monitorLabelNode.setPosition(0, this.monitorSurfaceNode.position.y + surfaceH / 2 - surfaceHeaderH / 2, 0);
-
-    if (!this.monitorProcessLabelNode) {
-      this.monitorProcessLabelNode = new Node('MonitorProcessLabel');
-      this.monitorProcessLabelNode.layer = 1 << 25;
-      this.monitorProcessLabelNode.parent = this.node;
-      this.monitorProcessLabelNode.addComponent(UITransform);
-      const lbl = this.monitorProcessLabelNode.addComponent(Label);
-      lbl.fontFamily = 'PingFang SC';
-      lbl.horizontalAlign = 0;
-      lbl.verticalAlign = 1;
-      lbl.isBold = true;
-      lbl.overflow = Label.Overflow.SHRINK;
-    }
-    if (!this.monitorEntryLabelNode) {
-      this.monitorEntryLabelNode = new Node('MonitorEntryLabel');
-      this.monitorEntryLabelNode.layer = 1 << 25;
-      this.monitorEntryLabelNode.parent = this.node;
-      this.monitorEntryLabelNode.addComponent(UITransform);
-      const lbl = this.monitorEntryLabelNode.addComponent(Label);
-      lbl.fontFamily = 'PingFang SC';
-      lbl.horizontalAlign = 2;
-      lbl.verticalAlign = 1;
-      lbl.isBold = true;
-      lbl.overflow = Label.Overflow.SHRINK;
-    }
-    const sideLabelY = this.monitorSurfaceNode.position.y + surfaceH / 2 - surfaceHeaderH - Math.max(27, surfaceH * 0.14);
-    const sideFont = Math.min(20, Math.max(16, visSize.width * 0.030));
-    const sideLabelW = surfaceW * 0.28;
-    const sidePad = Math.max(26, surfaceW * 0.035);
-    const processLabel = this.monitorProcessLabelNode.getComponent(Label)!;
-    processLabel.string = '处理→';
-    processLabel.fontSize = sideFont;
-    processLabel.lineHeight = sideFont + 4;
-    processLabel.color = new Color(76, 67, 58, 255);
-    this.monitorProcessLabelNode.getComponent(UITransform)!.setContentSize(sideLabelW, 28);
-    this.monitorProcessLabelNode.setPosition(-surfaceW / 2 + sidePad + sideLabelW / 2, sideLabelY, 0);
-    const entryLabel = this.monitorEntryLabelNode.getComponent(Label)!;
-    entryLabel.string = '←入口';
-    entryLabel.fontSize = sideFont;
-    entryLabel.lineHeight = sideFont + 4;
-    entryLabel.color = new Color(76, 67, 58, 255);
-    this.monitorEntryLabelNode.getComponent(UITransform)!.setContentSize(sideLabelW, 28);
-    this.monitorEntryLabelNode.setPosition(surfaceW / 2 - sidePad - sideLabelW / 2, sideLabelY, 0);
+    // "AI显示器·任务流"与"处理→/←入口"浮动文字全部移除：
+    // 内屏灯带提供设备感，流向信息由传送带两端的图形化箭头槽口承担（见 conveyorTrack 绘制）。
+    if (this.monitorLabelNode) { this.monitorLabelNode.destroy(); this.monitorLabelNode = null; }
+    if (this.monitorProcessLabelNode) { this.monitorProcessLabelNode.destroy(); this.monitorProcessLabelNode = null; }
+    if (this.monitorEntryLabelNode) { this.monitorEntryLabelNode.destroy(); this.monitorEntryLabelNode = null; }
 
     // Belt（传送带卡槽）放在标题和状态行之间，卡牌始终限制在显示器内。
     if (this.beltNode) {
-      const beltY = (hudTopY + hudBottomY) / 2 - (screenTopY - screenBottomY) * 0.070;
+      const beltY = (hudTopY + hudBottomY) / 2 - (screenTopY - screenBottomY) * 0.040;
       this.beltNode.setPosition(this.beltNode.position.x, beltY, 0);
       let beltUt = this.beltNode.getComponent(UITransform);
       if (!beltUt) beltUt = this.beltNode.addComponent(UITransform);
-      // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度
+      // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度。
+      // 标题栏降级为灯带后内屏可用高度增加，全部还给卡片：目标要大、要可点。
       const beltW = Math.min(screenWidthPx * 0.94, visSize.width * 0.92);
-      const beltH = Math.max(154, Math.min((screenTopY - screenBottomY) * 0.70, 188));
+      const beltH = Math.max(170, Math.min((screenTopY - screenBottomY) * 0.80, 230));
       beltUt.setContentSize(beltW, beltH);
       if (!this.conveyorTrackNode) {
         this.conveyorTrackNode = new Node('ConveyorTrack');
@@ -2643,6 +2586,14 @@ export class GameRunner extends Component {
         trackG.lineWidth = 2;
         trackG.circle(x, 0, rollerR * 0.55);
         trackG.fill(); trackG.stroke();
+        // 滚轮上的向左流向箭头：替代原"处理→ / ←入口"浮动文字，图形化表达任务流向。
+        const aw = rollerR * 0.46;
+        trackG.fillColor = new Color(238, 233, 222, 235);
+        trackG.moveTo(x - aw, 0);
+        trackG.lineTo(x + aw * 0.5, aw * 0.85);
+        trackG.lineTo(x + aw * 0.5, -aw * 0.85);
+        trackG.close();
+        trackG.fill();
       });
       const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
       mask.type = Mask.Type.GRAPHICS_RECT;
@@ -2690,33 +2641,8 @@ export class GameRunner extends Component {
     if (this.monitorSurfaceNode) this.monitorSurfaceNode.active = playing;
     if (this.conveyorTrackNode) this.conveyorTrackNode.active = playing;
     if (this.deskDecorNode) this.deskDecorNode.active = playing;
-    if (this.subtitleNode) this.subtitleNode.active = playing && !this.compactHeader;
     if (this.actionDockNode) this.actionDockNode.active = playing && this.aimingProp !== null;
     if (this.lowerHudNode) this.lowerHudNode.active = playing;
-  }
-  /** 副标题固定在主标题与显示器之间，不进入显示器内屏。 */
-  private layoutSubtitle(viewWidth: number, y: number): void {
-    if (!this.subtitleNode) {
-      const node = new Node('Subtitle');
-      node.layer = 1 << 25;
-      node.addComponent(UITransform);
-      const label = node.addComponent(Label);
-      label.fontFamily = 'PingFang SC';
-      label.color = new Color(65, 57, 49, 255);
-      label.horizontalAlign = 1;
-      label.verticalAlign = 1;
-      label.isBold = true;
-      label.overflow = Label.Overflow.SHRINK;
-      node.parent = this.node;
-      this.subtitleNode = node;
-    }
-    const label = this.subtitleNode.getComponent(Label)!;
-    label.string = `第${this.session.currentIndex + 1}关 · ${this.missionTitle()}`;
-    label.fontSize = Math.min(20, Math.max(15, viewWidth * .045));
-    label.lineHeight = label.fontSize + 5;
-    this.subtitleNode.getComponent(UITransform)!.setContentSize(Math.min(viewWidth * .7, 460), 28);
-    this.subtitleNode.setPosition(0, y, 0);
-    this.subtitleNode.active = this.uiState === 'playing';
   }
 
   /** 认可度仪表：尺寸与状态由 ApprovalGaugeView 统一管理。 */
@@ -2733,9 +2659,10 @@ export class GameRunner extends Component {
 
     const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + 110;
     const btnH = Math.min(128, Math.max(96, viewHeight * 0.070));
-    const panelW = Math.min(viewWidth * 0.94, 720);
-    const panelH = 150;
-    const panelY = btnY + btnH / 2 + panelH / 2 + Math.max(84, viewHeight * 0.072);
+    // 删除刻度行与事件条后，铭牌更矮更窄，贴近按钮区消除大片死区。
+    const panelW = Math.min(viewWidth * 0.86, 620);
+    const panelH = 112;
+    const panelY = btnY + btnH / 2 + panelH / 2 + Math.max(40, viewHeight * 0.038);
 
     const node = this.lowerHudNode;
     node.setSiblingIndex(this.node.children.length - 1);
@@ -2759,7 +2686,7 @@ export class GameRunner extends Component {
     const sideInset = Math.max(6, Math.min(11, totalW * 0.018));
     const usableW = totalW - sideInset * 2;
     const slotW = (usableW - gap * (n - 1)) / n;
-    // 任务卡跟随 demo 的实体卡比例：宁愿轻微拥挤，也不要缩成廉价小标签。
+    // 任务卡跟随 demo 的实体��比例：宁愿轻微拥挤，也不要缩成廉价小标签。
     const cardH = Math.min(slotH * 0.88, slotW * 1.22);
     const cardY = Math.max(8, Math.min(14, slotH * 0.085));
     const startX = -totalW / 2 + sideInset + slotW / 2;
@@ -2898,7 +2825,7 @@ export class GameRunner extends Component {
     });
   }
 
-  /** 背景是按钮的兄弟节点并排在按钮之前，保证不会遮住 Label，也不会污染按钮事件列表。 */
+  /** 背景是按钮的兄弟节点并排在按钮之前，保证不会遮住 Label，也不会污染按钮��件列表。 */
   private ensurePropButtonBackgrounds(): void {
     if (!this.propButtons || this.propButtonBackgrounds.length > 0) return;
     this.propButtonNodes.forEach((_, i: number) => {

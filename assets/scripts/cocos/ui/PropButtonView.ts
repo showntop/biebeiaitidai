@@ -45,7 +45,7 @@ export class PropButtonView {
 
     this.actionLabel.node.getComponent(UITransform)?.setContentSize(width * 0.58, 34);
     this.actionLabel.node.setPosition(width * 0.16, height * 0.12, 0);
-    UiPainter.label(this.actionLabel, Math.min(UiTokens.type.action, width * 0.17), Color.WHITE, true);
+    UiPainter.label(this.actionLabel, Math.min(UiTokens.type.action, width * 0.17), UiTokens.color.inkDeep, true);
 
     this.countLabel.node.getComponent(UITransform)?.setContentSize(width * 0.58, 24);
     this.countLabel.node.setPosition(width * 0.16, -height * 0.22, 0);
@@ -71,23 +71,24 @@ export class PropButtonView {
     } else {
       if (bgSprite) bgSprite.enabled = false;
       if (ut && g) UiPainter.keycap(g, ut.width, ut.height, value.base, value.state);
+      // 锁定/用尽不换皮：同一键帽降饱和 + 半透明图标，保持世界观一致。
       this.iconSprite.spriteFrame = value.icon;
-      this.iconSprite.enabled = !!value.icon && !disabled;
-      this.iconSprite.color = disabled ? alphaColor(UiTokens.color.muted, 145) : Color.WHITE;
+      this.iconSprite.enabled = !!value.icon;
+      this.iconSprite.color = disabled ? alphaColor(Color.WHITE, 110) : Color.WHITE;
       this.actionLabel.enabled = true;
     }
 
     this.actionLabel.string = value.action;
-    this.actionLabel.color = disabled ? UiTokens.color.muted : Color.WHITE;
+    this.actionLabel.color = disabled ? UiTokens.color.muted : UiTokens.color.inkDeep;
     this.countLabel.string = value.count;
-    UiPainter.label(this.countLabel, UiTokens.type.micro, disabled ? UiTokens.color.muted : alphaColor(Color.WHITE, 230), true);
+    UiPainter.label(this.countLabel, UiTokens.type.micro, disabled ? UiTokens.color.muted : alphaColor(UiTokens.color.ink, 225), true);
     const statusBakedIntoAsset = !!value.background && value.state === 'locked';
     this.statusLabel.node.active = !statusBakedIntoAsset && value.status.length > 0 && value.status !== '就绪';
     this.statusLabel.string = value.status;
     UiPainter.label(
       this.statusLabel,
       UiTokens.type.micro,
-      disabled ? UiTokens.color.muted : alphaColor(Color.WHITE, 220),
+      disabled ? UiTokens.color.muted : alphaColor(UiTokens.color.ink, 200),
       false,
     );
   }
