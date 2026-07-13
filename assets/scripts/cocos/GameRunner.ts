@@ -2489,7 +2489,8 @@ export class GameRunner extends Component {
       sub.isBold = true;
       sub.overflow = Label.Overflow.SHRINK;
     }
-    const subtitleY = titleY - 30;
+    // 下限保护：副标题绝不低于显示器上边框，彻底杜绝被机身遮挡。
+    const subtitleY = Math.max(titleY - 30, screenTopY + 22);
     this.subtitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 460), 26);
     this.subtitleNode.setPosition(0, subtitleY, 0);
     const subLabel = this.subtitleNode.getComponent(Label)!;
@@ -2571,10 +2572,8 @@ export class GameRunner extends Component {
 
       // ── 传送带凹槽机箱 ──
       // 6 张卡横排导致卡片被宽度限制、无法靠放大填满高屏，于是把传送带嵌进一个
-      // 占满内屏的凹槽面板：给传送带明确容器 + 屏内层次，彻底消除"空荡荡"的观感。
+      // 占满内屏的凹槽面板：给传送带明确容器 + 屏内层次，彻底���除"空荡荡"的观感。
       // 画在 surfaceG（屏面 Graphics）上，位于卡片与轨道之下。
-      const surfaceCenterY = (screenTopY + screenBottomY) / 2;
-      const beltLocalY = beltY - surfaceCenterY;
       const trayW = surfaceW * 0.93;
       const trayTopLocal = surfaceH / 2 - surfaceHeaderH - 10;
       const trayBottomLocal = -surfaceH / 2 + 12;
@@ -2609,7 +2608,6 @@ export class GameRunner extends Component {
       surfaceG.fillColor = new Color(244, 172, 32, 72);
       surfaceG.roundRect(-trayW / 2 + 12, scanY - 1, trayW - 24, 2, 1);
       surfaceG.fill();
-      void beltLocalY;
 
       if (!this.conveyorTrackNode) {
         this.conveyorTrackNode = new Node('ConveyorTrack');
@@ -2764,13 +2762,14 @@ export class GameRunner extends Component {
   private layoutBeltSlots(totalW: number, slotH: number): void {
     if (!this.beltNode || this.slotNodes.length === 0) return;
     const n = this.slotNodes.length;
-    const gap = Math.max(3, Math.min(6, totalW * 0.009));
-    const sideInset = Math.max(6, Math.min(11, totalW * 0.018));
+    const gap = Math.max(2, Math.min(5, totalW * 0.007));
+    const sideInset = Math.max(4, Math.min(8, totalW * 0.012));
     const usableW = totalW - sideInset * 2;
     const slotW = (usableW - gap * (n - 1)) / n;
-    // 任务卡跟随 demo 的实体��比例：宁愿轻微拥挤，也不要缩成廉价小标签。
-    const cardH = Math.min(slotH * 0.88, slotW * 1.22);
-    const cardY = Math.max(8, Math.min(14, slotH * 0.085));
+    // 托盘机箱把卡片框进容器后，卡片可以做得更修长饱满（文件卡纵向比例），
+    // 尽量吃满托盘高度，彻底摆脱"漂浮的小标签"观感。
+    const cardH = Math.min(slotH * 0.94, slotW * 1.5);
+    const cardY = Math.max(6, Math.min(12, slotH * 0.06));
     const startX = -totalW / 2 + sideInset + slotW / 2;
     this.slotNodes.forEach((slot: Node, i: number) => {
       let ut = slot.getComponent(UITransform);
