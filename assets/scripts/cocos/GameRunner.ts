@@ -1683,7 +1683,6 @@ export class GameRunner extends Component {
         status: statusLine,
         count,
         icon: this.propSfFor(type),
-        background: this.propButtonSfFor(i, state),
       });
     });
   }
@@ -2255,7 +2254,7 @@ export class GameRunner extends Component {
     return iconNode.getComponent(Sprite)!;
   }
 
-  /** 卡牌类别 → SpriteFrame 映射（null = 没素材，走 Label 兜底）。 */
+  /** 卡牌类别 → SpriteFrame ��射（null = 没素材，走 Label 兜底）。 */
   private cardSfFor(cat: Card['category']): SpriteFrame | null {
     const key = GameRunner.CARD_ART_KEYS[cat] ?? `card-${cat}`;
     return this.artSprites.get(key) ?? this.artSprites.get(`card-${cat}`) ?? null;
@@ -2898,7 +2897,7 @@ export class GameRunner extends Component {
     });
   }
 
-  /** 背景是按钮的兄弟节点并排在按钮之前，保证不会遮住 Label，也不会污染按钮事件列表。 */
+  /** 背景是按钮的兄弟节点并排在按钮之前，保证不会遮住 Label，也不会污染按钮��件列表。 */
   private ensurePropButtonBackgrounds(): void {
     if (!this.propButtons || this.propButtonBackgrounds.length > 0) return;
     this.propButtonNodes.forEach((_, i: number) => {
