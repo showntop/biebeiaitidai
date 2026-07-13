@@ -26,12 +26,14 @@ export class UiPainter {
     const disabled = locked || depleted;
     const ink = new Color(76, 67, 58, 255);
     const softInk = new Color(112, 101, 88, 255);
+    // 纸质键帽：面色以纸为主、只带一点功能色，功能识别交给图标与底部色带。
+    // 避免高饱和糖果面与桌面纸质世界观割裂。
     const face = disabled
       ? mixColor(UiTokens.color.disabled, UiTokens.color.paper, locked ? 0.42 : 0.26)
-      : mixColor(base, UiTokens.color.paper, 0.08);
+      : mixColor(base, UiTokens.color.paper, 0.62);
     const edge = disabled
       ? mixColor(UiTokens.color.disabled, softInk, 0.22)
-      : mixColor(base, ink, 0.34);
+      : mixColor(mixColor(base, UiTokens.color.paper, 0.30), ink, 0.30);
     const lift = pressed ? 2 : 6;
     const faceShift = pressed ? -1 : 0;
     const radius = Math.min(UiTokens.radius.large, h * 0.20);
@@ -50,9 +52,15 @@ export class UiPainter {
     g.roundRect(-w / 2 + 4, -h / 2 + 4 + faceShift, w - 8, h - lift - 6, radius - 3);
     g.fill(); g.stroke();
 
-    g.fillColor = alphaColor(mixColor(edge, ink, 0.22), disabled ? 46 : 108);
-    g.roundRect(-w / 2 + 8, -h / 2 + 6 + faceShift, w - 16, Math.max(6, h * 0.08), 5);
+    // 面顶细暗带（保留键帽体量感）+ 底部功能色带（低成本区分功能，不靠整面换色）。
+    g.fillColor = alphaColor(mixColor(edge, ink, 0.22), disabled ? 46 : 88);
+    g.roundRect(-w / 2 + 8, -h / 2 + 6 + faceShift, w - 16, Math.max(5, h * 0.06), 5);
     g.fill();
+    if (!disabled) {
+      g.fillColor = alphaColor(mixColor(base, ink, 0.12), 210);
+      g.roundRect(-w / 2 + 10, h / 2 - lift - 13 + faceShift, w - 20, 6, 3);
+      g.fill();
+    }
 
     g.strokeColor = alphaColor(Color.WHITE, disabled ? 24 : 78);
     g.lineWidth = UiTokens.stroke.hairline;

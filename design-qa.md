@@ -194,6 +194,29 @@ final result: passed
 - Browser QA confirms the bottom prop buttons render as full PNG assets at 390 × 844, and task cards + buttons coexist cleanly in the live gameplay state.
 
 final result: passed
+## Minimal start page card/button refinement — 2026-07-14
+
+- Reference screenshot supplied by user: `/var/folders/jn/1zg6fv2x4p5d_ynwx4p2g4pm0000gn/T/codex-clipboard-de825c84-aeff-4157-9987-af18da7fc4ad.png`
+- Final browser QA screenshot: `/Users/denny/Work/biebeiaitidai/qa-start-card-button-v8.png`
+- Runtime: Cocos web-mobile build, local browser preview.
+
+### What changed
+
+- Tightened start-card metrics so the entry card no longer feels like a stretched horizontal panel in wider previews, while keeping the tall-phone layout close to the supplied reference.
+- Rebalanced card vertical position, radius, border, and shadow to read softer and closer to the paper mock.
+- Reduced the primary CTA’s height, text size, play icon size, highlight strip, and bottom depth so it reads like the reference’s friendly thick button instead of a heavy blue brick.
+- Reworked the spacing between the three gameplay cards, CTA, and progress row to remove overlap and restore clear rhythm.
+- Adjusted the three gameplay cards toward rounded soft chips with lighter icon badges.
+
+### Verification
+
+- `npx tsc --noEmit`: passed.
+- `npm test`: 92 tests passed.
+- Cocos `web-mobile` build completed; Creator still exits with code 36/SIGTERM after the successful build task, but the build log ends with `build Task (web-mobile) Finished`.
+- Browser console check: no warning/error messages on the refined start page.
+
+final result: passed
+
 ## Minimal start page rebuild — 2026-07-13
 
 - Reference screenshot supplied by user: `/var/folders/jn/1zg6fv2x4p5d_ynwx4p2g4pm0000gn/T/codex-clipboard-de825c84-aeff-4157-9987-af18da7fc4ad.png`

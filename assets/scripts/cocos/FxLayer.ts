@@ -152,8 +152,9 @@ export class FxLayer {
   /* ---------- 分区跨越（全屏色闪） ---------- */
 
   private fxZoneChange(to: ApprovalZone): void {
+    // 猎杀闪屏从荧光紫改为深警示红棕，与危险红同族，避免引入第4种情绪色。
     const colors: Record<string, Color> = {
-      hunt: new Color(100, 80, 255, 90),
+      hunt: new Color(150, 66, 58, 96),
       good: new Color(80, 200, 80, 60),
       ok: new Color(200, 180, 60, 50),
       danger: new Color(220, 60, 60, 100),
@@ -186,8 +187,9 @@ export class FxLayer {
   /* ---------- 拍马屁冻结 ---------- */
 
   private fxKissUpFreeze(durationSec: number): void {
-    this.flashOverlay(new Color(80, 150, 255, 70), Math.max(durationSec, 0.5));
-    this.floatText('冻结!', 0, 50, new Color(100, 180, 255), Math.max(durationSec, 0.8));
+    // 冻结提示用琥珀金（正向增益），不引入界面外的荧光蓝。
+    this.flashOverlay(new Color(244, 172, 32, 56), Math.max(durationSec, 0.5));
+    this.floatText('传送带暂停!', 0, 50, new Color(244, 172, 32), Math.max(durationSec, 0.8));
   }
 
   /* ---------- 复活 ---------- */
@@ -206,8 +208,8 @@ export class FxLayer {
   /* ---------- 猎杀线 ---------- */
 
   private fxHuntCharge(): void {
-    this.flashOverlay(new Color(100, 80, 255, 80), 0.8);
-    this.floatText('猎杀倒计时!', 0, 80, new Color(180, 120, 255), 1.2);
+    this.flashOverlay(new Color(150, 66, 58, 84), 0.8);
+    this.floatText('猎杀倒计时!', 0, 80, new Color(226, 96, 80), 1.2);
   }
 
   /* ---------- 猎杀中断（脱险） ---------- */
