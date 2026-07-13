@@ -248,6 +248,13 @@ export class GameRunner extends Component {
   private static readonly UI_MUTED = new Color(126, 114, 99, 255);
   private static readonly UI_WALNUT = new Color(168, 124, 88, 255);
   private static readonly UI_DANGER = new Color(220, 60, 60, 255);
+  private static readonly START_BG = new Color(238, 229, 215, 255);
+  private static readonly START_CARD = new Color(255, 252, 246, 255);
+  private static readonly START_SOFT = new Color(238, 232, 222, 255);
+  private static readonly START_BLUE = new Color(47, 145, 223, 255);
+  private static readonly START_BLUE_DARK = new Color(13, 119, 190, 255);
+  private static readonly START_TEXT = new Color(50, 40, 33, 255);
+  private static readonly START_MUTED = new Color(116, 106, 95, 255);
 
   onLoad(): void {
     this.hideDebugOverlays();
@@ -596,7 +603,7 @@ export class GameRunner extends Component {
     }
   }
 
-  /** 动态创建开始页覆盖层 —— 方案 3：精密桌面玩具式入口。 */
+  /** 动态创建开始页覆盖层 —— 简洁纸感小游戏入口。 */
   private createLevelSelectUI(): Node {
     const root = new Node('LevelSelectUI');
     root.layer = 33554432; // UI_2D
@@ -606,46 +613,52 @@ export class GameRunner extends Component {
     this.node.addChild(root);
 
     const vis = view.getVisibleSize();
-    const posterW = Math.min(vis.width * 0.88, 650);
-    const posterH = Math.min(vis.height * 0.56, 610);
-    const posterCY = vis.height * 0.055;
+    const cardW = Math.min(vis.width * 0.91, 1000);
+    const cardH = Math.min(vis.height * 0.47, 1080);
+    const cardCY = -vis.height * 0.006;
 
-    // ── 顶部铭牌：把题材说清楚，但不抢主标题 ──
-    this.paintStartAlertBar(root, posterW, posterH, posterCY);
+    this.paintStartAlertBar(root, cardW, cardH, cardCY);
 
-    // ── 主标题：单一强焦点，不再做倾斜海报 ──
     const titleNode = new Node('StartTitle');
     titleNode.layer = 33554432;
     titleNode.parent = root;
-    titleNode.setPosition(0, posterCY + posterH * 0.18, 0);
-    const titleUt = titleNode.addComponent(UITransform);
-    titleUt.setContentSize(posterW * 0.84, 120);
+    titleNode.setPosition(0, cardCY + cardH * 0.205, 0);
+    titleNode.addComponent(UITransform).setContentSize(cardW * 0.96, 210);
     const titleLabel = titleNode.addComponent(Label);
     titleLabel.string = '别让AI替代你';
     titleLabel.fontFamily = 'PingFang SC';
-    titleLabel.fontSize = 42;
-    titleLabel.lineHeight = 52;
-    titleLabel.horizontalAlign = 1; // CENTER
+    titleLabel.fontSize = Math.min(132, Math.max(104, cardW * 0.12));
+    titleLabel.lineHeight = titleLabel.fontSize + 12;
+    titleLabel.horizontalAlign = 1;
     titleLabel.verticalAlign = 1;
-    titleLabel.color = new Color(28, 22, 18, 255);
+    titleLabel.color = GameRunner.START_TEXT;
     titleLabel.isBold = true;
     titleLabel.overflow = Label.Overflow.NONE;
 
-    // ── 玩法承诺：一眼讲清“扔回去” ──
-    const crisis = this.mkLabel(root, 'CrisisText', 0, posterCY + posterH * 0.02,
-      '长按纸团 · 对准卡片 · 把麻烦扔回去', 18, posterW * 0.82, 42);
-    this.styleStartLabel(crisis, GameRunner.UI_MUTED, false);
+    const crisis = this.mkLabel(root, 'CrisisText', 0, cardCY + cardH * 0.07,
+      '长按纸团，对准卡片，把麻烦稳稳扔回去。', 36, cardW * 0.78, 70);
+    this.styleStartLabel(crisis, GameRunner.START_MUTED, false);
 
-    // ── 唯一 CTA：继续最高已解锁关，避免老玩家每次回到第 1 关 ──
-    this.makeStartButton(root, 0, posterCY - posterH * 0.22, Math.min(posterW * 0.62, 360), 74,
+    this.makeStartDoodles(root, vis, cardW, cardCY);
+
+    this.makeStartButton(root, 0, cardCY - cardH * 0.285, cardW * 0.875, cardH * 0.145,
       `继续第${this.session.profile.highestUnlockedLevel + 1}关`, () => this.onLevelSelected(this.session.profile.highestUnlockedLevel));
 
-    // ── 底部进度：轻量一行 ──
-    const rank = this.mkLabel(root, 'RankInfo', 0, posterCY - posterH * 0.39, '', 16, posterW * 0.76, 30);
-    this.styleStartLabel(rank, GameRunner.UI_MUTED, false);
+    const rankIcon = new Node('RankIcon');
+    rankIcon.layer = 33554432;
+    rankIcon.parent = root;
+    rankIcon.addComponent(UITransform).setContentSize(42, 42);
+    rankIcon.setPosition(-cardW * 0.225, cardCY - cardH * 0.405, 0);
+    const rankG = rankIcon.addComponent(Graphics);
+    rankG.strokeColor = GameRunner.START_BLUE;
+    rankG.lineWidth = 4;
+    rankG.moveTo(-5, 12);
+    rankG.bezierCurveTo(18, 5, 14, -18, -2, -14);
+    rankG.bezierCurveTo(-16, -9, -12, 8, 0, 5);
+    rankG.stroke();
 
-    // ── 装饰涂鸦 ──
-    this.makeStartDoodles(root, vis, posterW, posterCY);
+    const rank = this.mkLabel(root, 'RankInfo', 36, cardCY - cardH * 0.405, '', 36, cardW * 0.66, 64);
+    this.styleStartLabel(rank, GameRunner.START_MUTED, false);
 
     return root;
   }
@@ -719,76 +732,75 @@ export class GameRunner extends Component {
 
   private paintFullScreenStartBg(g: Graphics): void {
     const vis = view.getVisibleSize();
-    const posterW = Math.min(vis.width * 0.88, 650);
-    const posterH = Math.min(vis.height * 0.56, 610);
-    const posterX = -posterW / 2;
-    const posterCY = vis.height * 0.055;
-    const posterY = posterCY - posterH / 2;
+    const cardW = Math.min(vis.width * 0.91, 1000);
+    const cardH = Math.min(vis.height * 0.47, 1080);
+    const cardCY = -vis.height * 0.006;
+    const cardX = -cardW / 2;
+    const cardY = cardCY - cardH / 2;
+    const radius = Math.min(34, cardW * 0.085);
     g.clear();
 
-    // 暖象牙墙面
-    g.fillColor = GameRunner.UI_IVORY;
+    g.fillColor = GameRunner.START_BG;
     g.rect(-vis.width / 2, -vis.height / 2, vis.width, vis.height);
     g.fill();
 
-    // 极轻纸纹：只给环境，不污染功能区
-    g.strokeColor = new Color(205, 189, 166, 42);
-    g.lineWidth = 1;
-    for (let y = -vis.height / 2 + 28; y < vis.height / 2; y += 34) {
-      g.moveTo(-vis.width / 2 + 20, y);
-      g.lineTo(vis.width / 2 - 20, y + 2);
-      g.stroke();
+    // 柔和纸面投影：不用深色外框，只用多层低透明度阴影托出卡片。
+    const shadow = new Color(108, 88, 62, 24);
+    for (let i = 0; i < 5; i++) {
+      g.fillColor = new Color(shadow.r, shadow.g, shadow.b, Math.max(4, shadow.a - i * 4));
+      g.roundRect(cardX + 5 - i, cardY - 16 - i * 3, cardW - 10 + i * 2, cardH + 2, radius + i * 2);
+      g.fill();
     }
 
-    // 入口页不再露出桌面色块；保持完整暖墙背景，避免下半屏断层。
-
-    // 入口页改成同主界面一套“显示器/桌面玩具”材质，而不是网页表单卡片。
-    g.fillColor = new Color(44, 39, 34, 92);
-    g.roundRect(posterX + 6, posterY - 10, posterW, posterH, 28);
+    g.fillColor = GameRunner.START_CARD;
+    g.strokeColor = new Color(214, 203, 188, 210);
+    g.lineWidth = 1.5;
+    g.roundRect(cardX, cardY, cardW, cardH, radius);
     g.fill();
-    g.fillColor = new Color(44, 42, 38, 255);
-    g.strokeColor = new Color(24, 23, 21, 230);
-    g.lineWidth = 4;
-    g.roundRect(posterX, posterY, posterW, posterH, 28);
-    g.fill();
-    g.stroke();
-
-    const headerH = 46;
-    g.fillColor = new Color(82, 78, 70, 255);
-    g.roundRect(posterX + 8, posterY + posterH - headerH - 8, posterW - 16, headerH, 18);
-    g.fill();
-    g.fillColor = GameRunner.UI_PAPER;
-    g.roundRect(posterX + 8, posterY + 8, posterW - 16, posterH - headerH - 16, 18);
-    g.fill();
-    g.strokeColor = new Color(255, 255, 255, 118);
-    g.lineWidth = 2;
-    g.moveTo(posterX + 30, posterY + posterH - 20);
-    g.lineTo(posterX + posterW - 30, posterY + posterH - 20);
     g.stroke();
   }
 
-  /** 在主面板顶部画深炭色产品铭牌。 */
-  private paintStartAlertBar(parent: Node, posterW: number, _posterH: unknown, posterCY: number): void {
-    const node = new Node('StartAlertBar');
+  /** 在主面板顶部画轻量状态药丸。 */
+  private paintStartAlertBar(parent: Node, cardW: number, cardH: number, cardCY: number): void {
+    const node = new Node('StartStatusPill');
     node.layer = 33554432;
     node.parent = parent;
-    const barW = posterW * 0.48;
-    const barH = 32;
-    const barY = posterCY + Math.min(view.getVisibleSize().height * 0.56, 610) * 0.43;
-    const ut = node.addComponent(UITransform);
-    ut.setContentSize(barW, barH);
-    node.setPosition(0, barY, 0);
+    const pillW = Math.min(cardW * 0.42, 430);
+    const pillH = 68;
+    node.addComponent(UITransform).setContentSize(pillW, pillH);
+    node.setPosition(0, cardCY + cardH * 0.385, 0);
+
     const g = node.addComponent(Graphics);
-    g.fillColor = new Color(49, 46, 41, 255);
-    g.strokeColor = new Color(255, 255, 255, 70);
-    g.lineWidth = 2;
-    g.roundRect(-barW / 2, -barH / 2, barW, barH, 12);
+    g.fillColor = GameRunner.START_SOFT;
+    g.strokeColor = new Color(222, 214, 202, 180);
+    g.lineWidth = 1;
+    g.roundRect(-pillW / 2, -pillH / 2, pillW, pillH, pillH / 2);
     g.fill();
     g.stroke();
-    const labelNode = this.mkLabel(node, 'AlertText', 0, 0, 'AI显示器 · 生存实验', 15, barW - 24, barH - 6);
+
+    const dot = new Node('BreathingDot');
+    dot.layer = 33554432;
+    dot.parent = node;
+    dot.addComponent(UITransform).setContentSize(24, 24);
+    dot.setPosition(-pillW / 2 + 54, 0, 0);
+    const dotG = dot.addComponent(Graphics);
+    dotG.fillColor = GameRunner.START_BLUE;
+    dotG.circle(0, 0, 10);
+    dotG.fill();
+    dot.addComponent(UIOpacity).opacity = 230;
+    tween(dot)
+      .repeatForever(
+        tween()
+          .to(0.72, { scale: new Vec3(1.26, 1.26, 1) }, { easing: 'sineInOut' })
+          .to(0.72, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' }),
+      )
+      .start();
+
+    const labelNode = this.mkLabel(node, 'AlertText', 32, 0, 'AI显示器 · 生存实验', 34, pillW - 96, pillH - 8);
     const label = labelNode.getComponent(Label);
     if (label) {
-      label.color = new Color(239, 233, 220, 255);
+      label.fontFamily = 'PingFang SC';
+      label.color = GameRunner.START_TEXT;
       label.isBold = true;
     }
   }
@@ -797,35 +809,66 @@ export class GameRunner extends Component {
     const btn = new Node('StartButton');
     btn.layer = 33554432;
     btn.parent = parent;
-    btn.addComponent(UITransform).setContentSize(w, h);
+    btn.addComponent(UITransform).setContentSize(w, h + 10);
     btn.setPosition(x, y, 0);
 
     const g = btn.addComponent(Graphics);
-    UiPainter.keycap(g, w, h, GameRunner.PROP_COLORS[0], 'ready');
+    this.paintStartThickButton(g, w, h, false);
 
-    const labelNode = this.mkLabel(btn, 'StartButtonLabel', 0, 4, text, 27, w - 28, h - 12);
+    const playNode = new Node('StartPlayIcon');
+    playNode.layer = 33554432;
+    playNode.parent = btn;
+    playNode.addComponent(UITransform).setContentSize(54, 54);
+    playNode.setPosition(-w * 0.13, 7, 0);
+    const playG = playNode.addComponent(Graphics);
+    playG.fillColor = Color.WHITE;
+    playG.moveTo(-12, -18);
+    playG.lineTo(18, 0);
+    playG.lineTo(-12, 18);
+    playG.close();
+    playG.fill();
+
+    const labelNode = this.mkLabel(btn, 'StartButtonLabel', 56, 7, text, 60, w * 0.68, h - 16);
     const label = labelNode.getComponent(Label);
     if (label) {
+      label.fontFamily = 'PingFang SC';
       label.isBold = true;
       label.color = Color.WHITE;
-      label.lineHeight = 32;
+      label.lineHeight = 66;
       label.horizontalAlign = 1;
       label.verticalAlign = 1;
+      label.overflow = Label.Overflow.SHRINK;
     }
-    btn.on(Node.EventType.TOUCH_START, () => {
-      btn.setScale(0.96, 0.94, 1);
-      UiPainter.keycap(g, w, h, GameRunner.PROP_COLORS[0], 'pressed');
-    });
-    btn.on(Node.EventType.TOUCH_CANCEL, () => {
-      btn.setScale(1, 1, 1);
-      UiPainter.keycap(g, w, h, GameRunner.PROP_COLORS[0], 'ready');
-    });
+
+    const setPressed = (pressed: boolean) => {
+      this.paintStartThickButton(g, w, h, pressed);
+      const dy = pressed ? -6 : 0;
+      playNode.setPosition(-w * 0.13, 7 + dy, 0);
+      labelNode.setPosition(56, 7 + dy, 0);
+    };
+    btn.on(Node.EventType.TOUCH_START, () => setPressed(true));
+    btn.on(Node.EventType.TOUCH_CANCEL, () => setPressed(false));
     btn.on(Node.EventType.TOUCH_END, () => {
-      btn.setScale(1, 1, 1);
-      UiPainter.keycap(g, w, h, GameRunner.PROP_COLORS[0], 'ready');
+      setPressed(false);
       onTap();
     });
     return btn;
+  }
+
+  private paintStartThickButton(g: Graphics, w: number, h: number, pressed: boolean): void {
+    g.clear();
+    const topY = pressed ? -8 : -2;
+    const shadowY = -h / 2 - 5;
+    const r = h * 0.42;
+    g.fillColor = GameRunner.START_BLUE_DARK;
+    g.roundRect(-w / 2, shadowY, w, h, r);
+    g.fill();
+    g.fillColor = GameRunner.START_BLUE;
+    g.roundRect(-w / 2, topY - h / 2, w, h, r);
+    g.fill();
+    g.fillColor = new Color(255, 255, 255, 34);
+    g.roundRect(-w / 2 + 14, topY + h * 0.09, w - 28, h * 0.22, h * 0.11);
+    g.fill();
   }
 
   private styleStartLabel(node: Node, color: Color, bold: boolean): void {
@@ -836,23 +879,98 @@ export class GameRunner extends Component {
     label.overflow = Label.Overflow.SHRINK;
   }
 
-  private makeStartDoodles(parent: Node, vis: { width: number; height: number }, posterW: number, posterCY: number): void {
-    const doodle = new Node('StartDoodles');
-    doodle.layer = 33554432;
-    doodle.parent = parent;
-    doodle.addComponent(UITransform).setContentSize(vis.width, vis.height);
-    const posterH = Math.min(vis.height * 0.56, 610);
-    const y = posterCY - posterH * 0.055;
-    const labels = ['长按蓄力', '拖向任务', '松手投出'];
-    labels.forEach((text, i) => {
-      const x = (i - 1) * posterW * 0.25;
-      const chip = this.mkLabel(doodle, `StartStep${i}`, x, y, `${i + 1}  ${text}`, 14, posterW * 0.23, 30);
-      const label = chip.getComponent(Label);
-      if (label) {
-        label.color = i === 0 ? GameRunner.PROP_COLORS[0] : GameRunner.UI_MUTED;
-        label.isBold = i === 0;
-      }
+  private makeStartDoodles(parent: Node, vis: { width: number; height: number }, cardW: number, cardCY: number): void {
+    const steps = new Node('StartSteps');
+    steps.layer = 33554432;
+    steps.parent = parent;
+    steps.addComponent(UITransform).setContentSize(vis.width, vis.height);
+    const cardH = Math.min(vis.height * 0.47, 430);
+    const stepW = cardW * 0.27;
+    const stepH = cardH * 0.28;
+    const gap = cardW * 0.035;
+    const y = cardCY - cardH * 0.125;
+    const data: Array<[string, string]> = [
+      ['hold', '1 长按蓄力'],
+      ['target', '2 对准目标'],
+      ['throw', '3 松手投出'],
+    ];
+    data.forEach(([icon, text], i) => {
+      this.drawStartStepCard(steps, i, (i - 1) * (stepW + gap), y, stepW, stepH, text, icon);
     });
+  }
+
+  private drawStartStepCard(parent: Node, index: number, x: number, y: number, w: number, h: number, text: string, icon: string): void {
+    const card = new Node(`StartStepCard${index}`);
+    card.layer = 33554432;
+    card.parent = parent;
+    card.addComponent(UITransform).setContentSize(w, h);
+    card.setPosition(x, y, 0);
+    const g = card.addComponent(Graphics);
+    const radius = Math.min(26, w * 0.24);
+    g.fillColor = GameRunner.START_SOFT;
+    g.roundRect(-w / 2, -h / 2, w, h, radius);
+    g.fill();
+
+    g.fillColor = new Color(255, 255, 255, 255);
+    g.strokeColor = new Color(218, 209, 196, 150);
+    g.lineWidth = 1;
+    const iconR = Math.min(34, w * 0.15);
+    g.circle(0, h * 0.21, iconR);
+    g.fill();
+    g.stroke();
+
+    this.drawStartStepIcon(g, icon, 0, h * 0.21, iconR);
+
+    const labelNode = this.mkLabel(card, `StartStepText${index}`, 0, -h * 0.27, text, 30, w - 18, 46);
+    const label = labelNode.getComponent(Label);
+    if (label) {
+      label.fontFamily = 'PingFang SC';
+      label.color = GameRunner.START_TEXT;
+      label.isBold = true;
+      label.horizontalAlign = 1;
+      label.verticalAlign = 1;
+      label.overflow = Label.Overflow.SHRINK;
+    }
+  }
+
+  private drawStartStepIcon(g: Graphics, icon: string, cx: number, cy: number, r: number): void {
+    g.strokeColor = GameRunner.START_BLUE;
+    g.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 40);
+    g.lineWidth = 5;
+    if (icon === 'hold') {
+      g.moveTo(cx - r * 0.34, cy + r * 0.34);
+      g.lineTo(cx + r * 0.42, cy);
+      g.lineTo(cx - r * 0.18, cy - r * 0.18);
+      g.lineTo(cx - r * 0.34, cy - r * 0.56);
+      g.close();
+      g.stroke();
+      return;
+    }
+    if (icon === 'target') {
+      g.circle(cx, cy, r * 0.42);
+      g.stroke();
+      g.moveTo(cx - r * 0.62, cy);
+      g.lineTo(cx - r * 0.32, cy);
+      g.moveTo(cx + r * 0.32, cy);
+      g.lineTo(cx + r * 0.62, cy);
+      g.moveTo(cx, cy - r * 0.62);
+      g.lineTo(cx, cy - r * 0.32);
+      g.moveTo(cx, cy + r * 0.32);
+      g.lineTo(cx, cy + r * 0.62);
+      g.stroke();
+      g.fillColor = GameRunner.START_BLUE;
+      g.circle(cx, cy, r * 0.12);
+      g.fill();
+      return;
+    }
+    g.moveTo(cx - r * 0.52, cy + r * 0.12);
+    g.lineTo(cx + r * 0.55, cy + r * 0.42);
+    g.lineTo(cx + r * 0.18, cy - r * 0.54);
+    g.close();
+    g.stroke();
+    g.moveTo(cx + r * 0.55, cy + r * 0.42);
+    g.lineTo(cx - r * 0.05, cy - r * 0.08);
+    g.stroke();
   }
 
   /** 战报：自包含的小卡片 + 内嵌可点击按钮，与 scene 节点解耦。 */

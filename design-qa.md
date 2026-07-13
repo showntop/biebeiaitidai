@@ -194,3 +194,26 @@ final result: passed
 - Browser QA confirms the bottom prop buttons render as full PNG assets at 390 × 844, and task cards + buttons coexist cleanly in the live gameplay state.
 
 final result: passed
+## Minimal start page rebuild — 2026-07-13
+
+- Reference screenshot supplied by user: `/var/folders/jn/1zg6fv2x4p5d_ynwx4p2g4pm0000gn/T/codex-clipboard-de825c84-aeff-4157-9987-af18da7fc4ad.png`
+- Final browser QA screenshot: `/Users/denny/Work/biebeiaitidai/qa-start-minimal-v5-390.png`
+- Runtime: Cocos web-mobile build, local browser preview.
+
+### What changed
+
+- Rebuilt the start page around warm paper beige, off-white card, soft beige chips, and one friendly blue accent.
+- Removed the heavy dark monitor/card frame from the entry screen.
+- Added a light status pill with breathing blue dot: `AI显示器 · 生存实验`.
+- Replaced inline tiny step text with three equal step cards using icon badges for hold / target / throw.
+- Replaced the old generic keycap CTA with a thick game button: blue face, darker bottom depth, highlight strip, press displacement, and play icon.
+- Kept Cocos text on `PingFang SC`; the requested web-style Baloo/CJK font stack rendered incorrectly inside Cocos `Label`, so a real Baloo treatment should be imported later as a font asset instead of using a CSS font-family list.
+
+### Verification
+
+- `npx tsc --noEmit`: passed.
+- `npm test`: 92 tests passed.
+- Cocos `web-mobile` build completed; Creator still exits with code 36/SIGTERM after the successful build task, but the build log ends with `build Task (web-mobile) Finished`.
+- Browser console check: no warning/error messages on the rebuilt start page.
+
+final result: passed
