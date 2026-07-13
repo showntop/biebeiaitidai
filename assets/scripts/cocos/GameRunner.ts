@@ -449,11 +449,6 @@ export class GameRunner extends Component {
     this.lastEventText = text.replace(/^事件\s*[·:：]\s*/, '');
   }
 
-  private missionTitle(index = this.session.currentIndex): string {
-    const title = getLevel(index).title ?? '';
-    return title.includes('·') ? title.split('·').slice(1).join('·') : title || '替代警报';
-  }
-
   private shouldShowTutorial(): boolean {
     return this.uiState === 'playing' && this.session.currentIndex === 0 && !this.tutorialDone;
   }
@@ -1932,22 +1927,38 @@ export class GameRunner extends Component {
       baseSprite.enabled = false;
       accentSprite.enabled = false;
       g.clear();
-      const radius = Math.min(13, Math.max(9, w * 0.18));
+      // 空槽 = 虚线描边"幽灵槽"：实心灰块看起来像素材加载失败，
+      // 虚线轮廓 + 极淡底传达"这里会来卡片"的预期，且不与真卡抢视觉。
       const foot = Math.max(5, Math.min(8, h * 0.08));
-      g.fillColor = new Color(52, 46, 39, 28);
-      g.roundRect(-w / 2 + 3, -h / 2 - foot - 1, w - 6, h - 4, radius + 2);
+      const gx = -w / 2 + 7;
+      const gy = -h / 2 + 7;
+      const gw = w - 14;
+      const gh = h - foot - 14;
+      g.fillColor = new Color(225, 216, 202, 30);
+      g.roundRect(gx, gy, gw, gh, Math.min(12, w * 0.16));
       g.fill();
-      g.fillColor = new Color(225, 216, 202, 92);
-      g.strokeColor = new Color(72, 63, 54, 58);
+      g.strokeColor = new Color(72, 63, 54, 60);
       g.lineWidth = 2;
-      g.roundRect(-w / 2 + 5, -h / 2 + 5, w - 10, h - foot - 10, radius);
-      g.fill();
-      g.stroke();
-      g.strokeColor = new Color(255, 250, 241, 58);
-      g.lineWidth = 1;
-      g.moveTo(-w / 2 + radius, h / 2 - foot - 13);
-      g.lineTo(w / 2 - radius, h / 2 - foot - 13);
-      g.stroke();
+      const dash = 7;
+      const gapLen = 6;
+      const dashLine = (x1: number, y1: number, x2: number, y2: number) => {
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const steps = Math.max(1, Math.floor(len / (dash + gapLen)));
+        const ux = (x2 - x1) / len;
+        const uy = (y2 - y1) / len;
+        for (let s = 0; s < steps; s++) {
+          const sx = x1 + ux * s * (dash + gapLen);
+          const sy = y1 + uy * s * (dash + gapLen);
+          g.moveTo(sx, sy);
+          g.lineTo(sx + ux * dash, sy + uy * dash);
+        }
+        g.stroke();
+      };
+      const inset = 4;
+      dashLine(gx + inset, gy, gx + gw - inset, gy);
+      dashLine(gx + gw, gy + inset, gx + gw, gy + gh - inset);
+      dashLine(gx + gw - inset, gy + gh, gx + inset, gy + gh);
+      dashLine(gx, gy + gh - inset, gx, gy + inset);
       return;
     }
     const baseFrame = this.artSprites.get('task-card-base') ?? null;
@@ -2448,7 +2459,7 @@ export class GameRunner extends Component {
     tl.lineHeight = tl.fontSize + 6;
     tl.color = new Color(48, 40, 34, 255);
 
-    // 独立副标题已合并进主标题，彻底移除被显示器边框遮挡的问题节点。
+    // 独立副标题已合并进主标题，彻底移��被显示器边框遮挡的问题节点。
     if (this.subtitleNode) {
       this.subtitleNode.destroy();
       this.subtitleNode = null;
@@ -2575,6 +2586,14 @@ export class GameRunner extends Component {
         trackG.lineWidth = 2;
         trackG.circle(x, 0, rollerR * 0.55);
         trackG.fill(); trackG.stroke();
+        // 滚轮上的向左流向箭头：替代原"处理→ / ←入口"浮动文字，图形化表达任务流向。
+        const aw = rollerR * 0.46;
+        trackG.fillColor = new Color(238, 233, 222, 235);
+        trackG.moveTo(x - aw, 0);
+        trackG.lineTo(x + aw * 0.5, aw * 0.85);
+        trackG.lineTo(x + aw * 0.5, -aw * 0.85);
+        trackG.close();
+        trackG.fill();
       });
       const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
       mask.type = Mask.Type.GRAPHICS_RECT;
