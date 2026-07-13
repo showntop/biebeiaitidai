@@ -1834,13 +1834,13 @@ export class GameRunner extends Component {
   private render(): void {
     const snap = this.game.getSnapshot();
 
-    // ── 标题：主标题 + 关卡号合并成一条，去掉会被显示器压住的独立副标题 ──
+    // ── 标题：主标题只写游戏名；关卡号由下方副标题承载，避免"第X关"重复。 ──
     if (this.gameTitleNode) {
       const tl = this.gameTitleNode.getComponent(Label);
       if (tl) {
-        tl.string = `别让AI替代你 · 第${this.session.currentIndex + 1}关`;
-        tl.fontSize = 30;
-        tl.lineHeight = tl.fontSize + 6;
+        tl.string = '别让AI替代你';
+        tl.fontSize = 32;
+        tl.lineHeight = tl.fontSize + 4;
         tl.color = new Color(48, 40, 34, 255);
         tl.isBold = true;
       }
@@ -2300,7 +2300,7 @@ export class GameRunner extends Component {
    *  改这一个值就能调角色位置，不用动其他代码。 */
   private static readonly CHAR_Y_OFFSET = -0.10;
 
-  /** 挂背景 + 角色 Sprite，位置按背景图实测比例动态计算（不再猜固定像素）。
+  /** 挂背景 + ��色 Sprite，位置按背景图实测比例动态计算（不再猜固定像素）。
    *  背景按宽度等比完整显示，绝不再用 cover 裁掉显示器两侧；超长屏多出的底部区域用背景底色延伸，
    *  作为道具操作区。再用图片实测比例反算显示器/桌面位置，把 Belt/Char/Props 对齐上去。 */
   private applyBgCharSprites(): void {
@@ -2490,7 +2490,7 @@ export class GameRunner extends Component {
       sub.overflow = Label.Overflow.SHRINK;
     }
     // 下限保护：副标题绝不低于显示器上边框，彻底杜绝被机身遮挡。
-    const subtitleY = Math.max(titleY - 30, screenTopY + 22);
+    const subtitleY = Math.max(titleY - 38, screenTopY + 20);
     this.subtitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 460), 26);
     this.subtitleNode.setPosition(0, subtitleY, 0);
     const subLabel = this.subtitleNode.getComponent(Label)!;
@@ -2582,32 +2582,24 @@ export class GameRunner extends Component {
       surfaceG.fillColor = new Color(96, 84, 72, 38);
       surfaceG.roundRect(-trayW / 2 + 3, trayBottomLocal - 4, trayW, trayH, 18);
       surfaceG.fill();
-      // 凹槽面板：略深冷调米色，与屏面拉开层次
-      surfaceG.fillColor = new Color(236, 228, 212, 255);
-      surfaceG.strokeColor = new Color(122, 110, 95, 135);
+      // 凹槽面板：更明确的冷调米色，与屏面拉开层次，读作一块"凹陷的工作屏"。
+      surfaceG.fillColor = new Color(228, 219, 201, 255);
+      surfaceG.strokeColor = new Color(112, 100, 86, 180);
       surfaceG.lineWidth = 2;
       surfaceG.roundRect(-trayW / 2, trayBottomLocal, trayW, trayH, 18);
       surfaceG.fill(); surfaceG.stroke();
       // 顶部内阴影，制造凹陷深度
-      surfaceG.fillColor = new Color(120, 108, 94, 40);
-      surfaceG.roundRect(-trayW / 2 + 7, trayTopLocal - 18, trayW - 14, 15, 8);
+      surfaceG.fillColor = new Color(120, 108, 94, 46);
+      surfaceG.roundRect(-trayW / 2 + 7, trayTopLocal - 16, trayW - 14, 13, 7);
       surfaceG.fill();
       // 极淡横向扫描纹，赋予"屏幕"质感（卡片会覆盖大部分，弱到几乎无干扰）
-      surfaceG.strokeColor = new Color(122, 110, 95, 15);
+      surfaceG.strokeColor = new Color(112, 100, 86, 18);
       surfaceG.lineWidth = 1;
-      for (let ly = trayBottomLocal + 14; ly < trayTopLocal - 20; ly += 13) {
+      for (let ly = trayBottomLocal + 16; ly < trayTopLocal - 14; ly += 13) {
         surfaceG.moveTo(-trayW / 2 + 12, ly);
         surfaceG.lineTo(trayW / 2 - 12, ly);
       }
       surfaceG.stroke();
-      // 琥珀扫描线：位于卡片上方留白，呼应"AI 正在扫描任务"的叙事
-      const scanY = trayTopLocal - 26;
-      surfaceG.fillColor = new Color(244, 172, 32, 30);
-      surfaceG.roundRect(-trayW / 2 + 12, scanY - 3, trayW - 24, 6, 3);
-      surfaceG.fill();
-      surfaceG.fillColor = new Color(244, 172, 32, 72);
-      surfaceG.roundRect(-trayW / 2 + 12, scanY - 1, trayW - 24, 2, 1);
-      surfaceG.fill();
 
       if (!this.conveyorTrackNode) {
         this.conveyorTrackNode = new Node('ConveyorTrack');
