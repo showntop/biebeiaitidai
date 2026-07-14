@@ -39,18 +39,18 @@ export class PropButtonView {
     bgAsset?.getComponent(UITransform)?.setContentSize(width, height);
     bgAsset?.setPosition(0, 0, 0);
 
-    const iconSize = Math.min(width * 0.34, height * 0.56);
+    const iconSize = Math.min(width * 0.34, height * 0.40);
     this.iconSprite.node.getComponent(UITransform)?.setContentSize(iconSize, iconSize);
-    this.iconSprite.node.setPosition(-width * 0.31, height * 0.02, 0);
+    this.iconSprite.node.setPosition(0, height * 0.18, 0);
 
-    this.actionLabel.node.getComponent(UITransform)?.setContentSize(width * 0.58, 34);
-    this.actionLabel.node.setPosition(width * 0.16, height * 0.12, 0);
-    UiPainter.label(this.actionLabel, Math.min(UiTokens.type.action, width * 0.17), UiTokens.color.inkDeep, true);
+    this.actionLabel.node.getComponent(UITransform)?.setContentSize(width * 0.86, 34);
+    this.actionLabel.node.setPosition(0, -height * 0.25, 0);
+    UiPainter.label(this.actionLabel, Math.min(20, Math.max(15, width * 0.15)), UiTokens.color.inkDeep, true);
 
-    this.countLabel.node.getComponent(UITransform)?.setContentSize(width * 0.58, 24);
-    this.countLabel.node.setPosition(width * 0.16, -height * 0.22, 0);
-    this.statusLabel.node.getComponent(UITransform)?.setContentSize(width * 0.46, 22);
-    this.statusLabel.node.setPosition(width * 0.18, height * 0.34, 0);
+    this.countLabel.node.getComponent(UITransform)?.setContentSize(width * 0.72, 22);
+    this.countLabel.node.setPosition(0, -height * 0.02, 0);
+    this.statusLabel.node.getComponent(UITransform)?.setContentSize(width * 0.78, 22);
+    this.statusLabel.node.setPosition(0, height * 0.40, 0);
   }
 
   render(value: PropButtonRenderState): void {
@@ -80,8 +80,9 @@ export class PropButtonView {
 
     this.actionLabel.string = value.action;
     this.actionLabel.color = disabled ? UiTokens.color.muted : UiTokens.color.inkDeep;
-    this.countLabel.string = value.count;
-    UiPainter.label(this.countLabel, UiTokens.type.micro, disabled ? UiTokens.color.muted : alphaColor(UiTokens.color.ink, 225), true);
+    this.iconSprite.color = disabled ? alphaColor(UiTokens.color.muted, 150) : alphaColor(UiTokens.color.blue, 240);
+    this.countLabel.string = disabled && value.status ? value.status : value.count;
+    UiPainter.label(this.countLabel, UiTokens.type.micro, disabled ? UiTokens.color.muted : alphaColor(UiTokens.color.blue, 220), true);
     const statusBakedIntoAsset = !!value.background && value.state === 'locked';
     this.statusLabel.node.active = !statusBakedIntoAsset && value.status.length > 0 && value.status !== '就绪';
     this.statusLabel.string = value.status;

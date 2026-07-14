@@ -217,6 +217,31 @@ final result: passed
 
 final result: passed
 
+## Main gameplay UI reference rebuild — 2026-07-14
+
+- Reference screenshot supplied by user: `/var/folders/jn/1zg6fv2x4p5d_ynwx4p2g4pm0000gn/T/codex-clipboard-de406ae5-a9ff-444a-9dcf-639668f9440e.png`
+- Final browser QA screenshot: `/Users/denny/Work/biebeiaitidai/qa-main-ui-redesign-v5.png`
+- Runtime: Cocos web-mobile build, local browser preview.
+
+### What changed
+
+- Rebuilt the gameplay screen around the same warm paper design language as the refined start page.
+- Replaced the scattered top HUD with a clearer hierarchy: centered game title, left level pill, right timer pill with icon and countdown progress.
+- Reworked the core monitor into an inbox-style playfield with a cream paper surface, header dots, queue status pill, dotted texture, and visible conveyor.
+- Changed task cards away from the old dark PNG base and into paper document cards with category tabs, soft shadows, hand-drawn outlines, and document-line texture.
+- Expanded the workstation strip so it visually connects the monitor to the lower HUD instead of leaving a large empty gap.
+- Rebuilt the approval panel as a white pill with segmented progress color, compact zone badge, and lower visual weight.
+- Kept the prop buttons aligned to the same rounded paper/blue token system and fixed the newly added workstation band visibility during UI state switches.
+
+### Verification
+
+- `npx tsc --noEmit`: passed.
+- `npm test`: 92 tests passed.
+- Cocos `web-mobile` build completed; Creator still exits with code 36/SIGTERM after the successful build task, but the build log ends with `build Task (web-mobile) Finished`.
+- Browser console check: no warning/error messages on the rebuilt gameplay screen.
+
+final result: passed
+
 ## Minimal start page rebuild — 2026-07-13
 
 - Reference screenshot supplied by user: `/var/folders/jn/1zg6fv2x4p5d_ynwx4p2g4pm0000gn/T/codex-clipboard-de825c84-aeff-4157-9987-af18da7fc4ad.png`

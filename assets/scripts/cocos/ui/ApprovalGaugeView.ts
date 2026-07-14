@@ -40,118 +40,99 @@ export class ApprovalGaugeView {
 
   layout(width: number, height: number): void {
     this.root.getComponent(UITransform)?.setContentSize(width, height);
-    this.barW = width - UiTokens.space.lg * 2;
-    this.barH = 24;
-    this.barY = -12;
+    this.barW = width - 60;
+    this.barH = Math.min(22, Math.max(16, height * 0.18));
+    this.barY = -height * 0.24;
 
-    // 上排：左侧"认可度 + 数字"，右侧分区药丸；下方是进度条；底部一行提示。
-    const rowY = height / 2 - 22;
+    const rowY = height * 0.22;
     this.valueBaseX = -this.barW / 2;
     this.zoneBaseX = this.barW / 2 - 40;
     this.zoneBaseY = rowY;
 
-    // 数字行左对齐（内部再拼小标签"认可度"），锚在进度条左端上方。
-    this.place(this.value, this.valueBaseX + width * 0.24, rowY, width * 0.5, 34);
-    this.place(this.zone, this.zoneBaseX, this.zoneBaseY, 80, 26);
-    this.place(this.hint, 0, -height / 2 + 15, this.barW, 22);
+    this.place(this.value, this.valueBaseX + width * 0.22, rowY, width * 0.46, 38);
+    this.place(this.zone, this.zoneBaseX, this.zoneBaseY, 78, 30);
+    this.place(this.hint, 0, -height / 2 + 12, this.barW, 20);
 
-    UiPainter.label(this.value, UiTokens.type.value, UiTokens.color.inkDeep, true);
-    UiPainter.label(this.zone, UiTokens.type.caption, UiTokens.color.paper, true);
-    UiPainter.label(this.hint, UiTokens.type.caption, alphaColor(UiTokens.color.muted, 210));
+    UiPainter.label(this.value, Math.min(30, Math.max(22, width * 0.040)), UiTokens.color.inkDeep, true);
+    UiPainter.label(this.zone, UiTokens.type.caption, UiTokens.color.inkDeep, true);
+    UiPainter.label(this.hint, UiTokens.type.micro, alphaColor(UiTokens.color.muted, 170));
     this.value.horizontalAlign = 0;
 
-    // 静态凹槽轨道：暖色软槽 + 顶部内阴影，营造"嵌进桌面"的深度，而不是浮在墙上的平条。
     this.frame.clear();
     const g = this.frame;
+    const panelR = Math.min(44, height * 0.42);
+    g.fillColor = alphaColor(UiTokens.color.inkDeep, 34);
+    g.roundRect(-width / 2 + 5, -height / 2 - 6, width - 10, height, panelR);
+    g.fill();
+    g.fillColor = new Color(255, 252, 246, 250);
+    g.strokeColor = new Color(226, 216, 198, 230);
+    g.lineWidth = 1.5;
+    g.roundRect(-width / 2, -height / 2, width, height, panelR);
+    g.fill(); g.stroke();
+
     const y = this.barY;
     const r = this.barH / 2;
-    // 轨道投影
-    g.fillColor = alphaColor(UiTokens.color.inkDeep, 26);
-    g.roundRect(-this.barW / 2, y - this.barH / 2 - 3, this.barW, this.barH, r);
-    g.fill();
-    // 凹槽底
-    g.fillColor = mixColor(UiTokens.color.ivory, UiTokens.color.ink, 0.16);
-    g.strokeColor = alphaColor(UiTokens.color.ink, 120);
-    g.lineWidth = UiTokens.stroke.hairline;
+    g.fillColor = new Color(226, 218, 204, 255);
     g.roundRect(-this.barW / 2, y - this.barH / 2, this.barW, this.barH, r);
-    g.fill(); g.stroke();
-    // 顶部内阴影
-    g.fillColor = alphaColor(UiTokens.color.inkDeep, 40);
-    g.roundRect(-this.barW / 2 + 5, y + this.barH / 2 - 8, this.barW - 10, 5, 2.5);
     g.fill();
+
+    const segs = [
+      { x: 0, w: 0.28, c: UiTokens.color.good },
+      { x: 0.28, w: 0.22, c: UiTokens.color.ok },
+      { x: 0.50, w: 0.20, c: UiTokens.color.gold },
+      { x: 0.70, w: 0.30, c: UiTokens.color.danger },
+    ];
+    segs.forEach((seg, i) => {
+      const sx = -this.barW / 2 + this.barW * seg.x;
+      const sw = this.barW * seg.w;
+      g.fillColor = alphaColor(seg.c, 68);
+      g.roundRect(sx, y - this.barH / 2, sw + (i < segs.length - 1 ? 2 : 0), this.barH, i === 0 || i === segs.length - 1 ? r : 2);
+      g.fill();
+    });
 
     this.dynamic.node.getComponent(UITransform)?.setContentSize(width, height);
     this.dynamic.node.setPosition(0, 0, 0);
   }
 
-  update(approval: number, zone: string, hintText: string, elapsed: number): void {
-    const copy: Record<string, string> = { hunt: '猎杀!', good: '良好', ok: '勉强', danger: '危险!' };
+  update(approval: number, zone: string, _hintText: string, elapsed: number): void {
+    const copy: Record<string, string> = { hunt: '优秀', good: '良好', ok: '一般', danger: '危险!' };
     const colors: Record<string, Readonly<Color>> = {
       hunt: UiTokens.color.hunt,
       good: UiTokens.color.good,
-      ok: UiTokens.color.ok,
+      ok: UiTokens.color.gold,
       danger: UiTokens.color.danger,
     };
     const pct = Math.max(0, Math.min(1, approval / 100));
-    const zoneColor = colors[zone] ?? UiTokens.color.ink;
+    const zoneColor = colors[zone] ?? UiTokens.color.gold;
     const danger = zone === 'danger';
     this.value.string = `认可度  ${approval}`;
     this.zone.string = copy[zone] ?? zone;
-    this.hint.string = hintText;
+    this.hint.string = '';
 
-    // 危险时分区徽章轻微抖动。
-    const shakeX = danger ? Math.sin(elapsed * 22) * 1.6 : 0;
+    const shakeX = danger ? Math.sin(elapsed * 18) * 1.4 : 0;
     this.zone.node.setPosition(this.zoneBaseX + shakeX, this.zoneBaseY, 0);
 
     const g = this.dynamic;
     g.clear();
 
-    // 分区药丸徽章：胶囊底 + 白字，颜色即信息。
-    const badgeW = 66;
-    const badgeH = 24;
+    const badgeW = 76;
+    const badgeH = 30;
     const bx = this.zoneBaseX + shakeX;
-    g.fillColor = alphaColor(UiTokens.color.inkDeep, 24);
-    g.roundRect(bx - badgeW / 2, this.zoneBaseY - badgeH / 2 - 2, badgeW, badgeH, badgeH / 2);
-    g.fill();
-    g.fillColor = zoneColor;
+    g.fillColor = danger ? alphaColor(UiTokens.color.danger, 42) : new Color(253, 234, 195, 255);
     g.roundRect(bx - badgeW / 2, this.zoneBaseY - badgeH / 2, badgeW, badgeH, badgeH / 2);
     g.fill();
-    g.fillColor = alphaColor(Color.WHITE, 46);
-    g.roundRect(bx - badgeW / 2 + 4, this.zoneBaseY + badgeH / 2 - 8, badgeW - 8, 4, 2);
-    g.fill();
 
-    // 进度填充：圆角 + 顶部高光带 + 底部暗边，做出体量感。
-    const inset = 4;
+    const inset = 0;
     const innerH = this.barH - inset * 2;
     const trackInnerW = this.barW - inset * 2;
-    const fillW = Math.max(pct > 0 ? innerH : 0, trackInnerW * pct);
+    const fillW = trackInnerW * pct;
     const left = -this.barW / 2 + inset;
     if (fillW > 0) {
       g.fillColor = zoneColor;
-      g.roundRect(left, this.barY - innerH / 2, fillW, innerH, innerH / 2);
+      g.roundRect(left, this.barY - innerH / 2, Math.max(innerH, fillW), innerH, innerH / 2);
       g.fill();
-      // 顶部高光带
-      g.fillColor = alphaColor(mixColor(zoneColor, Color.WHITE, 0.5), 150);
-      g.roundRect(left + 3, this.barY + 1, Math.max(0, fillW - 6), innerH * 0.4, innerH * 0.2);
-      g.fill();
-      // 底部暗边
-      g.fillColor = alphaColor(mixColor(zoneColor, UiTokens.color.inkDeep, 0.5), 90);
-      g.roundRect(left + 3, this.barY - innerH / 2 + 1, Math.max(0, fillW - 6), 3, 1.5);
-      g.fill();
-
-      // 滑块手柄：白色小圆钮 + 分区色环，位于填充前端，像一个可抓的进度旋钮。
-      const knobX = left + fillW;
-      const knobR = this.barH * 0.62;
-      g.fillColor = alphaColor(UiTokens.color.inkDeep, 40);
-      g.circle(knobX, this.barY - 2, knobR);
-      g.fill();
-      g.fillColor = Color.WHITE;
-      g.strokeColor = zoneColor;
-      g.lineWidth = 3;
-      g.circle(knobX, this.barY, knobR);
-      g.fill(); g.stroke();
-      g.fillColor = zoneColor;
-      g.circle(knobX, this.barY, knobR * 0.42);
+      g.fillColor = alphaColor(Color.WHITE, 58);
+      g.roundRect(left + 4, this.barY + innerH * 0.10, Math.max(0, fillW - 8), innerH * 0.30, innerH * 0.15);
       g.fill();
     }
   }

@@ -24,102 +24,118 @@ export class UiPainter {
     const depleted = state === 'depleted';
     const pressed = state === 'pressed';
     const disabled = locked || depleted;
-    const ink = new Color(76, 67, 58, 255);
-    const softInk = new Color(112, 101, 88, 255);
-    // 纸质键帽：面色以纸为主、只带一点功能色，功能识别交给图标与底部色带。
-    // 避免高饱和糖果面与桌面纸质世界观割裂。
-    const face = disabled
-      ? mixColor(UiTokens.color.disabled, UiTokens.color.paper, locked ? 0.42 : 0.26)
-      : mixColor(base, UiTokens.color.paper, 0.62);
+    const radius = Math.min(24, Math.max(15, h * 0.24));
+    const innerRadius = Math.max(10, radius - 6);
+    const faceShift = pressed ? -4 : 0;
+    const lift = pressed ? 2 : 8;
+    const ink = UiTokens.color.inkDeep;
     const edge = disabled
-      ? mixColor(UiTokens.color.disabled, softInk, 0.22)
-      : mixColor(mixColor(base, UiTokens.color.paper, 0.30), ink, 0.30);
-    const lift = pressed ? 2 : 6;
-    const faceShift = pressed ? -1 : 0;
-    const radius = Math.min(UiTokens.radius.large, h * 0.20);
+      ? alphaColor(UiTokens.color.muted, 58)
+      : alphaColor(mixColor(base, ink, 0.32), 178);
+    const face = disabled
+      ? mixColor(UiTokens.color.ivory, UiTokens.color.disabled, 0.20)
+      : mixColor(UiTokens.color.paper, base, 0.035);
 
     g.clear();
-    // Soft contact shadow only. Large black slabs make these read as cheap UI skins.
-    g.fillColor = alphaColor(ink, disabled ? 38 : 74);
-    g.roundRect(-w / 2 + 7, -h / 2 - lift - 3, w - 14, Math.max(14, h * 0.22), radius * 0.70);
+    // Compact keycap: smaller radius + visible bottom thickness. This reads more like a tactile game prop
+    // button than a web pill.
+    g.fillColor = alphaColor(ink, disabled ? 18 : 48);
+    g.roundRect(-w / 2 + 6, -h / 2 - lift - 2, w - 12, h, radius);
     g.fill();
-    g.fillColor = edge;
-    g.roundRect(-w / 2 + 1, -h / 2 - lift, w - 2, h - 2, radius + 1);
+
+    g.fillColor = disabled ? alphaColor(UiTokens.color.disabled, 76) : alphaColor(mixColor(base, ink, 0.18), 178);
+    g.roundRect(-w / 2 + 1, -h / 2 - lift, w - 2, h - 2, radius);
     g.fill();
+
     g.fillColor = face;
-    g.strokeColor = disabled ? alphaColor(softInk, 116) : ink;
-    g.lineWidth = UiTokens.stroke.normal;
-    g.roundRect(-w / 2 + 4, -h / 2 + 4 + faceShift, w - 8, h - lift - 6, radius - 3);
+    g.strokeColor = edge;
+    g.lineWidth = disabled ? UiTokens.stroke.hairline : UiTokens.stroke.normal;
+    g.roundRect(-w / 2 + 2, -h / 2 + 4 + faceShift, w - 4, h - lift - 5, radius);
     g.fill(); g.stroke();
 
-    // 面顶细暗带（保留键帽体量感）+ 底部功能色带（低成本区分功能，不靠整面换色）。
-    g.fillColor = alphaColor(mixColor(edge, ink, 0.22), disabled ? 46 : 88);
-    g.roundRect(-w / 2 + 8, -h / 2 + 6 + faceShift, w - 16, Math.max(5, h * 0.06), 5);
-    g.fill();
+    // Inner bevel and top sheen: one clear light source from upper-left.
+    g.strokeColor = alphaColor(Color.WHITE, disabled ? 34 : 132);
+    g.lineWidth = UiTokens.stroke.hairline;
+    g.roundRect(-w / 2 + 8, -h / 2 + 10 + faceShift, w - 16, h - lift - 18, innerRadius);
+    g.stroke();
+    g.moveTo(-w / 2 + radius + 6, h / 2 - lift - 9 + faceShift);
+    g.lineTo(w / 2 - radius - 6, h / 2 - lift - 9 + faceShift);
+    g.stroke();
+
+    // Soft icon well behind the sprite; gives the separate icon a designed home.
     if (!disabled) {
-      g.fillColor = alphaColor(mixColor(base, ink, 0.12), 210);
-      g.roundRect(-w / 2 + 10, h / 2 - lift - 13 + faceShift, w - 20, 6, 3);
+      g.fillColor = alphaColor(base, 24);
+      g.circle(0, h * 0.18 + faceShift, Math.min(w, h) * 0.22);
+      g.fill();
+      g.fillColor = alphaColor(base, 128);
+      g.roundRect(-w / 2 + 16, -h / 2 + 10 + faceShift, w - 32, 5, 3);
+      g.fill();
+    } else {
+      g.fillColor = alphaColor(UiTokens.color.disabled, 54);
+      g.roundRect(-w / 2 + 12, -h / 2 + 12 + faceShift, w - 24, h - lift - 24, innerRadius);
       g.fill();
     }
 
-    g.strokeColor = alphaColor(Color.WHITE, disabled ? 24 : 78);
-    g.lineWidth = UiTokens.stroke.hairline;
-    g.moveTo(-w / 2 + radius, h / 2 - 10 + faceShift);
-    g.lineTo(w / 2 - radius, h / 2 - 10 + faceShift);
-    g.stroke();
-
-    if (state === 'ready' || state === 'charging') {
-      g.strokeColor = state === 'charging' ? alphaColor(UiTokens.color.gold, 205) : alphaColor(Color.WHITE, 112);
-      g.lineWidth = state === 'charging' ? UiTokens.stroke.strong : UiTokens.stroke.hairline;
-      g.roundRect(-w / 2 + 9, -h / 2 + 9 + faceShift, w - 18, h - lift - 16, radius - 7);
+    if (state === 'charging') {
+      g.strokeColor = alphaColor(UiTokens.color.gold, 210);
+      g.lineWidth = UiTokens.stroke.strong;
+      g.roundRect(-w / 2 + 7, -h / 2 + 8 + faceShift, w - 14, h - lift - 13, innerRadius);
       g.stroke();
     }
     if (state === 'cooldown') {
-      g.fillColor = alphaColor(ink, 66);
-      g.roundRect(-w / 2 + 6, -h / 2 + 6, w - 12, h - lift - 10, radius - 5);
+      g.fillColor = alphaColor(ink, 34);
+      g.roundRect(-w / 2 + 8, -h / 2 + 9, w - 16, h - lift - 15, innerRadius);
       g.fill();
     }
   }
 
   static card(g: Graphics, w: number, h: number, base: Readonly<Color>, state: CardShellState): void {
-    const stateColor = state === 'rework' ? UiTokens.color.rework
+    const accent = state === 'rework' ? UiTokens.color.rework
       : state === 'inserted' ? UiTokens.color.disabled
-      : state === 'boss' ? UiTokens.color.inkDeep
+      : state === 'boss' ? UiTokens.color.danger
       : base;
     const disabled = state === 'inserted';
-    const ink = new Color(88, 78, 68, 255);
+    const ink = new Color(31, 42, 54, 255);
     const face = disabled
-      ? mixColor(UiTokens.color.disabled, UiTokens.color.paper, 0.34)
-      : state === 'boss'
-        ? new Color(104, 101, 94, 255)
-        : state === 'idle'
-          ? mixColor(stateColor, ink, 0.18)
-          : mixColor(stateColor, UiTokens.color.paper, 0.12);
-    const edge = state === 'boss'
-      ? ink
-      : mixColor(stateColor, ink, disabled ? 0.32 : 0.22);
-    const radius = Math.min(15, Math.max(9, w * 0.16));
-    const inset = Math.max(2, Math.min(4, w * 0.040));
-    const bottomBand = Math.max(7, Math.min(11, h * 0.12));
+      ? mixColor(UiTokens.color.ivory, UiTokens.color.disabled, 0.24)
+      : new Color(255, 252, 246, 255);
+    const radius = Math.min(22, Math.max(14, w * 0.22));
+    const tabW = Math.max(24, w * 0.28);
+    const tabH = Math.max(18, h * 0.20);
+    const inset = Math.max(3, Math.min(5, w * 0.045));
 
     g.clear();
-    // Flat task tile: soft contact shadow + one warm ink outline. Avoid button-like stacked bases.
-    g.fillColor = alphaColor(ink, disabled ? 24 : 42);
-    g.roundRect(-w / 2 + 7, -h / 2 - 5, w - 14, Math.max(8, h * 0.12), radius * 0.55);
+
+    // Soft paper-card shadow: visible enough to lift the card, but not button-like.
+    g.fillColor = alphaColor(ink, disabled ? 20 : 48);
+    g.roundRect(-w / 2 + 8, -h / 2 - 7, w - 12, h - 2, radius);
+    g.fill();
+
+    // Small colored folder tab. This preserves category color without turning the whole task into a loud button.
+    g.fillColor = alphaColor(accent, disabled ? 82 : 230);
+    g.roundRect(w / 2 - tabW - 10, h / 2 - tabH + 2, tabW, tabH, tabH * 0.48);
     g.fill();
 
     g.fillColor = face;
-    g.strokeColor = alphaColor(ink, disabled ? 116 : 178);
-    g.lineWidth = 2;
+    g.strokeColor = alphaColor(ink, disabled ? 82 : 238);
+    g.lineWidth = disabled ? UiTokens.stroke.hairline : UiTokens.stroke.strong;
     g.roundRect(-w / 2 + inset, -h / 2 + inset, w - inset * 2, h - inset * 2, radius);
-    g.fill(); g.stroke();
-
-    g.fillColor = alphaColor(edge, disabled ? 72 : 138);
-    g.roundRect(-w / 2 + inset + 3, -h / 2 + inset + 3, w - inset * 2 - 6, bottomBand, Math.min(5, radius * 0.45));
     g.fill();
+    g.stroke();
 
-    g.fillColor = alphaColor(Color.WHITE, disabled ? 16 : 42);
-    g.roundRect(-w / 2 + inset + 9, h / 2 - inset - 11, w - inset * 2 - 18, 4, 3);
+    // Paper text-line texture so empty cards still read as "documents in an inbox".
+    const lineColor = disabled ? alphaColor(UiTokens.color.muted, 54) : new Color(213, 203, 187, 255);
+    const left = -w * 0.27;
+    const top = h * 0.22;
+    [0, 1, 2].forEach((i) => {
+      const lineW = w * (i === 0 ? 0.36 : i === 1 ? 0.56 : 0.46);
+      g.fillColor = lineColor;
+      g.roundRect(left, top - i * h * 0.16, lineW, Math.max(4, h * 0.055), 3);
+      g.fill();
+    });
+
+    g.fillColor = alphaColor(Color.WHITE, disabled ? 28 : 96);
+    g.roundRect(-w / 2 + radius * 0.75, h / 2 - inset - 12, w * 0.34, 4, 3);
     g.fill();
   }
 

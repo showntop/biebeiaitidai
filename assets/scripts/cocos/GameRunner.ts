@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate, profiler } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, Rect, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate, profiler } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -73,6 +73,7 @@ export class GameRunner extends Component {
   private monitorSurfaceNode: Node | null = null;
   private conveyorTrackNode: Node | null = null;
   private deskDecorNode: Node | null = null;
+  private deskItemNodes: Node[] = [];
   private charNode: Node | null = null;
   /** 动态创建的游戏标题和倒计时（不依赖场景绑定节点） */
   private gameTitleNode: Node | null = null;
@@ -109,6 +110,7 @@ export class GameRunner extends Component {
   private propButtonViews: PropButtonView[] = [];
   private approvalGaugeView: ApprovalGaugeView | null = null;
   private aimingProp: PropType | null = null;
+  private suppressSyntheticPropCancelUntil = 0;
   private aimingSlot = 0;
   private aimStart = new Vec3();
   private aimPoint = new Vec3();
@@ -250,8 +252,8 @@ export class GameRunner extends Component {
   private static readonly START_BG = new Color(238, 229, 215, 255);
   private static readonly START_CARD = new Color(255, 252, 246, 255);
   private static readonly START_SOFT = new Color(238, 232, 222, 255);
-  private static readonly START_BLUE = new Color(47, 145, 223, 255);
-  private static readonly START_BLUE_DARK = new Color(13, 119, 190, 255);
+  private static readonly START_BLUE = UiTokens.color.blue;
+  private static readonly START_BLUE_DARK = new Color(58, 94, 124, 255);
   private static readonly START_TEXT = new Color(50, 40, 33, 255);
   private static readonly START_MUTED = new Color(116, 106, 95, 255);
 
@@ -702,12 +704,15 @@ export class GameRunner extends Component {
     if (this.monitorSurfaceNode) this.monitorSurfaceNode.active = v;
     if (this.conveyorTrackNode) this.conveyorTrackNode.active = v;
     if (this.deskDecorNode) this.deskDecorNode.active = v;
+    this.deskItemNodes.forEach((node) => { if (node?.isValid) node.active = v; });
     if (this.charNode) this.charNode.active = v;
     if (this.subtitleNode) this.subtitleNode.active = v;
     if (this.lowerHudNode) this.lowerHudNode.active = v;
     if (this.actionDockNode) this.actionDockNode.active = v;
     if (this.timerPlateNode) this.timerPlateNode.active = v;
     if (this.monitorLabelNode) this.monitorLabelNode.active = v;
+    const deskBand = this.node.getChildByName('DeskBand');
+    if (deskBand) deskBand.active = v;
     if (this.monitorProcessLabelNode) this.monitorProcessLabelNode.active = v;
     if (this.monitorEntryLabelNode) this.monitorEntryLabelNode.active = v;
     if (this.tutorialRoot) this.tutorialRoot.active = v && this.shouldShowTutorial();
@@ -825,11 +830,14 @@ export class GameRunner extends Component {
     playNode.addComponent(UITransform).setContentSize(iconSide, iconSide);
     playNode.setPosition(-w * 0.155, 5, 0);
     const playG = playNode.addComponent(Graphics);
-    playG.fillColor = Color.WHITE;
+    playG.fillColor = GameRunner.START_TEXT;
     playG.moveTo(-iconSide * 0.20, -iconSide * 0.29);
     playG.lineTo(iconSide * 0.27, 0);
     playG.lineTo(-iconSide * 0.20, iconSide * 0.29);
     playG.close();
+    playG.fill();
+    playG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 150);
+    playG.circle(iconSide * 0.36, iconSide * 0.20, Math.max(2.5, iconSide * 0.08));
     playG.fill();
 
     const labelNode = this.mkLabel(btn, 'StartButtonLabel', 44, 5, text, Math.min(48, Math.max(36, h * 0.48)), w * 0.62, h - 12);
@@ -837,7 +845,7 @@ export class GameRunner extends Component {
     if (label) {
       label.fontFamily = 'PingFang SC';
       label.isBold = true;
-      label.color = Color.WHITE;
+      label.color = GameRunner.START_TEXT;
       label.lineHeight = label.fontSize + 8;
       label.horizontalAlign = 1;
       label.verticalAlign = 1;
@@ -860,19 +868,49 @@ export class GameRunner extends Component {
   }
 
   private paintStartThickButton(g: Graphics, w: number, h: number, pressed: boolean): void {
+    // 入口 CTA 与主界面道具按钮统一：米白纸质键帽 + 暖棕描边/厚度，蓝色只做极少量点缀。
     g.clear();
-    const depth = Math.max(8, h * 0.16);
-    const topY = pressed ? -depth * 0.68 : 0;
-    const shadowY = -h / 2 - depth;
-    const r = h * 0.43;
-    g.fillColor = GameRunner.START_BLUE_DARK;
-    g.roundRect(-w / 2, shadowY, w, h, r);
+    const faceShift = pressed ? -4 : 0;
+    const lift = pressed ? 2 : 8;
+    const radius = Math.min(24, Math.max(15, h * 0.24));
+
+    g.fillColor = new Color(54, 48, 42, pressed ? 24 : 42);
+    g.roundRect(-w / 2 + 6, -h / 2 - lift - 2, w - 12, h, radius);
     g.fill();
-    g.fillColor = GameRunner.START_BLUE;
-    g.roundRect(-w / 2, topY - h / 2, w, h, r);
+
+    g.fillColor = new Color(178, 139, 102, 210);
+    g.roundRect(-w / 2 + 1, -h / 2 - lift, w - 2, h - 2, radius);
     g.fill();
-    g.fillColor = new Color(255, 255, 255, 44);
-    g.roundRect(-w / 2 + h * 0.18, topY + h * 0.14, w - h * 0.36, h * 0.13, h * 0.065);
+
+    g.fillColor = GameRunner.START_CARD;
+    g.strokeColor = new Color(146, 106, 76, pressed ? 210 : 238);
+    g.lineWidth = 3;
+    g.roundRect(-w / 2 + 2, -h / 2 + 4 + faceShift, w - 4, h - lift - 5, radius);
+    g.fill(); g.stroke();
+
+    g.strokeColor = new Color(171, 129, 92, pressed ? 92 : 145);
+    g.lineWidth = 2;
+    g.moveTo(-w / 2 + radius + 8, h / 2 - lift - 6 + faceShift);
+    g.lineTo(w / 2 - radius - 8, h / 2 - lift - 6 + faceShift);
+    g.stroke();
+
+    g.strokeColor = new Color(255, 255, 255, pressed ? 42 : 90);
+    g.lineWidth = 2;
+    g.roundRect(-w / 2 + 10, -h / 2 + 12 + faceShift, w - 20, h - lift - 22, Math.max(10, radius - 7));
+    g.stroke();
+    g.moveTo(-w / 2 + radius + 10, h / 2 - lift - 11 + faceShift);
+    g.lineTo(w / 2 - radius - 10, h / 2 - lift - 11 + faceShift);
+    g.stroke();
+
+    g.fillColor = new Color(166, 125, 88, pressed ? 128 : 178);
+    g.roundRect(-w / 2 + 24, -h / 2 + 12 + faceShift, w - 48, 5, 3);
+    g.fill();
+    g.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, pressed ? 32 : 50);
+    g.roundRect(-w / 2 + 30, -h / 2 + 18 + faceShift, w * 0.22, 4, 2);
+    g.fill();
+
+    g.fillColor = new Color(255, 255, 255, pressed ? 42 : 74);
+    g.roundRect(-w / 2 + radius + 12, h / 2 - lift - 12 + faceShift, w - radius * 2 - 24, 5, 3);
     g.fill();
   }
 
@@ -1260,6 +1298,7 @@ export class GameRunner extends Component {
         this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
         this.showPaperAim(prop);
         this.aimingProp = prop;
+        this.suppressSyntheticPropCancelUntil = Date.now() + 180;
         { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
         this.updatePaperAim(event);
         this.setEventText('拖动道具操作区，松手刷出去');
@@ -1275,6 +1314,7 @@ export class GameRunner extends Component {
       this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
       this.showPaperAim(prop);
       this.aimingProp = prop;
+      this.suppressSyntheticPropCancelUntil = Date.now() + 180;
       { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
       this.updatePaperAim(event);
       this.advanceTutorial(1, '拖向显示器里的任务卡');
@@ -1286,10 +1326,12 @@ export class GameRunner extends Component {
   }
   private onPropMove(prop: PropType, event: EventTouch): void {
     if (this.aimingProp !== prop) return;
+    this.suppressSyntheticPropCancelUntil = 0;
     this.updatePaperAim(event);
     this.advanceTutorial(2, '松手投出纸团');
   }
   private onPropUp(prop: PropType, event?: EventTouch | EventMouse): void {
+    this.suppressSyntheticPropCancelUntil = 0;
     if (prop === PT.KissUp) {
       if (this.aimingProp === prop) {
         if (event) this.updatePaperAim(event);
@@ -1327,6 +1369,7 @@ export class GameRunner extends Component {
 
   private onGlobalTouchMove(event: EventTouch): void {
     if (this.aimingProp === null) return;
+    this.suppressSyntheticPropCancelUntil = 0;
     this.updatePaperAim(event);
     this.advanceTutorial(2, '松手投出纸团');
   }
@@ -1340,6 +1383,12 @@ export class GameRunner extends Component {
   private onGlobalTouchCancel(): void {
     const prop = this.aimingProp;
     if (prop === null) return;
+    if (this.actionDockNode?.active && Date.now() < this.suppressSyntheticPropCancelUntil) {
+      // 进入道具拖拽时会隐藏/重排底部按钮，Cocos 会立刻派发一次全局 TOUCH_CANCEL。
+      // 这不是玩家取消操作，忽略它，避免按住按钮后马上显示“取消”。
+      return;
+    }
+    this.suppressSyntheticPropCancelUntil = 0;
     this.game.cancel(prop);
     this.clearPaperAim(true);
     this.punchButton(prop, false);
@@ -1347,6 +1396,7 @@ export class GameRunner extends Component {
 
   private onGlobalMouseMove(event: EventMouse): void {
     if (this.aimingProp === null) return;
+    this.suppressSyntheticPropCancelUntil = 0;
     this.updatePaperAim(event);
     this.advanceTutorial(2, '松手投出纸团');
   }
@@ -1556,6 +1606,7 @@ export class GameRunner extends Component {
   }
 
   private clearPaperAim(destroyPaper: boolean): void {
+    this.suppressSyntheticPropCancelUntil = 0;
     this.aimingProp = null;
     this.aimGuideNode?.destroy();
     this.aimGuideNode = null;
@@ -1966,35 +2017,76 @@ export class GameRunner extends Component {
   private render(): void {
     const snap = this.game.getSnapshot();
 
-    // ── 标题：主标题 + 关卡号合并成一条，去掉会被显示器压住的独立副标题 ──
     if (this.gameTitleNode) {
       const tl = this.gameTitleNode.getComponent(Label);
       if (tl) {
-        tl.string = `别让AI替代你 · 第${this.session.currentIndex + 1}关`;
-        tl.fontSize = 30;
+        tl.string = '别让AI替代你';
+        tl.fontSize = Math.min(44, Math.max(30, view.getVisibleSize().width * 0.070));
         tl.lineHeight = tl.fontSize + 6;
-        tl.color = new Color(48, 40, 34, 255);
+        tl.color = GameRunner.START_TEXT;
         tl.isBold = true;
       }
     }
-    // ── 计时器：动态节点，黑字加粗 ──
+
+    const remain = Math.max(0, snap.duration - snap.elapsed);
+    const urgent = remain <= 10 && !this.game.over;
+    const resultText: Record<string, string> = { 'win-survive': '通关', 'win-hunt': '猎杀', lose: '淘汰' };
     if (this.gameTimerNode) {
       const tl = this.gameTimerNode.getComponent(Label)!;
-      const remain = Math.max(0, snap.duration - snap.elapsed);
-      const resultText: Record<string, string> = { 'win-survive': '通关', 'win-hunt': '猎杀', lose: '淘汰' };
       tl.string = this.game.over
         ? `${Math.ceil(remain)}s ${resultText[this.game.result] ?? ''}`
         : `${Math.ceil(remain)}s`;
-      tl.fontSize = this.game.over ? 22 : (this.compactHeader ? 24 : 28);
+      tl.fontSize = this.game.over ? 22 : 28;
       tl.lineHeight = tl.fontSize + 4;
-      tl.color = new Color(70, 60, 50, 255);
+      tl.color = urgent ? new Color(220, 72, 66, 255) : GameRunner.START_TEXT;
       tl.isBold = true;
+      const pulse = urgent ? 1 + Math.sin(snap.elapsed * 8) * 0.035 : 1;
+      this.gameTimerNode.setScale(pulse, pulse, 1);
+      this.timerPlateNode?.setScale(pulse, pulse, 1);
     }
+    if (this.timerPlateNode) {
+      const ut = this.timerPlateNode.getComponent(UITransform)!;
+      const w = ut.width;
+      const h = ut.height;
+      const g = this.timerPlateNode.getComponent(Graphics)!;
+      const pct = snap.duration > 0 ? Math.max(0, Math.min(1, remain / snap.duration)) : 0;
+      const accent = urgent ? new Color(220, 72, 66, 255) : GameRunner.START_BLUE;
+      g.clear();
+      g.fillColor = new Color(150, 132, 105, 42);
+      g.roundRect(-w / 2 + 3, -h / 2 - 5, w - 6, h, h / 2);
+      g.fill();
+      g.fillColor = GameRunner.START_CARD;
+      g.strokeColor = new Color(224, 214, 198, 230);
+      g.lineWidth = 1.4;
+      g.roundRect(-w / 2, -h / 2, w, h, h / 2);
+      g.fill(); g.stroke();
+      const iconX = -w / 2 + h * 0.48;
+      g.strokeColor = urgent ? accent : GameRunner.START_TEXT;
+      g.lineWidth = 3;
+      g.circle(iconX, h * 0.06, h * 0.16);
+      g.stroke();
+      g.moveTo(iconX, h * 0.06);
+      g.lineTo(iconX + h * 0.08, h * 0.15);
+      g.stroke();
+      g.moveTo(iconX - h * 0.07, h * 0.27);
+      g.lineTo(iconX + h * 0.07, h * 0.27);
+      g.stroke();
+      const barW = w * 0.42;
+      const barH = Math.max(5, h * 0.085);
+      const barX = w * 0.08;
+      const barY = -h * 0.24;
+      g.fillColor = new Color(218, 210, 195, 255);
+      g.roundRect(barX - barW / 2, barY - barH / 2, barW, barH, barH / 2);
+      g.fill();
+      g.fillColor = accent;
+      g.roundRect(barX - barW / 2, barY - barH / 2, barW * pct, barH, barH / 2);
+      g.fill();
+    }
+
     this.updateLowerHud(Math.round(snap.approval), snap.zone);
 
     const cards = this.game.conveyor.cards;
     this.ensureSlotBackgrounds();
-    // 槽位只作为固定坐标和底层占位；真实卡片由 cardVisuals 按 id 独立渲染。
     for (let i = 0; i < this.slotNodes.length; i++) {
       this.drawCardBackground(i, null);
       this.renderSlot(this.slotNodes[i], null, i);
@@ -2010,7 +2102,6 @@ export class GameRunner extends Component {
           : Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
         const target = this.slotNodes[idx];
         if (target) this.scanIndicator.setPosition(target.position.x, target.position.y, 0);
-        // 蓄力进度可视化：指示器随 scanPos 0→1 放大，给"蓄满了"的直观反馈
         const s = this.aimingProp !== null ? 1.18 : 0.6 + this.scanPos * 0.8;
         this.scanIndicator.setScale(s, s, 1);
       }
@@ -2093,19 +2184,8 @@ export class GameRunner extends Component {
       dashLine(gx, gy + gh - inset, gx, gy + inset);
       return;
     }
-    const baseFrame = this.artSprites.get('task-card-base') ?? null;
-    const accentKey = card.state === CS.Boss
-      ? 'task-card-accent-boss'
-      : card.state === CS.Idle || card.state === CS.Inserted
-        ? 'task-card-accent-idle'
-        : GameRunner.CARD_ACCENT_ART_KEYS[card.category] ?? 'task-card-accent-normal';
-    const accentFrame = this.artSprites.get(accentKey) ?? null;
-    if (baseFrame) {
-      g.clear();
-      this.applySpriteFrame(baseSprite, baseFrame, w, h, Color.WHITE);
-      this.applySpriteFrame(accentSprite, accentFrame, w, h, Color.WHITE);
-      return;
-    }
+    baseSprite.enabled = false;
+    accentSprite.enabled = false;
     const base = GameRunner.CARD_BORDER_COLORS[card.category] ?? GameRunner.CARD_BORDER_COLORS.routine;
     const shellState: CardShellState = card.state === CS.Rework ? 'rework'
       : card.state === CS.Inserted ? 'inserted'
@@ -2436,25 +2516,15 @@ export class GameRunner extends Component {
    *  背景按宽度等比完整显示，绝不再用 cover 裁掉显示器两侧；超长屏多出的底部区域用背景底色延伸，
    *  作为道具操作区。再用图片实测比例反算显示器/桌面位置，把 Belt/Char/Props 对齐上去。 */
   private applyBgCharSprites(): void {
-    const LAYER_2D = 1 << 25; // UI_2D
+    const LAYER_2D = 1 << 25;
     const visSize = view.getVisibleSize();
-    const bgSf = this.artSprites.get('bg-office');
-    if (!bgSf) return;
+    const topY = visSize.height / 2;
+    const bottomY = -visSize.height / 2;
+    const safe = sys.getSafeAreaRect(false);
+    const safeTopY = safe.y + safe.height - visSize.height / 2;
+    const safeBottomY = safe.y - visSize.height / 2;
 
-    const texSize = bgSf.originalSize; // 原图像素尺寸，如 1088×1920
-    // width-fit：显示器横向结构完整保留；超长屏额外高度留给底部操作区，不再牺牲左右画面。
-    const scale = visSize.width / texSize.width;
-    const bgDisplayW = texSize.width * scale;
-    const bgDisplayH = texSize.height * scale; // 缩放后背景图的显示高度
-    // 顶部只轻微裁切，让完整显示器落到微信胶囊下方；图片下方的剩余高度自然成为操作区。
-    const extraHeight = Math.max(0, visSize.height - bgDisplayH);
-    // 超长屏把背景整体稍下沉，给标题与计时器真正的呼吸空间。
-    const bottomExtension = Math.max(226, extraHeight * 0.78 + 92);
-    const bgBottomY = -visSize.height / 2 + bottomExtension;
-    const bgCenterY = bgBottomY + bgDisplayH / 2;
-    const bgTopY = bgCenterY + bgDisplayH / 2;
-
-    // 图片没有铺到的区域使用原图墙面底色延伸，避免灰底或硬接缝。
+    // 一套与新版开始页一致的暖纸质背景，主界面不再依赖整张旧办公室图来决定层级。
     if (!this.bgFillNode) {
       this.bgFillNode = new Node('BgFill');
       this.bgFillNode.layer = LAYER_2D;
@@ -2463,132 +2533,21 @@ export class GameRunner extends Component {
       this.bgFillNode.addComponent(Graphics);
       this.bgFillNode.active = this.uiState === 'playing';
     }
-    const fillUt = this.bgFillNode.getComponent(UITransform)!;
-    fillUt.setContentSize(visSize.width, visSize.height);
-    const fillG = this.bgFillNode.getComponent(Graphics)!;
-    fillG.clear();
-    fillG.fillColor = new Color(240, 228, 208, 255); // bg-office.png 实测墙面色
-    fillG.rect(-visSize.width / 2, -visSize.height / 2, visSize.width, visSize.height);
-    fillG.fill();
+    this.bgFillNode.getComponent(UITransform)!.setContentSize(visSize.width, visSize.height);
     this.bgFillNode.setPosition(0, 0, 0);
     this.bgFillNode.setSiblingIndex(0);
+    const fillG = this.bgFillNode.getComponent(Graphics)!;
+    fillG.clear();
+    fillG.fillColor = GameRunner.START_BG;
+    fillG.rect(-visSize.width / 2, -visSize.height / 2, visSize.width, visSize.height);
+    fillG.fill();
 
-    if (!this.bgNode) {
-      this.bgNode = new Node('Bg');
-      this.bgNode.layer = LAYER_2D;
-      this.bgNode.parent = this.node;
-      this.bgNode.addComponent(UITransform);
-      const sprite = this.bgNode.addComponent(Sprite);
-      sprite.sizeMode = Sprite.SizeMode.CUSTOM; // 必须先设，避免被 spriteFrame 赋值时的自动尺寸覆盖
-      sprite.spriteFrame = bgSf;
-      this.bgNode.active = this.uiState === 'playing';
-    }
-    this.bgNode.getComponent(UITransform)!.setContentSize(bgDisplayW, bgDisplayH);
-    this.bgNode.setPosition(0, bgCenterY, 0); // 每次调用都刷新（防止 visSize 变化，比如窗口 resize）
-    this.bgNode.setSiblingIndex(1);
+    if (this.bgNode) this.bgNode.active = false;
 
-    // 用比例常量反算显示器屏幕区域在当前屏幕坐标系下的像素位置
-    // 背景图顶部世界坐标 = bgTopY；某比例 p 处的世界 y = bgTopY - p * bgDisplayH
-    const screenTopY = bgTopY - GameRunner.BG_SCREEN_TOP * bgDisplayH;
-    const screenBottomY = bgTopY - GameRunner.BG_SCREEN_BOTTOM * bgDisplayH;
-    const screenWidthPx = (GameRunner.BG_SCREEN_RIGHT - GameRunner.BG_SCREEN_LEFT) * bgDisplayW;
-    const deskTopY = bgTopY - GameRunner.BG_DESK_TOP * bgDisplayH;
-
-    // 美术稿是暖色工作台屏幕，而不是一整块死黑灰；独立内屏面只覆盖显示区域，保留原监视器外壳。
-    if (!this.monitorSurfaceNode) {
-      this.monitorSurfaceNode = new Node('MonitorSurface');
-      this.monitorSurfaceNode.layer = LAYER_2D;
-      this.monitorSurfaceNode.parent = this.node;
-      this.monitorSurfaceNode.addComponent(UITransform);
-      this.monitorSurfaceNode.addComponent(Graphics);
-    }
-    const surfaceW = screenWidthPx * 0.96;
-    const surfaceH = (screenTopY - screenBottomY) * 0.92;
-    this.monitorSurfaceNode.getComponent(UITransform)!.setContentSize(surfaceW, surfaceH);
-    this.monitorSurfaceNode.setPosition(0, (screenTopY + screenBottomY) / 2, 0);
-    this.monitorSurfaceNode.setSiblingIndex(2);
-    const surfaceG = this.monitorSurfaceNode.getComponent(Graphics)!;
-    surfaceG.clear();
-    const surfaceRadius = 14;
-    // 屏面顶栏：窗口三点 + 右侧极简"运行中"信号条，交代这是一块 AI 工作屏，撑住顶部视觉。
-    const surfaceHeaderH = 30;
-    surfaceG.fillColor = new Color(246, 238, 225, 255);
-    surfaceG.strokeColor = new Color(88, 78, 68, 210);
-    surfaceG.lineWidth = 2.5;
-    surfaceG.roundRect(-surfaceW / 2, -surfaceH / 2, surfaceW, surfaceH, surfaceRadius);
-    surfaceG.fill(); surfaceG.stroke();
-    // 顶栏底带
-    surfaceG.fillColor = new Color(88, 78, 68, 30);
-    surfaceG.roundRect(-surfaceW / 2 + 3, surfaceH / 2 - surfaceHeaderH, surfaceW - 6, surfaceHeaderH - 3, surfaceRadius * 0.6);
-    surfaceG.fill();
-    // 顶栏下分隔线
-    surfaceG.strokeColor = new Color(88, 78, 68, 70);
-    surfaceG.lineWidth = 1.5;
-    surfaceG.moveTo(-surfaceW / 2 + 8, surfaceH / 2 - surfaceHeaderH);
-    surfaceG.lineTo(surfaceW / 2 - 8, surfaceH / 2 - surfaceHeaderH);
-    surfaceG.stroke();
-    // 左侧窗口三点（琥珀 + 两颗墨灰）
-    const lampY = surfaceH / 2 - surfaceHeaderH / 2;
-    const lampColors = [new Color(244, 172, 32, 255), new Color(150, 140, 126, 255), new Color(150, 140, 126, 255)];
-    lampColors.forEach((c, i) => {
-      surfaceG.fillColor = c;
-      surfaceG.circle(-surfaceW / 2 + 20 + i * 16, lampY, 4);
-      surfaceG.fill();
-    });
-    // 右侧"运行中"信号条：三根递增短竖条 + 一颗琥珀点。
-    const sigX = surfaceW / 2 - 46;
-    [6, 10, 14].forEach((barH, i) => {
-      surfaceG.fillColor = new Color(120, 108, 94, 210);
-      surfaceG.roundRect(sigX + i * 7, lampY - barH / 2, 4, barH, 2);
-      surfaceG.fill();
-    });
-    surfaceG.fillColor = new Color(244, 172, 32, 255);
-    surfaceG.circle(surfaceW / 2 - 18, lampY, 4);
-    surfaceG.fill();
-
-    // 桌面陈设是独立真素材：补足办公室叙事，同时中央 48% 保持透明给机器人与弹道。
-    const decorSf = this.artSprites.get('desk-decor');
-    if (decorSf) {
-      if (!this.deskDecorNode) {
-        this.deskDecorNode = new Node('DeskDecor');
-        this.deskDecorNode.layer = LAYER_2D;
-        this.deskDecorNode.parent = this.node;
-        this.deskDecorNode.addComponent(UITransform);
-        const sprite = this.deskDecorNode.addComponent(Sprite);
-        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        sprite.spriteFrame = decorSf;
-      }
-      const decorW = Math.min(visSize.width * 1.18, 760);
-      const decorH = decorW / 2;
-      this.deskDecorNode.getComponent(UITransform)!.setContentSize(decorW, decorH);
-      this.deskDecorNode.setPosition(0, deskTopY - decorH * 0.15, 0);
-      this.deskDecorNode.setSiblingIndex(3);
-      this.deskDecorNode.active = this.uiState === 'playing';
-    }
-
-    // HUD 贴合显示器内屏，而不是沿用 960×640 横屏场景里的固定 y 坐标。
-    const monitorPadding = Math.max(18, visSize.width * 0.028);
-    const hudTopY = screenTopY - monitorPadding;
-    const hudBottomY = screenBottomY + monitorPadding;
-
-    // 标题区：放在显示器上方 50px 处的墙面区
-    const safe = sys.getSafeAreaRect(false);
-    const safeTopY = safe.y + safe.height - visSize.height / 2;
-    const headerGap = safeTopY - screenTopY;
-    this.compactHeader = false;
-    // 主标题保持可见且靠近游戏内容，不再被安全区压成弱提示。
-    const titleY = safeTopY - Math.max(44, visSize.height * 0.050);
-
-    // 隐藏场景旧节点，改用代码动态创建（避免编辑器绑定问题）
-    if (this.levelLabel) this.levelLabel.node.active = false;
-    if (this.timerLabel) this.timerLabel.node.active = false;
-    if (this.approvalLabel) this.approvalLabel.node.active = false;
-    if (this.zoneLabel) this.zoneLabel.node.active = false;
-
-    // ── 动态标题（极简：单节点 + Label） ──
+    // 顶部：主标题 + 左关卡胶囊 + 右计时胶囊，形成一套统一 HUD。
     if (!this.gameTitleNode) {
       this.gameTitleNode = new Node('GameTitle');
-      this.gameTitleNode.layer = 1 << 25;
+      this.gameTitleNode.layer = LAYER_2D;
       this.gameTitleNode.parent = this.node;
       this.gameTitleNode.addComponent(UITransform);
       const lbl = this.gameTitleNode.addComponent(Label);
@@ -2597,221 +2556,394 @@ export class GameRunner extends Component {
       lbl.verticalAlign = 1;
       lbl.isBold = true;
       lbl.overflow = Label.Overflow.SHRINK;
-      lbl.color = new Color(70, 60, 50, 255);
     }
-    // 主标题：墙面上方居中大字。
-    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 460), 44);
+    const titleY = Math.min(safeTopY - 34, topY - Math.max(34, visSize.height * 0.042));
+    this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.76, 520), 54);
     this.gameTitleNode.setPosition(0, titleY, 0);
-    const tl = this.gameTitleNode.getComponent(Label)!;
-    tl.string = '别让AI替代你';
-    tl.fontSize = 32;
-    tl.lineHeight = tl.fontSize + 4;
-    tl.color = new Color(48, 40, 34, 255);
+    const titleLabel = this.gameTitleNode.getComponent(Label)!;
+    titleLabel.string = '别让AI替代你';
+    titleLabel.fontSize = Math.min(44, Math.max(30, visSize.width * 0.070));
+    titleLabel.lineHeight = titleLabel.fontSize + 6;
+    titleLabel.color = GameRunner.START_TEXT;
+    titleLabel.isBold = true;
 
-    // 副标题：主标题正下方一行，关卡 + 关卡名；弱化字号与颜色，与主标题形成清晰层级。
-    if (!this.subtitleNode) {
-      this.subtitleNode = new Node('GameSubtitle');
-      this.subtitleNode.layer = 1 << 25;
-      this.subtitleNode.parent = this.node;
-      this.subtitleNode.addComponent(UITransform);
-      const sub = this.subtitleNode.addComponent(Label);
-      sub.fontFamily = 'PingFang SC';
-      sub.horizontalAlign = 1;
-      sub.verticalAlign = 1;
-      sub.isBold = true;
-      sub.overflow = Label.Overflow.SHRINK;
-    }
-    // 下限保护：副标题绝不低于显示器上边框，彻底杜绝被机身遮挡。
-    const subtitleY = Math.max(titleY - 30, screenTopY + 22);
-    this.subtitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.72, 460), 26);
-    this.subtitleNode.setPosition(0, subtitleY, 0);
-    const subLabel = this.subtitleNode.getComponent(Label)!;
-    const rawTitle = getLevel(this.session.currentIndex).title ?? '';
-    const missionName = rawTitle.includes('·') ? rawTitle.split('·').slice(-1)[0] : rawTitle;
-    subLabel.string = `第${this.session.currentIndex + 1}关 · ${missionName || '替代警报'}`;
-    subLabel.fontSize = 17;
-    subLabel.lineHeight = 21;
-    subLabel.color = new Color(122, 106, 90, 255);
-    this.subtitleNode.active = this.uiState === 'playing';
+    const hudY = titleY - Math.max(70, visSize.height * 0.082);
+    // 顶部小标题与倒计时按显示器左右边缘对齐，而不是按屏幕安全边距贴边。
+    // 这样 HUD 和核心玩法区会形成两条稳定的竖向视觉基线。
+    const monitorW = Math.min(visSize.width * 0.91, 760);
+    const pillW = Math.min(142, Math.max(112, visSize.width * 0.18));
+    const pillH = Math.min(70, Math.max(56, visSize.height * 0.070));
+    const hudLeftX = -monitorW / 2 + pillW / 2;
 
-    // ── 动态计时器 ──
-    if (!this.gameTimerNode) {
-      this.gameTimerNode = new Node('GameTimer');
-      this.gameTimerNode.layer = 1 << 25;
-      this.gameTimerNode.parent = this.node;
-      this.gameTimerNode.addComponent(UITransform);
-      const timer = this.gameTimerNode.addComponent(Label);
-      timer.fontFamily = 'PingFang SC';
+    if (!this.monitorLabelNode) {
+      this.monitorLabelNode = new Node('LevelPill');
+      this.monitorLabelNode.layer = LAYER_2D;
+      this.monitorLabelNode.parent = this.node;
+      this.monitorLabelNode.addComponent(UITransform);
+      this.monitorLabelNode.addComponent(Graphics);
+      const text = new Node('LevelPillText');
+      text.layer = LAYER_2D;
+      text.parent = this.monitorLabelNode;
+      text.addComponent(UITransform);
+      const lbl = text.addComponent(Label);
+      lbl.fontFamily = 'PingFang SC';
+      lbl.horizontalAlign = 1;
+      lbl.verticalAlign = 1;
+      lbl.isBold = true;
+      lbl.overflow = Label.Overflow.SHRINK;
     }
-    const timerLabel = this.gameTimerNode.getComponent(Label)!;
-    timerLabel.horizontalAlign = 1; // CENTER
-    timerLabel.verticalAlign = 1;
-    timerLabel.overflow = Label.Overflow.SHRINK;
-    timerLabel.isBold = true;
-    const plateW = Math.min(Math.max(118, visSize.width * 0.27), 140);
-    const plateH = 54;
-    const timerX = visSize.width / 2 - plateW / 2 - Math.max(22, visSize.width * 0.045);
-    this.gameTimerNode.getComponent(UITransform)!.setContentSize(plateW - 18, 42);
-    // 计时器与"主标题+副标题"两行块的视觉中线对齐。
-    const timerY = titleY - 14;
-    this.gameTimerNode.setPosition(timerX + 4, timerY, 0);
+    this.monitorLabelNode.getComponent(UITransform)!.setContentSize(pillW, pillH);
+    this.monitorLabelNode.setPosition(hudLeftX, hudY, 0);
+    this.monitorLabelNode.setSiblingIndex(2);
+    const levelG = this.monitorLabelNode.getComponent(Graphics)!;
+    levelG.clear();
+    levelG.fillColor = GameRunner.START_SOFT;
+    levelG.roundRect(-pillW / 2, -pillH / 2, pillW, pillH, pillH * 0.46);
+    levelG.fill();
+    const levelText = this.monitorLabelNode.getChildByName('LevelPillText')?.getComponent(Label);
+    if (levelText) {
+      const rawTitle = getLevel(this.session.currentIndex).title ?? '';
+      const missionName = rawTitle.includes('·') ? rawTitle.split('·').slice(-1)[0] : rawTitle;
+      levelText.string = `第 ${this.session.currentIndex + 1} 关\n${missionName || '替代警报'}`;
+      levelText.fontSize = Math.min(23, Math.max(18, pillW * 0.17));
+      levelText.lineHeight = levelText.fontSize + 6;
+      levelText.color = GameRunner.START_TEXT;
+      levelText.node.getComponent(UITransform)!.setContentSize(pillW - 20, pillH - 10);
+      levelText.node.setPosition(0, 0, 0);
+    }
+    if (this.subtitleNode) this.subtitleNode.active = false;
+
     if (!this.timerPlateNode) {
       this.timerPlateNode = new Node('TimerPlate');
-      this.timerPlateNode.layer = 1 << 25;
+      this.timerPlateNode.layer = LAYER_2D;
       this.timerPlateNode.parent = this.node;
       this.timerPlateNode.addComponent(UITransform);
       this.timerPlateNode.addComponent(Graphics);
     }
-    this.timerPlateNode.getComponent(UITransform)!.setContentSize(plateW, plateH);
-    this.timerPlateNode.setPosition(timerX, timerY, 0);
-    this.timerPlateNode.setSiblingIndex(Math.max(0, this.gameTimerNode.getSiblingIndex() - 1));
-    const plateG = this.timerPlateNode.getComponent(Graphics)!;
-    plateG.clear();
-    plateG.fillColor = new Color(72, 64, 55, 46);
-    plateG.roundRect(-plateW / 2 + 5, -plateH / 2 - 5, plateW - 10, plateH, 16);
-    plateG.fill();
-    plateG.fillColor = new Color(255, 251, 243, 246);
-    plateG.strokeColor = new Color(102, 91, 79, 176);
-    plateG.lineWidth = 2.5;
-    plateG.roundRect(-plateW / 2, -plateH / 2, plateW, plateH, 15);
-    plateG.fill(); plateG.stroke();
-    plateG.strokeColor = new Color(255, 255, 255, 112);
-    plateG.lineWidth = 2;
-    plateG.moveTo(-plateW / 2 + 20, plateH / 2 - 10);
-    plateG.lineTo(plateW / 2 - 18, plateH / 2 - 10);
-    plateG.stroke();
-    plateG.fillColor = new Color(244, 172, 32, 255);
-    plateG.circle(-plateW / 2 + 15, plateH / 2 - 13, 4);
-    plateG.fill();
+    const timerW = Math.min(196, Math.max(152, visSize.width * 0.245));
+    const timerH = Math.min(72, Math.max(56, visSize.height * 0.066));
+    const timerX = monitorW / 2 - timerW / 2;
+    this.timerPlateNode.getComponent(UITransform)!.setContentSize(timerW, timerH);
+    this.timerPlateNode.setPosition(timerX, hudY, 0);
+    this.timerPlateNode.setSiblingIndex(2);
+    if (!this.gameTimerNode) {
+      this.gameTimerNode = new Node('GameTimer');
+      this.gameTimerNode.layer = LAYER_2D;
+      this.gameTimerNode.parent = this.node;
+      this.gameTimerNode.addComponent(UITransform);
+      const timer = this.gameTimerNode.addComponent(Label);
+      timer.fontFamily = 'PingFang SC';
+      timer.horizontalAlign = 1;
+      timer.verticalAlign = 1;
+      timer.isBold = true;
+      timer.overflow = Label.Overflow.SHRINK;
+    }
+    this.gameTimerNode.getComponent(UITransform)!.setContentSize(timerW * 0.45, timerH * 0.58);
+    this.gameTimerNode.setPosition(timerX + timerW * 0.10, hudY + timerH * 0.10, 0);
 
-    // "AI显示器·任务流"与"处理→/←入口"浮动文字全部移除：
-    // 内屏灯带提供设备感，流向信息由传送带两端的图形化箭头槽口承担（见 conveyorTrack 绘制）。
-    if (this.monitorLabelNode) { this.monitorLabelNode.destroy(); this.monitorLabelNode = null; }
-    if (this.monitorProcessLabelNode) { this.monitorProcessLabelNode.destroy(); this.monitorProcessLabelNode = null; }
-    if (this.monitorEntryLabelNode) { this.monitorEntryLabelNode.destroy(); this.monitorEntryLabelNode = null; }
+    // 中央核心：收件箱显示器。厚边框保留玩具感，内屏留给传送带和任务卡。
+    const monitorH = Math.min(visSize.height * 0.315, monitorW * 0.58);
+    const monitorY = hudY - timerH * 0.5 - Math.max(monitorH * 0.55 + 20, visSize.height * 0.175);
+    if (!this.monitorSurfaceNode) {
+      this.monitorSurfaceNode = new Node('InboxMonitor');
+      this.monitorSurfaceNode.layer = LAYER_2D;
+      this.monitorSurfaceNode.parent = this.node;
+      this.monitorSurfaceNode.addComponent(UITransform);
+      this.monitorSurfaceNode.addComponent(Graphics);
+    }
+    this.monitorSurfaceNode.getComponent(UITransform)!.setContentSize(monitorW, monitorH);
+    this.monitorSurfaceNode.setPosition(0, monitorY, 0);
+    this.monitorSurfaceNode.setSiblingIndex(1);
+    const surfaceG = this.monitorSurfaceNode.getComponent(Graphics)!;
+    surfaceG.clear();
+    const monitorR = Math.min(42, monitorH * 0.16);
+    surfaceG.fillColor = new Color(68, 56, 46, 255);
+    surfaceG.roundRect(-monitorW / 2, -monitorH / 2, monitorW, monitorH, monitorR);
+    surfaceG.fill();
+    surfaceG.fillColor = new Color(255, 252, 246, 255);
+    surfaceG.roundRect(-monitorW / 2 + 22, -monitorH / 2 + 22, monitorW - 44, monitorH - 44, monitorR * 0.72);
+    surfaceG.fill();
 
-    // Belt（传送带卡槽）放在标题和状态行之间，卡牌始终限制在显示器内。
+    const innerW = monitorW - 44;
+    const innerH = monitorH - 44;
+    const headerH = Math.min(64, Math.max(46, innerH * 0.21));
+    const innerLeft = -innerW / 2;
+    const innerTop = innerH / 2;
+    surfaceG.strokeColor = new Color(226, 216, 198, 255);
+    surfaceG.lineWidth = 1.2;
+    surfaceG.moveTo(innerLeft + 2, innerTop - headerH);
+    surfaceG.lineTo(innerLeft + innerW - 2, innerTop - headerH);
+    surfaceG.stroke();
+    [new Color(240, 92, 96, 255), new Color(238, 176, 78, 255), new Color(79, 178, 112, 255)].forEach((c, i) => {
+      surfaceG.fillColor = c;
+      surfaceG.circle(innerLeft + 42 + i * 28, innerTop - headerH / 2, 9);
+      surfaceG.fill();
+    });
+    const dotColor = new Color(226, 216, 198, 92);
+    for (let x = innerLeft + 36; x < innerLeft + innerW - 28; x += 28) {
+      for (let y = -innerH / 2 + 70; y < innerTop - headerH - 8; y += 28) {
+        surfaceG.fillColor = dotColor;
+        surfaceG.circle(x, y, 1.6);
+        surfaceG.fill();
+      }
+    }
+
+    if (!this.monitorProcessLabelNode) {
+      this.monitorProcessLabelNode = new Node('InboxTitle');
+      this.monitorProcessLabelNode.layer = LAYER_2D;
+      this.monitorProcessLabelNode.parent = this.monitorSurfaceNode;
+      this.monitorProcessLabelNode.addComponent(UITransform);
+      const lbl = this.monitorProcessLabelNode.addComponent(Label);
+      lbl.fontFamily = 'PingFang SC';
+      lbl.horizontalAlign = 0;
+      lbl.verticalAlign = 1;
+      lbl.isBold = true;
+      lbl.overflow = Label.Overflow.SHRINK;
+    }
+    const inboxLabel = this.monitorProcessLabelNode.getComponent(Label)!;
+    inboxLabel.string = '收件箱 · 待处理';
+    inboxLabel.fontSize = Math.min(22, Math.max(16, monitorW * 0.028));
+    inboxLabel.lineHeight = inboxLabel.fontSize + 4;
+    inboxLabel.color = GameRunner.START_MUTED;
+    this.monitorProcessLabelNode.getComponent(UITransform)!.setContentSize(innerW * 0.50, headerH - 8);
+    this.monitorProcessLabelNode.setPosition(innerLeft + 132 + innerW * 0.25, innerTop - headerH / 2, 0);
+
+    if (!this.monitorEntryLabelNode) {
+      this.monitorEntryLabelNode = new Node('QueuePill');
+      this.monitorEntryLabelNode.layer = LAYER_2D;
+      this.monitorEntryLabelNode.parent = this.monitorSurfaceNode;
+      this.monitorEntryLabelNode.addComponent(UITransform);
+      this.monitorEntryLabelNode.addComponent(Graphics);
+      const text = new Node('QueueText');
+      text.layer = LAYER_2D;
+      text.parent = this.monitorEntryLabelNode;
+      text.addComponent(UITransform);
+      const lbl = text.addComponent(Label);
+      lbl.fontFamily = 'PingFang SC';
+      lbl.horizontalAlign = 1;
+      lbl.verticalAlign = 1;
+      lbl.isBold = true;
+      lbl.overflow = Label.Overflow.SHRINK;
+    }
+    const queueW = Math.min(98, innerW * 0.16);
+    const queueH = Math.min(36, headerH * 0.64);
+    this.monitorEntryLabelNode.getComponent(UITransform)!.setContentSize(queueW, queueH);
+    this.monitorEntryLabelNode.setPosition(innerW / 2 - queueW / 2 - 30, innerTop - headerH / 2, 0);
+    const queueG = this.monitorEntryLabelNode.getComponent(Graphics)!;
+    queueG.clear();
+    queueG.fillColor = GameRunner.START_SOFT;
+    queueG.roundRect(-queueW / 2, -queueH / 2, queueW, queueH, queueH / 2);
+    queueG.fill();
+    const qText = this.monitorEntryLabelNode.getChildByName('QueueText')?.getComponent(Label);
+    if (qText) {
+      qText.string = '队列中';
+      qText.fontSize = Math.min(18, queueH * 0.50);
+      qText.lineHeight = qText.fontSize + 3;
+      qText.color = GameRunner.START_MUTED;
+      qText.node.getComponent(UITransform)!.setContentSize(queueW - 14, queueH - 4);
+      qText.node.setPosition(0, 0, 0);
+    }
+
     if (this.beltNode) {
-      const beltY = (hudTopY + hudBottomY) / 2 - (screenTopY - screenBottomY) * 0.040;
-      this.beltNode.setPosition(this.beltNode.position.x, beltY, 0);
+      const beltW = innerW * 0.84;
+      const beltH = Math.max(116, innerH - headerH - 66);
+      const beltY = monitorY - monitorH * 0.02;
+      this.beltNode.setPosition(0, beltY, 0);
       let beltUt = this.beltNode.getComponent(UITransform);
       if (!beltUt) beltUt = this.beltNode.addComponent(UITransform);
-      // 6 个卡槽横排，整体宽度不超过屏幕内屏可用宽度。
-      // 标题栏降级为灯带后内屏可用高度增加，全部还给卡片：目标要大、要可点。
-      const beltW = Math.min(screenWidthPx * 0.94, visSize.width * 0.92);
-      const beltH = Math.max(170, Math.min((screenTopY - screenBottomY) * 0.80, 230));
       beltUt.setContentSize(beltW, beltH);
-
-      // ── 传送带凹槽机箱 ──
-      // 6 张卡横排导致卡片被宽度限制、无法靠放大填满高屏，于是把传送带嵌进一个
-      // 占满内屏的凹槽面板：给传送带明确容器 + 屏内层次，彻底���除"空荡荡"的观感。
-      // 画在 surfaceG（屏面 Graphics）上，位于卡片与轨道之下。
-      const trayW = surfaceW * 0.93;
-      const trayTopLocal = surfaceH / 2 - surfaceHeaderH - 10;
-      const trayBottomLocal = -surfaceH / 2 + 12;
-      const trayH = trayTopLocal - trayBottomLocal;
-      // 投影
-      surfaceG.fillColor = new Color(96, 84, 72, 38);
-      surfaceG.roundRect(-trayW / 2 + 3, trayBottomLocal - 4, trayW, trayH, 18);
-      surfaceG.fill();
-      // 凹槽面板：略深冷调米色，与屏面拉开层次
-      surfaceG.fillColor = new Color(236, 228, 212, 255);
-      surfaceG.strokeColor = new Color(122, 110, 95, 135);
-      surfaceG.lineWidth = 2;
-      surfaceG.roundRect(-trayW / 2, trayBottomLocal, trayW, trayH, 18);
-      surfaceG.fill(); surfaceG.stroke();
-      // 顶部内阴影，制造凹陷深度
-      surfaceG.fillColor = new Color(120, 108, 94, 40);
-      surfaceG.roundRect(-trayW / 2 + 7, trayTopLocal - 18, trayW - 14, 15, 8);
-      surfaceG.fill();
-      // 极淡横向扫描纹，赋予"屏幕"质感（卡片会覆盖大部分，弱到几乎无干扰）
-      surfaceG.strokeColor = new Color(122, 110, 95, 15);
-      surfaceG.lineWidth = 1;
-      for (let ly = trayBottomLocal + 14; ly < trayTopLocal - 20; ly += 13) {
-        surfaceG.moveTo(-trayW / 2 + 12, ly);
-        surfaceG.lineTo(trayW / 2 - 12, ly);
-      }
-      surfaceG.stroke();
-      // 琥珀扫描线：位于卡片上方留白，呼应"AI 正在扫描任务"的叙事
-      const scanY = trayTopLocal - 26;
-      surfaceG.fillColor = new Color(244, 172, 32, 30);
-      surfaceG.roundRect(-trayW / 2 + 12, scanY - 3, trayW - 24, 6, 3);
-      surfaceG.fill();
-      surfaceG.fillColor = new Color(244, 172, 32, 72);
-      surfaceG.roundRect(-trayW / 2 + 12, scanY - 1, trayW - 24, 2, 1);
-      surfaceG.fill();
-
-      if (!this.conveyorTrackNode) {
-        this.conveyorTrackNode = new Node('ConveyorTrack');
-        this.conveyorTrackNode.layer = LAYER_2D;
-        this.conveyorTrackNode.parent = this.node;
-        this.conveyorTrackNode.addComponent(UITransform);
-        this.conveyorTrackNode.addComponent(Graphics);
-      }
-      const trackH = Math.max(44, Math.min(58, beltH * 0.36));
-      const trackOuterW = beltW + Math.max(34, visSize.width * 0.045);
-      this.conveyorTrackNode.getComponent(UITransform)!.setContentSize(trackOuterW, trackH + 14);
-      this.conveyorTrackNode.setPosition(0, beltY - beltH * 0.31, 0);
-      this.conveyorTrackNode.setSiblingIndex(Math.max(3, this.beltNode.getSiblingIndex() - 1));
-      const trackG = this.conveyorTrackNode.getComponent(Graphics)!;
-      trackG.clear();
-      const trackRadius = trackH / 2;
-      const rollerR = trackH * 0.40;
-      const rollerX = trackOuterW / 2 - rollerR - 3;
-      trackG.fillColor = new Color(96, 84, 72, 52);
-      trackG.roundRect(-trackOuterW / 2 + 2, -trackH / 2 - 5, trackOuterW - 4, trackH + 2, trackRadius);
-      trackG.fill();
-      trackG.fillColor = new Color(105, 103, 96, 255);
-      trackG.strokeColor = new Color(84, 74, 64, 190);
-      trackG.lineWidth = 2.5;
-      trackG.roundRect(-trackOuterW / 2, -trackH / 2, trackOuterW, trackH, trackRadius);
-      trackG.fill(); trackG.stroke();
-      trackG.fillColor = new Color(124, 121, 112, 255);
-      trackG.roundRect(-trackOuterW / 2 + 9, -trackH / 2 + 7, trackOuterW - 18, trackH * 0.50, trackRadius * 0.45);
-      trackG.fill();
-      trackG.fillColor = new Color(88, 84, 77, 255);
-      trackG.roundRect(-trackOuterW / 2 + 9, -trackH / 2 + 7, trackOuterW - 18, trackH * 0.18, trackRadius * 0.30);
-      trackG.fill();
-      trackG.strokeColor = new Color(255, 255, 255, 34);
-      trackG.lineWidth = 2;
-      trackG.moveTo(-trackOuterW / 2 + trackRadius, trackH / 2 - 8);
-      trackG.lineTo(trackOuterW / 2 - trackRadius, trackH / 2 - 8);
-      trackG.stroke();
-      trackG.strokeColor = new Color(82, 72, 62, 58);
-      trackG.lineWidth = 2;
-      const segment = beltW / 6;
-      for (let i = 1; i < 6; i++) {
-        const x = -beltW / 2 + segment * i;
-        trackG.moveTo(x, -trackH / 2 + 7);
-        trackG.lineTo(x, trackH / 2 - 8);
-        trackG.stroke();
-      }
-      [-rollerX, rollerX].forEach((x) => {
-        trackG.fillColor = new Color(124, 121, 113, 255);
-        trackG.strokeColor = new Color(84, 74, 64, 170);
-        trackG.lineWidth = 2.5;
-        trackG.circle(x, 0, rollerR);
-        trackG.fill(); trackG.stroke();
-        trackG.fillColor = new Color(92, 86, 78, 255);
-        trackG.strokeColor = new Color(84, 74, 64, 115);
-        trackG.lineWidth = 2;
-        trackG.circle(x, 0, rollerR * 0.55);
-        trackG.fill(); trackG.stroke();
-        // 滚轮上的向左流向箭头：替代原"处理→ / ←入口"浮动文字，图形化表达任务流向。
-        const aw = rollerR * 0.46;
-        trackG.fillColor = new Color(238, 233, 222, 235);
-        trackG.moveTo(x - aw, 0);
-        trackG.lineTo(x + aw * 0.5, aw * 0.85);
-        trackG.lineTo(x + aw * 0.5, -aw * 0.85);
-        trackG.close();
-        trackG.fill();
-      });
       const mask = this.beltNode.getComponent(Mask) ?? this.beltNode.addComponent(Mask);
       mask.type = Mask.Type.GRAPHICS_RECT;
       this.layoutBeltSlots(beltW, beltH);
     }
 
-    // 角色：键盘前沿对齐桌面线。角色稍微挡住显示器底部是正常的（坐在桌前面对屏幕的视角）。
+    if (!this.conveyorTrackNode) {
+      this.conveyorTrackNode = new Node('ConveyorTrack');
+      this.conveyorTrackNode.layer = LAYER_2D;
+      this.conveyorTrackNode.parent = this.node;
+      this.conveyorTrackNode.addComponent(UITransform);
+      this.conveyorTrackNode.addComponent(Graphics);
+    }
+    const trackW = innerW * 0.88;
+    const trackH = Math.min(54, Math.max(42, monitorH * 0.13));
+    const trackY = monitorY - monitorH / 2 + 52;
+    this.conveyorTrackNode.getComponent(UITransform)!.setContentSize(trackW, trackH);
+    this.conveyorTrackNode.setPosition(0, trackY, 0);
+    this.conveyorTrackNode.setSiblingIndex(2);
+    const trackG = this.conveyorTrackNode.getComponent(Graphics)!;
+    trackG.clear();
+    trackG.fillColor = new Color(136, 124, 111, 255);
+    trackG.roundRect(-trackW / 2, -trackH / 2, trackW, trackH, trackH / 2);
+    trackG.fill();
+    const rollerR = trackH * 0.34;
+    [-trackW / 2 + trackH * 0.55, trackW / 2 - trackH * 0.55].forEach((x) => {
+      trackG.fillColor = new Color(252, 249, 242, 255);
+      trackG.circle(x, 0, rollerR);
+      trackG.fill();
+    });
+    trackG.fillColor = new Color(210, 201, 190, 255);
+    for (let x = -trackW / 2 + trackH * 1.2; x < trackW / 2 - trackH * 1.2; x += trackH * 0.62) {
+      trackG.roundRect(x, -trackH * 0.14, trackH * 0.16, trackH * 0.28, 2);
+      trackG.fill();
+    }
+
+    // 工位压缩成一条完整的浅色底座带：保留办公室叙事，但不再和玩法区抢视觉权重。
+    const approxBtnW = Math.min((Math.min(visSize.width - Math.max(24, visSize.width * 0.045) * 2, 720) - Math.max(14, visSize.width * 0.024) * (this.propButtonNodes.length - 1)) / Math.max(1, this.propButtonNodes.length), 150);
+    const approxBtnH = Math.min(116, Math.max(86, approxBtnW * 0.78));
+    const approxPanelH = Math.min(118, Math.max(92, visSize.height * 0.096));
+    const approxBtnY = safeBottomY + approxBtnH / 2 + Math.max(20, visSize.height * 0.018);
+    const approxPanelY = approxBtnY + approxBtnH / 2 + approxPanelH / 2 + Math.max(72, visSize.height * 0.075);
+    const deskTop = monitorY - monitorH / 2 - Math.max(16, visSize.height * 0.018);
+    const deskBottom = approxPanelY + approxPanelH / 2 + Math.max(12, visSize.height * 0.012);
+    const deskAvailableH = deskTop - deskBottom;
+    const deskH = Math.max(150, Math.min(430, deskAvailableH));
+    // 工位整体稍微上移，让桌面更贴近显示器/角色手部，减少下方漂浮感；物件和 AI 使用同一个 deskY 保持相对关系。
+    const deskLift = Math.min(30, Math.max(14, visSize.height * 0.020));
+    const deskY = deskTop - deskH / 2 + deskLift;
+
+    const deskBand = this.node.getChildByName('DeskBand') ?? new Node('DeskBand');
+    if (!deskBand.parent) {
+      deskBand.layer = LAYER_2D;
+      deskBand.parent = this.node;
+      deskBand.addComponent(UITransform);
+      deskBand.addComponent(Graphics);
+    }
+    // 桌面作为场景底座应延展到屏幕两侧，物件自然外扩；核心玩法区仍由上方显示器承担。
+    const bandW = Math.min(Math.max(visSize.width * 1.04, monitorW * 1.18), 920);
+    deskBand.getComponent(UITransform)!.setContentSize(bandW, deskH);
+    deskBand.setPosition(0, deskY, 0);
+    deskBand.setSiblingIndex(1);
+    deskBand.active = this.uiState === 'playing';
+    const bandG = deskBand.getComponent(Graphics)!;
+    bandG.clear();
+    bandG.fillColor = new Color(248, 226, 190, 82);
+    bandG.roundRect(-bandW / 2, -deskH / 2, bandW, deskH, 10);
+    bandG.fill();
+    bandG.fillColor = new Color(230, 174, 106, 48);
+    bandG.ellipse(0, -deskH * 0.42, bandW * 0.52, deskH * 0.11);
+    bandG.fill();
+
+    const tableDepth = Math.max(38, Math.min(62, deskH * 0.20));
+    const tableFaceH = Math.max(18, Math.min(30, deskH * 0.095));
+    const tableSurfaceBaseY = -deskH * 0.08;
+    const tableBoardLift = Math.min(16, Math.max(10, deskH * 0.045));
+    const tableSurfaceY = tableSurfaceBaseY + tableBoardLift;
+    const tableW = bandW * 0.98;
+    const tableBackW = tableW * 0.78;
+    const tableFrontW = tableW;
+    const tableBackY = tableSurfaceY + tableDepth * 0.34;
+    const tableFrontY = tableSurfaceY - tableDepth * 0.66;
+    const objectTableFrontY = tableSurfaceBaseY - tableDepth * 0.66;
+
+    // 桌面投影：先落在桌子下方，后续桌腿和桌面覆盖在上面，建立纵深。
+    bandG.fillColor = new Color(126, 82, 52, 42);
+    bandG.roundRect(-tableFrontW / 2 + 8, tableFrontY - tableFaceH - 9, tableFrontW - 16, tableFaceH + 12, 10);
+    bandG.fill();
+
+    // 上表面：梯形透视，后边稍窄、前边稍宽，看起来不再是一条扁平横条。
+    bandG.fillColor = new Color(196, 132, 78, 245);
+    bandG.strokeColor = new Color(111, 72, 49, 185);
+    bandG.lineWidth = 2;
+    bandG.moveTo(-tableBackW / 2, tableBackY);
+    bandG.lineTo(tableBackW / 2, tableBackY);
+    bandG.lineTo(tableFrontW / 2, tableFrontY);
+    bandG.lineTo(-tableFrontW / 2, tableFrontY);
+    bandG.close();
+    bandG.fill();
+    bandG.stroke();
+
+    bandG.fillColor = new Color(226, 170, 103, 130);
+    bandG.moveTo(-tableBackW / 2 + 16, tableBackY - 3);
+    bandG.lineTo(tableBackW / 2 - 16, tableBackY - 3);
+    bandG.lineTo(tableFrontW / 2 - 32, tableFrontY + tableDepth * 0.25);
+    bandG.lineTo(-tableFrontW / 2 + 32, tableFrontY + tableDepth * 0.25);
+    bandG.close();
+    bandG.fill();
+
+    // 侧面暗部 + 前沿厚度：让桌面有体积。
+    bandG.fillColor = new Color(132, 82, 52, 224);
+    bandG.moveTo(-tableFrontW / 2, tableFrontY);
+    bandG.lineTo(tableFrontW / 2, tableFrontY);
+    bandG.lineTo(tableFrontW * 0.48, tableFrontY - tableFaceH);
+    bandG.lineTo(-tableFrontW * 0.48, tableFrontY - tableFaceH);
+    bandG.close();
+    bandG.fill();
+
+    bandG.fillColor = new Color(104, 65, 48, 170);
+    bandG.moveTo(-tableFrontW / 2, tableFrontY);
+    bandG.lineTo(-tableBackW / 2, tableBackY);
+    bandG.lineTo(-tableBackW * 0.48, tableBackY - tableFaceH * 0.40);
+    bandG.lineTo(-tableFrontW * 0.48, tableFrontY - tableFaceH);
+    bandG.close();
+    bandG.fill();
+    bandG.moveTo(tableFrontW / 2, tableFrontY);
+    bandG.lineTo(tableBackW / 2, tableBackY);
+    bandG.lineTo(tableBackW * 0.48, tableBackY - tableFaceH * 0.40);
+    bandG.lineTo(tableFrontW * 0.48, tableFrontY - tableFaceH);
+    bandG.close();
+    bandG.fill();
+
+    bandG.fillColor = new Color(86, 72, 60, 155);
+    const legW = Math.max(14, tableW * 0.035);
+    const legH = Math.max(56, deskH * 0.30);
+    [-tableW * 0.38, tableW * 0.38].forEach((x) => {
+      bandG.roundRect(x - legW / 2, tableFrontY - tableFaceH - legH, legW, legH, 5);
+      bandG.fill();
+    });
+
+    bandG.fillColor = new Color(230, 174, 106, 92);
+    bandG.roundRect(-tableFrontW / 2 + 18, tableFrontY - 5, tableFrontW - 36, 5, 3);
+    bandG.fill();
+
+    // 物件接触阴影：先在桌面上落两组轻阴影，再把 decor sprite 盖上去，物件会更像“站在桌上”。
+    const objectRestY = objectTableFrontY + tableDepth * 0.56;
+    const objectClusterX = Math.min(tableW * 0.36, bandW * 0.40);
+    bandG.fillColor = new Color(80, 48, 30, 42);
+    bandG.ellipse(-objectClusterX, objectRestY - 5, tableW * 0.16, tableDepth * 0.16);
+    bandG.fill();
+    bandG.ellipse(objectClusterX, objectRestY - 5, tableW * 0.18, tableDepth * 0.16);
+    bandG.fill();
+
+    const decorSf = this.artSprites.get('desk-decor');
+    if (decorSf) {
+      if (this.deskDecorNode) this.deskDecorNode.active = false;
+      const itemDefs = [
+        { name: 'DeskPlant', rect: new Rect(20, 225, 282, 402), x: -tableFrontW * 0.33, h: Math.min(deskH * 0.34, 122), bottom: objectRestY + 1 },
+        { name: 'DeskPens', rect: new Rect(290, 285, 232, 360), x: -tableFrontW * 0.21, h: Math.min(deskH * 0.31, 110), bottom: objectRestY + 1 },
+        // 水杯把手和日历左边缘在原图中有轻微横向重叠，矩形裁切会把彼此带进来；
+        // 这里收窄相邻边，避免杯子和日历之间出现脏线/残片。
+        { name: 'DeskCup', rect: new Rect(1195, 308, 294, 326), x: tableFrontW * 0.225, h: Math.min(deskH * 0.30, 106), bottom: objectRestY - 1 },
+        { name: 'DeskNote', rect: new Rect(1490, 224, 264, 452), x: tableFrontW * 0.335, h: Math.min(deskH * 0.39, 138), bottom: objectRestY },
+      ];
+      const tex = decorSf.texture;
+      while (this.deskItemNodes.length < itemDefs.length) {
+        const i = this.deskItemNodes.length;
+        const def = itemDefs[i];
+        const node = new Node(def.name);
+        node.layer = LAYER_2D;
+        node.parent = this.node;
+        node.addComponent(UITransform);
+        const sprite = node.addComponent(Sprite);
+        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        const sf = new SpriteFrame();
+        sf.texture = tex;
+        sf.rect = def.rect;
+        sprite.spriteFrame = sf;
+        this.deskItemNodes.push(node);
+      }
+      this.deskItemNodes.forEach((node, i) => {
+        const def = itemDefs[i];
+        if (!def || !node?.isValid) {
+          if (node?.isValid) node.active = false;
+          return;
+        }
+        const w = def.h * (def.rect.width / def.rect.height);
+        node.getComponent(UITransform)!.setContentSize(w, def.h);
+        node.setPosition(def.x, deskY + def.bottom + def.h / 2, 0);
+        node.setSiblingIndex(2);
+        node.active = this.uiState === 'playing';
+      });
+    }
     const charSf = this.artSprites.get('char-back');
     if (charSf) {
       if (!this.charNode) {
@@ -2822,39 +2954,29 @@ export class GameRunner extends Component {
         const sprite = this.charNode.addComponent(Sprite);
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.spriteFrame = charSf;
-        this.charNode.setSiblingIndex(2);
-        this.charNode.active = this.uiState === 'playing';
       }
-      // 角色占屏宽 56%，是视觉主体
-      const charDisplayH = Math.min(visSize.width * 0.56, visSize.height * 0.31);
-      const charDisplayW = charDisplayH * GameRunner.CHAR_ASPECT; // 646:927 不是正方形
-      const charUt = this.charNode.getComponent(UITransform)!;
-      charUt.setContentSize(charDisplayW, charDisplayH);
-      // 键盘对齐桌面线，CHAR_Y_OFFSET 控制整体上下微调（正=上移，负=下移，单位=背景高度比例）
-      const charCenterY = deskTopY + (GameRunner.CHAR_HANDS_Y - 0.5) * charDisplayH + GameRunner.CHAR_Y_OFFSET * bgDisplayH;
-      this.charNode.setPosition(0, charCenterY, 0);
-      // 角色是前景主体，始终压在桌面背景之上；下方 HUD 会在随后重新置顶。
-      this.charNode.setSiblingIndex(Math.max(2, this.node.children.length - 1));
+      const charH = Math.min(deskH * 0.84, visSize.height * 0.210);
+      const charW = charH * GameRunner.CHAR_ASPECT;
+      this.charNode.getComponent(UITransform)!.setContentSize(charW, charH);
+      const keyboardRestY = objectTableFrontY + tableDepth * 0.26;
+      this.charNode.setPosition(0, deskY + keyboardRestY + charH * 0.11, 0);
+      this.charNode.setSiblingIndex(3);
+      this.charNode.active = this.uiState === 'playing';
     }
 
     this.layoutPropButtons(visSize.width, visSize.height);
     this.layoutLowerHud(visSize.width, visSize.height);
     this.layoutTutorialHint();
 
-    // 资源异步加载可能发生在入口页停留期间；动态创建的 HUD 必须再次服从页面状态。
     const playing = this.uiState === 'playing';
-    if (this.gameTitleNode) this.gameTitleNode.active = playing;
-    if (this.subtitleNode) this.subtitleNode.active = playing;
-    if (this.gameTimerNode) this.gameTimerNode.active = playing;
-    if (this.timerPlateNode) this.timerPlateNode.active = playing;
-    if (this.monitorLabelNode) this.monitorLabelNode.active = playing;
-    if (this.monitorProcessLabelNode) this.monitorProcessLabelNode.active = playing;
-    if (this.monitorEntryLabelNode) this.monitorEntryLabelNode.active = playing;
-    if (this.monitorSurfaceNode) this.monitorSurfaceNode.active = playing;
-    if (this.conveyorTrackNode) this.conveyorTrackNode.active = playing;
-    if (this.deskDecorNode) this.deskDecorNode.active = playing;
+    [this.bgFillNode, this.gameTitleNode, this.monitorLabelNode, this.timerPlateNode, this.gameTimerNode,
+      this.monitorSurfaceNode, this.monitorProcessLabelNode, this.monitorEntryLabelNode, this.conveyorTrackNode,
+      this.node.getChildByName('DeskBand'), this.charNode, this.lowerHudNode].forEach((node) => {
+      if (node) node.active = playing;
+    });
+    this.deskItemNodes.forEach((node) => { if (node?.isValid) node.active = playing; });
+    if (this.deskDecorNode) this.deskDecorNode.active = false;
     if (this.actionDockNode) this.actionDockNode.active = playing && this.aimingProp !== null;
-    if (this.lowerHudNode) this.lowerHudNode.active = playing;
   }
 
   /** 认可度仪表：尺寸与状态由 ApprovalGaugeView 统一管理。 */
@@ -2869,12 +2991,11 @@ export class GameRunner extends Component {
       this.approvalGaugeView = new ApprovalGaugeView(node);
     }
 
-    const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + 110;
-    const btnH = Math.min(128, Math.max(96, viewHeight * 0.070));
-    // 删除刻度行与事件条后，铭牌更矮更窄，贴近按钮区消除大片死区。
-    const panelW = Math.min(viewWidth * 0.86, 620);
-    const panelH = 112;
-    const panelY = btnY + btnH / 2 + panelH / 2 + Math.max(40, viewHeight * 0.038);
+    const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + 92;
+    const btnH = this.propButtonNodes[0]?.getComponent(UITransform)?.height ?? Math.min(108, Math.max(86, viewHeight * 0.072));
+    const panelW = Math.min(viewWidth * 0.90, 700);
+    const panelH = Math.min(118, Math.max(92, viewHeight * 0.096));
+    const panelY = btnY + btnH / 2 + panelH / 2 + Math.max(72, viewHeight * 0.075);
 
     const node = this.lowerHudNode;
     node.setSiblingIndex(this.node.children.length - 1);
@@ -2894,15 +3015,21 @@ export class GameRunner extends Component {
   private layoutBeltSlots(totalW: number, slotH: number): void {
     if (!this.beltNode || this.slotNodes.length === 0) return;
     const n = this.slotNodes.length;
-    const gap = Math.max(2, Math.min(5, totalW * 0.007));
-    const sideInset = Math.max(4, Math.min(8, totalW * 0.012));
+    const sideInset = Math.max(8, Math.min(14, totalW * 0.02));
     const usableW = totalW - sideInset * 2;
-    const slotW = (usableW - gap * (n - 1)) / n;
-    // 托盘机箱把卡片框进容器后，卡片可以做得更修长饱满（文件卡纵向比例），
-    // 尽量吃满托盘高度，彻底摆脱"漂浮的小标签"观感。
-    const cardH = Math.min(slotH * 0.94, slotW * 1.5);
-    const cardY = Math.max(6, Math.min(12, slotH * 0.06));
-    const startX = -totalW / 2 + sideInset + slotW / 2;
+
+    // 卡片要保持“可读的大卡”质感，但槽位不能再把 6 张硬塞进同一行。
+    // 这里用固定正间距队列：中心区域稳定露出约 3–4 张，更多卡片自然从右侧进入，交给 belt mask 裁切。
+    const maxCardW = Math.max(72, (usableW - 16 * 2) / 3.35);
+    const slotW = Math.min(slotH * 1.02, maxCardW);
+    const gap = Math.max(18, Math.min(30, slotW * 0.22));
+    const stride = slotW + gap;
+    const visibleSlots = Math.min(n, 4);
+    const visibleSpan = (visibleSlots - 1) * stride;
+    const startX = -visibleSpan / 2;
+
+    const cardH = Math.min(slotH * 0.88, slotW * 0.84);
+    const cardY = Math.max(slotH * 0.15, 14);
     this.slotNodes.forEach((slot: Node, i: number) => {
       let ut = slot.getComponent(UITransform);
       if (!ut) ut = slot.addComponent(UITransform);
@@ -2910,13 +3037,12 @@ export class GameRunner extends Component {
       TaskCardView.layout(slot, slotW, cardH);
       const label = slot.getComponent(Label);
       if (label) {
-        label.fontSize = Math.min(24, slotW * 0.24);
-        label.lineHeight = Math.min(30, slotH * 0.28);
+        label.fontSize = Math.min(22, slotW * 0.21);
+        label.lineHeight = Math.min(28, slotH * 0.24);
         label.overflow = Label.Overflow.SHRINK;
       }
-      slot.setPosition(startX + i * (slotW + gap), cardY, 0);
+      slot.setPosition(startX + i * stride, cardY, 0);
 
-      // 同步 Graphics 背景节点：尺寸 + 位置对齐 slot
       const bg = this.slotBackgrounds[i];
       if (bg) {
         const bgUt = bg.getComponent(UITransform);
@@ -2943,15 +3069,16 @@ export class GameRunner extends Component {
    *  按钮高度加高一档以容纳大纸团。 */
   private layoutPropButtons(viewWidth: number, viewHeight: number): void {
     if (!this.propButtons || this.propButtonNodes.length === 0) return;
-    const horizontalPadding = Math.max(28, viewWidth * 0.04);
-    const gap = Math.max(10, viewWidth * 0.014);
-    const totalW = Math.min(viewWidth - horizontalPadding * 2, 920);
-    const btnW = (totalW - gap * (this.propButtonNodes.length - 1)) / this.propButtonNodes.length;
-    const btnH = Math.min(112, Math.max(78, viewHeight * 0.064));
-    const startX = -totalW / 2 + btnW / 2;
     const safe = sys.getSafeAreaRect(false);
     const safeBottomY = safe.y - viewHeight / 2;
-    const y = safeBottomY + btnH / 2 + Math.max(22, viewHeight * 0.018);
+    const horizontalPadding = Math.max(24, viewWidth * 0.045);
+    const gap = Math.max(14, viewWidth * 0.024);
+    const totalW = Math.min(viewWidth - horizontalPadding * 2, 720);
+    const btnW = Math.min((totalW - gap * (this.propButtonNodes.length - 1)) / this.propButtonNodes.length, 150);
+    const usedW = btnW * this.propButtonNodes.length + gap * (this.propButtonNodes.length - 1);
+    const btnH = Math.min(116, Math.max(86, btnW * 0.78));
+    const startX = -usedW / 2 + btnW / 2;
+    const y = safeBottomY + btnH / 2 + Math.max(20, viewHeight * 0.018);
     const aimingIndex = this.aimingProp ? GameRunner.PROP_TYPES.indexOf(this.aimingProp) : -1;
     const choosing = aimingIndex >= 0;
     this.propButtons.setPosition(0, y, 0);
@@ -2963,9 +3090,13 @@ export class GameRunner extends Component {
       this.actionDockNode.addComponent(UITransform);
       this.actionDockNode.addComponent(Graphics);
     }
-    const dockW = totalW + 18;
-    const dockH = choosing ? Math.max(300, btnH * 4.0) : btnH + 12;
-    const dockY = choosing ? y + btnH * 1.55 : y - 4;
+    const dockW = Math.min(usedW + 32, viewWidth - horizontalPadding * 2 + 16);
+    const lowerHudGap = Math.max(72, viewHeight * 0.075);
+    const dockBottom = y - btnH / 2 - Math.max(6, btnH * 0.06);
+    const dockTopLimit = y + btnH / 2 + lowerHudGap - Math.max(14, viewHeight * 0.012);
+    const dockAvailableH = Math.max(112, dockTopLimit - dockBottom);
+    const dockH = choosing ? Math.max(118, Math.min(168, dockAvailableH)) : btnH + 14;
+    const dockY = choosing ? dockBottom + dockH / 2 : y - 4;
     this.actionDockNode.getComponent(UITransform)!.setContentSize(dockW, dockH);
     this.actionDockNode.setPosition(0, dockY, 0);
     this.actionDockNode.setSiblingIndex(Math.max(0, this.propButtons.getSiblingIndex() - 1));
@@ -2973,33 +3104,50 @@ export class GameRunner extends Component {
     const dockG = this.actionDockNode.getComponent(Graphics)!;
     dockG.clear();
     if (choosing) {
-      dockG.fillColor = new Color(52, 45, 38, 64);
-      dockG.roundRect(-dockW / 2 + 7, -dockH / 2 - 7, dockW - 14, dockH, 24);
+      const dockRadius = Math.min(24, Math.max(18, dockH * 0.16));
+      dockG.fillColor = new Color(54, 48, 42, 32);
+      dockG.roundRect(-dockW / 2 + 6, -dockH / 2 - 7, dockW - 12, dockH, dockRadius);
       dockG.fill();
-      dockG.fillColor = new Color(255, 250, 241, 238);
-      dockG.strokeColor = new Color(82, 73, 64, 190);
+      dockG.fillColor = new Color(255, 252, 246, 246);
+      dockG.strokeColor = new Color(166, 125, 88, 218);
       dockG.lineWidth = 3;
-      dockG.roundRect(-dockW / 2, -dockH / 2, dockW, dockH, 24);
+      dockG.roundRect(-dockW / 2, -dockH / 2, dockW, dockH, dockRadius);
       dockG.fill(); dockG.stroke();
-      dockG.fillColor = new Color(82, 78, 70, 246);
-      dockG.roundRect(-dockW / 2 + 14, dockH / 2 - 42, dockW - 28, 30, 13);
-      dockG.fill();
-      dockG.strokeColor = new Color(255, 255, 255, 78);
+      dockG.strokeColor = new Color(255, 255, 255, 96);
       dockG.lineWidth = 2;
-      dockG.moveTo(-dockW / 2 + 34, dockH / 2 - 21);
-      dockG.lineTo(dockW / 2 - 34, dockH / 2 - 21);
+      dockG.roundRect(-dockW / 2 + 10, -dockH / 2 + 10, dockW - 20, dockH - 22, Math.max(12, dockRadius - 7));
       dockG.stroke();
-      dockG.strokeColor = new Color(118, 108, 94, 92);
-      dockG.lineWidth = 2;
+      dockG.fillColor = new Color(166, 125, 88, 42);
+      dockG.roundRect(-dockW / 2 + 20, dockH / 2 - 24, dockW - 40, 6, 3);
+      dockG.fill();
+      dockG.fillColor = new Color(106, 140, 168, 28);
+      dockG.roundRect(-dockW / 2 + 26, -dockH / 2 + 18, dockW - 52, 7, 4);
+      dockG.fill();
+
       const railY = -dockH * 0.08;
-      dockG.moveTo(-dockW / 2 + 36, railY);
-      dockG.lineTo(dockW / 2 - 36, railY);
+      dockG.strokeColor = new Color(166, 125, 88, 128);
+      dockG.lineWidth = 3;
+      dockG.moveTo(-dockW / 2 + 42, railY);
+      dockG.lineTo(dockW / 2 - 42, railY);
       dockG.stroke();
       for (let i = 0; i < this.propButtonNodes.length; i++) {
         const x = startX + i * (btnW + gap);
-        dockG.fillColor = i === aimingIndex ? GameRunner.PROP_COLORS[i] : new Color(202, 192, 178, 165);
-        dockG.circle(x, railY, i === aimingIndex ? 7 : 4);
-        dockG.fill();
+        if (i === aimingIndex) {
+          dockG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 42);
+          dockG.circle(x, railY, 17);
+          dockG.fill();
+          dockG.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 178);
+          dockG.lineWidth = 3;
+          dockG.circle(x, railY, 12);
+          dockG.stroke();
+          dockG.fillColor = GameRunner.START_BLUE;
+          dockG.circle(x, railY, 6);
+          dockG.fill();
+        } else {
+          dockG.fillColor = new Color(202, 190, 172, 210);
+          dockG.circle(x, railY, 5);
+          dockG.fill();
+        }
       }
     }
 
@@ -3013,25 +3161,24 @@ export class GameRunner extends Component {
       btn.setPosition(x, 0, 0);
       const label = btn.getComponent(Label);
       if (label) {
-        label.fontSize = Math.min(17, Math.max(13, btnW * 0.17));
+        label.fontSize = Math.min(18, Math.max(13, btnW * 0.14));
         label.lineHeight = label.fontSize + 4;
         label.overflow = Label.Overflow.SHRINK;
       }
       const actionLabel = this.propActionLabels[i];
       if (actionLabel) {
         actionLabel.string = GameRunner.PROP_ACTION_LABELS[i] ?? '';
-        actionLabel.fontSize = Math.min(18, Math.max(13, btnW * 0.13));
+        actionLabel.fontSize = Math.min(20, Math.max(14, btnW * 0.15));
         actionLabel.lineHeight = actionLabel.fontSize + 4;
-        actionLabel.color = Color.WHITE;
-        actionLabel.node.getComponent(UITransform)!.setContentSize(btnW - 16, 28);
-        actionLabel.node.setPosition(0, -btnH * 0.30, 0);
+        actionLabel.color = GameRunner.START_TEXT;
+        actionLabel.node.getComponent(UITransform)!.setContentSize(btnW - 16, 30);
+        actionLabel.node.setPosition(0, -btnH * 0.27, 0);
       }
 
       const bg = this.propButtonBackgrounds[i];
       if (bg) {
         bg.active = !choosing;
-        const bgUt = bg.getComponent(UITransform)!;
-        bgUt.setContentSize(btnW, btnH);
+        bg.getComponent(UITransform)!.setContentSize(btnW, btnH);
         bg.setPosition(x, 0, 0);
       }
       this.propButtonViews[i]?.layout(x, btnW, btnH);
