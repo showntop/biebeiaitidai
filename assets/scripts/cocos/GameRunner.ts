@@ -982,8 +982,9 @@ export class GameRunner extends Component {
     this.session.finishLevel(report);
 
     const vis = view.getVisibleSize();
-    const pw = Math.min(vis.width * 0.86, 600);
-    const ph = Math.min(vis.height * 0.50, 520);
+    const resultLayout = UiTokens.layout.result;
+    const pw = Math.min(vis.width * resultLayout.widthRatio, resultLayout.maxWidth);
+    const ph = Math.min(vis.height * resultLayout.heightRatio, resultLayout.maxHeight);
     const won = report.result !== 'lose';
     const meme = buildReportText(this.session.profile, report, idx);
     const rank = this.session.rankLabel;
@@ -1004,7 +1005,7 @@ export class GameRunner extends Component {
       this.resultPanelNode.addComponent(Graphics);
     }
     this.resultPanelNode.getComponent(UITransform)!.setContentSize(pw, ph);
-    this.resultPanelNode.setPosition(0, vis.height * 0.015, 0);
+    this.resultPanelNode.setPosition(0, vis.height * resultLayout.yRatio, 0);
     this.resultPanelNode.active = true;
 
     if (!this.resultScrimNode) {
@@ -1032,9 +1033,9 @@ export class GameRunner extends Component {
     UiPainter.panel(cg, pw, ph, false);
 
     // 顶部战报状态牌：纸质底 + 小状态章，避免纯红/绿系统条破坏当前暖纸质世界观。
-    const statusW = pw * 0.70;
-    const statusH = 48;
-    const statusY = ph / 2 - 48;
+    const statusW = pw * resultLayout.statusWidthRatio;
+    const statusH = resultLayout.statusHeight;
+    const statusY = ph / 2 - resultLayout.statusTopInset;
     cg.fillColor = new Color(72, 58, 44, 48);
     cg.roundRect(-statusW / 2 + 4, statusY - statusH / 2 - 4, statusW - 8, statusH, 14);
     cg.fill();
@@ -1043,7 +1044,7 @@ export class GameRunner extends Component {
     cg.lineWidth = 3;
     cg.roundRect(-statusW / 2, statusY - statusH / 2, statusW, statusH, 14);
     cg.fill(); cg.stroke();
-    const badgeW = 86;
+    const badgeW = resultLayout.badgeWidth;
     const badgeX = statusW / 2 - badgeW / 2 - 12;
     cg.fillColor = won ? new Color(83, 170, 93, 235) : new Color(222, 84, 72, 238);
     cg.roundRect(badgeX - badgeW / 2, statusY - 16, badgeW, 32, 11);
@@ -1054,9 +1055,9 @@ export class GameRunner extends Component {
     cg.lineTo(statusW / 2 - badgeW - 20, statusY + statusH / 2 - 10);
     cg.stroke();
 
-    const starY = ph / 2 - 110;
+    const starY = ph / 2 - resultLayout.starTopInset;
     const starStr = `评价 ${report.stars} / 3`;
-    const starW = 160;
+    const starW = resultLayout.starWidth;
     cg.fillColor = new Color(76, 67, 58, 28);
     cg.roundRect(-starW / 2 + 3, starY - 22, starW - 6, 40, 12);
     cg.fill();
@@ -1067,27 +1068,27 @@ export class GameRunner extends Component {
     cg.fill(); cg.stroke();
 
     // 三个指标筹码，替代原来一行“表格感”的 stats。
-    const chipY = ph / 2 - 166;
-    const chipW = (pw - 70) / 3;
+    const chipY = ph / 2 - resultLayout.chipTopInset;
+    const chipW = (pw - resultLayout.chipHorizontalInset) / 3;
     [-1, 0, 1].forEach((offset) => {
-      const cx = offset * (chipW + 10);
+      const cx = offset * (chipW + resultLayout.chipGap);
       cg.fillColor = new Color(76, 67, 58, 22);
-      cg.roundRect(cx - chipW / 2 + 3, chipY - 27, chipW - 6, 48, 13);
+      cg.roundRect(cx - chipW / 2 + 3, chipY - resultLayout.chipHeight / 2 - 3, chipW - 6, resultLayout.chipHeight, 13);
       cg.fill();
       cg.fillColor = new Color(255, 250, 241, 255);
       cg.strokeColor = new Color(185, 149, 112, 150);
       cg.lineWidth = 2;
-      cg.roundRect(cx - chipW / 2, chipY - 24, chipW, 48, 12);
+      cg.roundRect(cx - chipW / 2, chipY - resultLayout.chipHeight / 2, chipW, resultLayout.chipHeight, 12);
       cg.fill(); cg.stroke();
       cg.fillColor = new Color(166, 125, 88, 98);
-      cg.roundRect(cx - chipW / 2 + 12, chipY - 21, chipW - 24, 4, 2);
+      cg.roundRect(cx - chipW / 2 + 12, chipY - resultLayout.chipHeight / 2 + 3, chipW - 24, 4, 2);
       cg.fill();
     });
 
     // 正文纸条：独立承载吐槽文本，不再在大空白里飘一行字。
-    const noteW = pw - 54;
-    const noteH = 82;
-    const noteY = -30;
+    const noteW = pw - resultLayout.noteHorizontalInset;
+    const noteH = resultLayout.noteHeight;
+    const noteY = resultLayout.noteY;
     cg.fillColor = new Color(76, 67, 58, 18);
     cg.roundRect(-noteW / 2 + 4, noteY - noteH / 2 - 4, noteW - 8, noteH, 14);
     cg.fill();
@@ -1105,15 +1106,15 @@ export class GameRunner extends Component {
       won ? '通过' : '淘汰', 18, badgeW - 10, 28, new Color(255, 252, 240, 255), true);
     this.addResultLabel(this.resultPanelNode, 'Stars', 0, starY, starStr, 30, pw * 0.6, 42,
       new Color(166, 112, 0, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'StatsApproval', -(chipW + 10), chipY,
+    this.addResultLabel(this.resultPanelNode, 'StatsApproval', -(chipW + resultLayout.chipGap), chipY,
       `峰值\n${Math.round(report.peakApproval)}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
     this.addResultLabel(this.resultPanelNode, 'StatsTime', 0, chipY,
       `耗时\n${report.timeUsedSec.toFixed(1)}s`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'StatsCombo', chipW + 10, chipY,
+    this.addResultLabel(this.resultPanelNode, 'StatsCombo', chipW + resultLayout.chipGap, chipY,
       `连击\n${report.maxCombo}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'Stats2', 0, chipY - 48,
+    this.addResultLabel(this.resultPanelNode, 'Stats2', 0, chipY - resultLayout.chipHeight,
       `${rank}   ·   第${day}轮反击`, 15, pw * 0.85, 24, new Color(95, 84, 70, 255), false);
-    this.addResultLabel(this.resultPanelNode, 'Meme', 0, -30,
+    this.addResultLabel(this.resultPanelNode, 'Meme', 0, noteY,
       meme, 15, noteW - 28, 62, new Color(100, 88, 72, 255), false);
 
     // 内嵌可点击按钮：根据实际按钮数量自动居中，避免胜利/失败状态下出现空槽偏移。
@@ -1124,19 +1125,19 @@ export class GameRunner extends Component {
     if (canRevive) {
       buttons.push({ name: 'BtnRevive', text: '复活', color: UiTokens.color.amber, tap: () => this.onRevive() });
     }
-    const btnGap = Math.min(18, Math.max(10, pw * 0.03));
-    const btnW = Math.min(pw * 0.27, (pw * 0.78 - btnGap * (buttons.length - 1)) / buttons.length);
-    const btnY = -ph / 2 + 46;
+    const btnGap = Math.min(resultLayout.buttonGapMax, Math.max(resultLayout.buttonGapMin, pw * resultLayout.buttonGapRatio));
+    const btnW = Math.min(pw * resultLayout.buttonMaxWidthRatio, (pw * resultLayout.buttonAreaWidthRatio - btnGap * (buttons.length - 1)) / buttons.length);
+    const btnY = -ph / 2 + resultLayout.buttonBottomInset;
     const btnSpan = (buttons.length - 1) * (btnW + btnGap);
     buttons.forEach((button, i) => {
-      this.makeResultButton(this.resultPanelNode!, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, 58, button.text, button.color, button.tap);
+      this.makeResultButton(this.resultPanelNode!, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, resultLayout.buttonHeight, button.text, button.color, button.tap);
     });
     // 结果出现采用一次短促“落桌”反馈，避免常驻漂浮动画。
     const panelOpacity = this.resultPanelNode.getComponent(UIOpacity) ?? this.resultPanelNode.addComponent(UIOpacity);
     panelOpacity.opacity = 0;
-    this.resultPanelNode.setScale(0.84, 0.84, 1);
-    tween(this.resultPanelNode).to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-    tween(panelOpacity).to(0.14, { opacity: 255 }, { easing: 'quadOut' }).start();
+    this.resultPanelNode.setScale(resultLayout.appearScale, resultLayout.appearScale, 1);
+    tween(this.resultPanelNode).to(UiTokens.motion.panelSec, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+    tween(panelOpacity).to(UiTokens.motion.resultFadeSec, { opacity: 255 }, { easing: 'quadOut' }).start();
   }
 
   private resultPanelNode: Node | null = null;
