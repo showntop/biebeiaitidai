@@ -10,7 +10,9 @@ import { CardState as CS, PropType as PT } from '../core/types';
 import type { Card, PropType } from '../core/types';
 import { FxLayer } from './FxLayer';
 import { ApprovalGaugeView } from './ui/ApprovalGaugeView';
+import { PropDockView } from './ui/PropDockView';
 import { PropButtonView } from './ui/PropButtonView';
+import { ResultDialogView, type ResultDialogButton } from './ui/ResultDialogView';
 import { TaskCardView } from './ui/TaskCardView';
 import { UiPainter, type CardShellState, type KeycapState } from './ui/UiPainter';
 import { UiTokens } from './ui/UiTokens';
@@ -83,7 +85,7 @@ export class GameRunner extends Component {
   private lowerHudNode: Node | null = null;
   /** 方案 3 的实体控制台底座与计时器铭牌。 */
   private actionDockNode: Node | null = null;
-  private actionDockHintLabel: Label | null = null;
+  private propDockView: PropDockView | null = null;
   private timerPlateNode: Node | null = null;
   private monitorLabelNode: Node | null = null;
   private monitorProcessLabelNode: Node | null = null;
@@ -1016,241 +1018,44 @@ export class GameRunner extends Component {
     if (this.nextBtn) this.nextBtn.active = false;
     if (this.reviveBtn) this.reviveBtn.active = false;
 
-    if (!this.resultPanelNode) {
-      this.resultPanelNode = new Node('ResultPanel');
-      this.resultPanelNode.layer = 1 << 25;
-      this.resultPanelNode.parent = this.node;
-      this.resultPanelNode.addComponent(UITransform);
-      this.resultPanelNode.addComponent(Graphics);
-    }
-    this.resultPanelNode.getComponent(UITransform)!.setContentSize(pw, ph);
-    this.resultPanelNode.setPosition(0, vis.height * resultLayout.yRatio, 0);
-    this.resultPanelNode.active = true;
-
-    if (!this.resultScrimNode) {
-      this.resultScrimNode = new Node('ResultScrim');
-      this.resultScrimNode.layer = 1 << 25;
-      this.resultScrimNode.parent = this.node;
-      this.resultScrimNode.addComponent(UITransform);
-      this.resultScrimNode.addComponent(Graphics);
-      this.resultScrimNode.addComponent(UIOpacity);
-    }
-    this.resultScrimNode.getComponent(UITransform)!.setContentSize(vis.width, vis.height);
-    const sg = this.resultScrimNode.getComponent(Graphics)!;
-    sg.clear();
-    sg.fillColor = new Color(78, 68, 56, 86);
-    sg.rect(-vis.width / 2, -vis.height / 2, vis.width, vis.height);
-    sg.fill();
-    this.resultScrimNode.setPosition(0, 0, 0);
-    this.resultScrimNode.active = true;
-    this.resultScrimNode.setSiblingIndex(Math.max(0, this.resultPanelNode.getSiblingIndex() - 1));
-
-    // 销毁旧的子节点，每次重新创建（避免复用旧位置）
-    this.resultPanelNode.removeAllChildren();
-
-    const cg = this.resultPanelNode.getComponent(Graphics)!;
-    UiPainter.panel(cg, pw, ph, false);
-
-    // 顶部战报状态牌：纸质底 + 小状态章，避免纯红/绿系统条破坏当前暖纸质世界观。
-    const statusW = pw * resultLayout.statusWidthRatio;
-    const statusH = resultLayout.statusHeight;
-    const statusY = ph / 2 - resultLayout.statusTopInset;
-    cg.fillColor = new Color(72, 58, 44, 48);
-    cg.roundRect(-statusW / 2 + 4, statusY - statusH / 2 - 4, statusW - 8, statusH, 14);
-    cg.fill();
-    cg.fillColor = new Color(255, 250, 241, 255);
-    cg.strokeColor = new Color(166, 125, 88, 214);
-    cg.lineWidth = 3;
-    cg.roundRect(-statusW / 2, statusY - statusH / 2, statusW, statusH, 14);
-    cg.fill(); cg.stroke();
-    const badgeW = resultLayout.badgeWidth;
-    const badgeX = statusW / 2 - badgeW / 2 - 12;
-    cg.fillColor = won ? new Color(83, 170, 93, 235) : new Color(222, 84, 72, 238);
-    cg.roundRect(badgeX - badgeW / 2, statusY - 16, badgeW, 32, 11);
-    cg.fill();
-    cg.strokeColor = new Color(255, 255, 255, 78);
-    cg.lineWidth = 2;
-    cg.moveTo(-statusW / 2 + 18, statusY + statusH / 2 - 10);
-    cg.lineTo(statusW / 2 - badgeW - 20, statusY + statusH / 2 - 10);
-    cg.stroke();
-
-    const starY = ph / 2 - resultLayout.starTopInset;
-    const starW = resultLayout.starWidth;
-    cg.fillColor = new Color(76, 67, 58, 28);
-    cg.roundRect(-starW / 2 + 3, starY - 22, starW - 6, 40, 12);
-    cg.fill();
-    cg.fillColor = new Color(255, 248, 225, 255);
-    cg.strokeColor = new Color(202, 148, 56, 210);
-    cg.lineWidth = 2;
-    cg.roundRect(-starW / 2, starY - 20, starW, 40, 11);
-    cg.fill(); cg.stroke();
-    const ratingBox = 28;
-    const ratingGap = 8;
-    const ratingStartX = 4;
-    for (let i = 0; i < 3; i++) {
-      const rx = ratingStartX + i * (ratingBox + ratingGap);
-      const active = i < report.stars;
-      cg.fillColor = active ? new Color(255, 228, 130, 255) : new Color(245, 238, 225, 255);
-      cg.strokeColor = active ? new Color(202, 148, 56, 230) : new Color(202, 178, 145, 150);
-      cg.lineWidth = active ? 2.5 : 2;
-      cg.roundRect(rx - ratingBox / 2, starY - ratingBox / 2, ratingBox, ratingBox, 7);
-      cg.fill(); cg.stroke();
-      if (active) {
-        cg.strokeColor = new Color(126, 88, 31, 230);
-        cg.lineWidth = 3;
-        cg.moveTo(rx - 7, starY - 1);
-        cg.lineTo(rx - 2, starY - 7);
-        cg.lineTo(rx + 8, starY + 7);
-        cg.stroke();
-      }
-    }
-
-    // 三个指标筹码，替代原来一行“表格感”的 stats。
-    const chipY = ph / 2 - resultLayout.chipTopInset;
-    const chipW = (pw - resultLayout.chipHorizontalInset) / 3;
-    [-1, 0, 1].forEach((offset) => {
-      const cx = offset * (chipW + resultLayout.chipGap);
-      cg.fillColor = new Color(76, 67, 58, 22);
-      cg.roundRect(cx - chipW / 2 + 3, chipY - resultLayout.chipHeight / 2 - 3, chipW - 6, resultLayout.chipHeight, 13);
-      cg.fill();
-      cg.fillColor = new Color(255, 250, 241, 255);
-      cg.strokeColor = new Color(185, 149, 112, 150);
-      cg.lineWidth = 2;
-      cg.roundRect(cx - chipW / 2, chipY - resultLayout.chipHeight / 2, chipW, resultLayout.chipHeight, 12);
-      cg.fill(); cg.stroke();
-      cg.fillColor = new Color(166, 125, 88, 98);
-      cg.roundRect(cx - chipW / 2 + 12, chipY - resultLayout.chipHeight / 2 + 3, chipW - 24, 4, 2);
-      cg.fill();
-    });
-
-    // 正文纸条：独立承载吐槽文本，不再在大空白里飘一行字。
-    const noteW = pw - resultLayout.noteHorizontalInset;
-    const noteH = resultLayout.noteHeight;
-    const noteY = resultLayout.noteY;
-    cg.fillColor = new Color(76, 67, 58, 18);
-    cg.roundRect(-noteW / 2 + 4, noteY - noteH / 2 - 4, noteW - 8, noteH, 14);
-    cg.fill();
-    cg.fillColor = new Color(255, 252, 244, 255);
-    cg.strokeColor = new Color(202, 178, 145, 128);
-    cg.lineWidth = 2;
-    cg.roundRect(-noteW / 2, noteY - noteH / 2, noteW, noteH, 13);
-    cg.fill(); cg.stroke();
-
-    // 创建标签子节点
-    this.addResultLabel(this.resultPanelNode, 'Title', -badgeW * 0.42, statusY,
-      won ? '岗位守住!' : '被 AI 优化了…', 28, pw * 0.85, 42,
-      UiTokens.color.inkDeep, true);
-    this.addResultLabel(this.resultPanelNode, 'ResultBadge', badgeX, statusY,
-      won ? '通过' : '淘汰', 18, badgeW - 10, 28, new Color(255, 252, 240, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'Stars', -starW * 0.28, starY, '评价', 22, 66, 32,
-      new Color(166, 112, 0, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'StatsApproval', -(chipW + resultLayout.chipGap), chipY,
-      `峰值\n${Math.round(report.peakApproval)}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'StatsTime', 0, chipY,
-      `耗时\n${report.timeUsedSec.toFixed(1)}s`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'StatsCombo', chipW + resultLayout.chipGap, chipY,
-      `连击\n${report.maxCombo}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'Stats2', 0, chipY - resultLayout.chipHeight,
-      `${rank}   ·   第${day}轮反击`, 15, pw * 0.85, 24, new Color(95, 84, 70, 255), false);
-    this.addResultLabel(this.resultPanelNode, 'Meme', 0, noteY,
-      meme, 15, noteW - 28, 62, new Color(100, 88, 72, 255), false);
-
     // 内嵌可点击按钮：根据实际按钮数量自动居中，避免胜利/失败状态下出现空槽偏移。
-    const buttons: Array<{ name: string; text: string; color: Readonly<Color>; tap: () => void }> = [
+    const buttons: ResultDialogButton[] = [
       { name: 'BtnRetry', text: '重试', color: UiTokens.color.walnut, tap: () => this.onRetry() },
       { name: 'BtnNext', text: canNext ? '下一关' : '回到选关', color: GameRunner.PROP_COLORS[0], tap: () => canNext ? this.onNext() : this.onBackToSelect() },
     ];
     if (canRevive) {
       buttons.push({ name: 'BtnRevive', text: '复活', color: UiTokens.color.amber, tap: () => this.onRevive() });
     }
-    const btnGap = Math.min(resultLayout.buttonGapMax, Math.max(resultLayout.buttonGapMin, pw * resultLayout.buttonGapRatio));
-    const btnW = Math.min(pw * resultLayout.buttonMaxWidthRatio, (pw * resultLayout.buttonAreaWidthRatio - btnGap * (buttons.length - 1)) / buttons.length);
-    const btnY = -ph / 2 + resultLayout.buttonBottomInset;
-    const btnSpan = (buttons.length - 1) * (btnW + btnGap);
-    buttons.forEach((button, i) => {
-      this.makeResultButton(this.resultPanelNode!, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, resultLayout.buttonHeight, button.text, button.color, button.tap);
+
+    if (!this.resultDialogView) this.resultDialogView = new ResultDialogView();
+    const nodes = this.resultDialogView.show({
+      parent: this.node,
+      layer: 1 << 25,
+      viewWidth: vis.width,
+      viewHeight: vis.height,
+      width: pw,
+      height: ph,
+      won,
+      title: won ? '岗位守住!' : '被 AI 优化了…',
+      badgeText: won ? '通过' : '淘汰',
+      stars: report.stars,
+      peakApproval: report.peakApproval,
+      timeUsedSec: report.timeUsedSec,
+      maxCombo: report.maxCombo,
+      rank,
+      day,
+      meme,
+      buttons,
     });
-    // 结果出现采用一次短促“落桌”反馈，避免常驻漂浮动画。
-    const panelOpacity = this.resultPanelNode.getComponent(UIOpacity) ?? this.resultPanelNode.addComponent(UIOpacity);
-    panelOpacity.opacity = 0;
-    this.resultPanelNode.setScale(resultLayout.appearScale, resultLayout.appearScale, 1);
-    tween(this.resultPanelNode).to(UiTokens.motion.panelSec, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-    tween(panelOpacity).to(UiTokens.motion.resultFadeSec, { opacity: 255 }, { easing: 'quadOut' }).start();
+    this.resultPanelNode = nodes.panel;
+    this.resultScrimNode = nodes.scrim;
   }
 
   private resultPanelNode: Node | null = null;
-
-  private addResultLabel(parent: Node, name: string, x: number, y: number, text: string, size: number, w: number, h: number, color: Color, bold: boolean): void {
-    const node = new Node(name);
-    node.layer = 1 << 25;
-    node.parent = parent;
-    const ut = node.addComponent(UITransform);
-    ut.setContentSize(w, h);
-    node.setPosition(x, y, 0);
-    const lbl = node.addComponent(Label);
-    lbl.string = text;
-    UiPainter.label(lbl, size, color, bold);
-    lbl.horizontalAlign = 1;
-    lbl.verticalAlign = 1;
-    lbl.overflow = Label.Overflow.SHRINK;
-  }
-
-  private makeResultButton(parent: Node, name: string, x: number, y: number, w: number, h: number, text: string, base: Color, onTap: () => void): void {
-    const btn = new Node(name);
-    btn.layer = 1 << 25;
-    btn.parent = parent;
-    btn.addComponent(UITransform).setContentSize(w, h);
-    btn.setPosition(x, y, 0);
-    const g = btn.addComponent(Graphics);
-    const paint = (pressed: boolean) => this.paintResultKeycap(g, w, h, base, pressed);
-    paint(false);
-    const labelNode = new Node(`${name}Label`);
-    labelNode.layer = 1 << 25;
-    labelNode.parent = btn;
-    labelNode.addComponent(UITransform).setContentSize(w - 12, h - 6);
-    labelNode.setPosition(0, 1, 0);
-    const lbl = labelNode.addComponent(Label);
-    lbl.string = text;
-    // 键帽面已统一为纸色系，文字一律用深墨保证对比。
-    UiPainter.label(lbl, 19, UiTokens.color.inkDeep, true);
-    lbl.horizontalAlign = 1;
-    lbl.verticalAlign = 1;
-    const setPressed = (pressed: boolean) => {
-      paint(pressed);
-      labelNode.setPosition(0, pressed ? -3 : 1, 0);
-    };
-    btn.on(Node.EventType.TOUCH_END, () => { setPressed(false); onTap(); });
-    btn.on(Node.EventType.TOUCH_START, () => setPressed(true));
-    btn.on(Node.EventType.TOUCH_CANCEL, () => setPressed(false));
-  }
-
-  private paintResultKeycap(g: Graphics, w: number, h: number, accent: Readonly<Color>, pressed: boolean): void {
-    g.clear();
-    const faceShift = pressed ? -3 : 0;
-    const lift = pressed ? 2 : 7;
-    const radius = Math.min(18, Math.max(12, h * 0.24));
-    g.fillColor = new Color(54, 48, 42, pressed ? 20 : 38);
-    g.roundRect(-w / 2 + 5, -h / 2 - lift - 2, w - 10, h, radius);
-    g.fill();
-    g.fillColor = new Color(178, 139, 102, 206);
-    g.roundRect(-w / 2 + 1, -h / 2 - lift, w - 2, h - 2, radius);
-    g.fill();
-    g.fillColor = GameRunner.START_CARD;
-    g.strokeColor = new Color(146, 106, 76, pressed ? 205 : 236);
-    g.lineWidth = 3;
-    g.roundRect(-w / 2 + 2, -h / 2 + 4 + faceShift, w - 4, h - lift - 5, radius);
-    g.fill(); g.stroke();
-    g.strokeColor = new Color(255, 255, 255, pressed ? 44 : 92);
-    g.lineWidth = 2;
-    g.moveTo(-w / 2 + radius + 5, h / 2 - lift - 10 + faceShift);
-    g.lineTo(w / 2 - radius - 5, h / 2 - lift - 10 + faceShift);
-    g.stroke();
-    g.fillColor = new Color(accent.r, accent.g, accent.b, pressed ? 108 : 158);
-    g.roundRect(-w / 2 + 16, -h / 2 + 11 + faceShift, w - 32, 5, 3);
-    g.fill();
-  }
+  private resultDialogView: ResultDialogView | null = null;
 
   private hideReport(): void {
+    this.resultDialogView?.hide();
     if (this.resultPanelNode) this.resultPanelNode.active = false;
     if (this.resultScrimNode) this.resultScrimNode.active = false;
     if (this.reportLabel) this.reportLabel.node.active = false;
@@ -3183,7 +2988,6 @@ export class GameRunner extends Component {
   private layoutPropButtons(viewWidth: number, viewHeight: number): void {
     if (!this.propButtons || this.propButtonNodes.length === 0) return;
     const propLayout = UiTokens.layout.props;
-    const dockLayout = UiTokens.layout.actionDock;
     const safe = sys.getSafeAreaRect(false);
     const safeBottomY = safe.y - viewHeight / 2;
     const horizontalPadding = Math.max(propLayout.minHorizontalPadding, viewWidth * propLayout.horizontalPaddingRatio);
@@ -3198,105 +3002,25 @@ export class GameRunner extends Component {
     const choosing = aimingIndex >= 0;
     this.propButtons.setPosition(0, y, 0);
 
-    if (!this.actionDockNode) {
-      this.actionDockNode = new Node('ActionDock');
-      this.actionDockNode.layer = 1 << 25;
-      this.actionDockNode.parent = this.node;
-      this.actionDockNode.addComponent(UITransform);
-      this.actionDockNode.addComponent(Graphics);
-      const hint = new Node('ActionDockHint');
-      hint.layer = 1 << 25;
-      hint.parent = this.actionDockNode;
-      hint.addComponent(UITransform);
-      this.actionDockHintLabel = hint.addComponent(Label);
-      this.actionDockHintLabel.horizontalAlign = 1;
-      this.actionDockHintLabel.verticalAlign = 1;
-      this.actionDockHintLabel.enableWrapText = false;
-    }
-    const dockW = Math.min(usedW + dockLayout.sidePadding, viewWidth - horizontalPadding * 2 + dockLayout.extraWidth);
-    const lowerHudGap = Math.max(dockLayout.minHudGap, viewHeight * dockLayout.hudGapRatio);
-    const dockBottom = y - btnH / 2 - Math.max(dockLayout.minBottomGap, btnH * dockLayout.bottomGapRatio);
-    const dockTopLimit = y + btnH / 2 + lowerHudGap - Math.max(dockLayout.minTopInset, viewHeight * dockLayout.topInsetRatio);
-    const dockAvailableH = Math.max(dockLayout.minAvailableHeight, dockTopLimit - dockBottom);
-    const dockH = choosing ? Math.max(dockLayout.minHeight, Math.min(dockLayout.maxHeight, dockAvailableH)) : btnH + dockLayout.idleExtraHeight;
-    const dockY = choosing ? dockBottom + dockH / 2 : y - 4;
-    this.actionDockNode.getComponent(UITransform)!.setContentSize(dockW, dockH);
-    this.actionDockNode.setPosition(0, dockY, 0);
-    this.actionDockNode.setSiblingIndex(Math.max(0, this.propButtons.getSiblingIndex() - 1));
-    this.actionDockNode.active = choosing && this.uiState === 'playing';
-    const dockG = this.actionDockNode.getComponent(Graphics)!;
-    dockG.clear();
-    if (this.actionDockHintLabel) {
-      this.actionDockHintLabel.node.active = choosing;
-      this.actionDockHintLabel.string = UiTokens.tutorial.dockHint;
-      UiPainter.label(this.actionDockHintLabel, UiTokens.type.micro, new Color(118, 96, 72, 210), true);
-      this.actionDockHintLabel.node.getComponent(UITransform)?.setContentSize(dockW - 52, dockLayout.hintHeight);
-      this.actionDockHintLabel.node.setPosition(0, dockH / 2 - dockLayout.hintTopOffset, 0);
-    }
-    if (choosing) {
-      const dockRadius = Math.min(dockLayout.radiusMax, Math.max(dockLayout.radiusMin, dockH * 0.15));
-      dockG.fillColor = new Color(54, 48, 42, 32);
-      dockG.roundRect(-dockW / 2 + 6, -dockH / 2 - 6, dockW - 12, dockH, dockRadius);
-      dockG.fill();
-      dockG.fillColor = new Color(255, 252, 246, 246);
-      dockG.strokeColor = new Color(166, 125, 88, 218);
-      dockG.lineWidth = 3;
-      dockG.roundRect(-dockW / 2, -dockH / 2, dockW, dockH, dockRadius);
-      dockG.fill(); dockG.stroke();
-      dockG.fillColor = new Color(255, 255, 255, 64);
-      dockG.roundRect(-dockW / 2 + 18, dockH / 2 - 20, dockW - 36, 5, 3);
-      dockG.fill();
-      // 内层拇指操作槽：让玩家一眼知道这里是“拖动/松手”的手感区域。
-      dockG.fillColor = new Color(244, 229, 205, 152);
-      dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 15, dockW - 44, dockH - 44, Math.max(10, dockRadius - 5));
-      dockG.fill();
-      dockG.strokeColor = new Color(166, 125, 88, 68);
-      dockG.lineWidth = 1.5;
-      dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 15, dockW - 44, dockH - 44, Math.max(10, dockRadius - 5));
-      dockG.stroke();
-      dockG.fillColor = new Color(166, 125, 88, 54);
-      dockG.roundRect(-dockW / 2 + 34, -dockH / 2 + 24, dockW - 68, 5, 3);
-      dockG.fill();
-
-      const railY = -dockH * 0.12;
-      dockG.strokeColor = new Color(166, 125, 88, 150);
-      dockG.lineWidth = 4;
-      dockG.moveTo(-dockW / 2 + dockLayout.railInset, railY);
-      dockG.lineTo(dockW / 2 - dockLayout.railInset, railY);
-      dockG.stroke();
-      const chevronY = railY + 18;
-      dockG.strokeColor = new Color(106, 140, 168, 118);
-      dockG.lineWidth = 2.5;
-      [-1, 1].forEach((dir) => {
-        const cx = dir * Math.min(86, dockW * 0.18);
-        dockG.moveTo(cx - dir * 10, chevronY + 7);
-        dockG.lineTo(cx, chevronY);
-        dockG.lineTo(cx - dir * 10, chevronY - 7);
-        dockG.stroke();
-      });
-      for (let i = 0; i < this.propButtonNodes.length; i++) {
-        const x = startX + i * (btnW + gap);
-        if (i === aimingIndex) {
-          dockG.fillColor = new Color(54, 48, 42, 34);
-          dockG.circle(x + 3, railY - 3, dockLayout.handleRadius + 4);
-          dockG.fill();
-          dockG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 46);
-          dockG.circle(x, railY, dockLayout.handleRadius + 3);
-          dockG.fill();
-          dockG.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 178);
-          dockG.lineWidth = 3;
-          dockG.circle(x, railY, dockLayout.handleRadius - 3);
-          dockG.stroke();
-          dockG.fillColor = GameRunner.START_BLUE;
-          dockG.circle(x, railY, dockLayout.dotRadius + 1.5);
-          dockG.fill();
-        } else {
-          dockG.fillColor = new Color(202, 190, 172, 210);
-          dockG.circle(x, railY, dockLayout.dotRadius);
-          dockG.fill();
-        }
-      }
-    }
+    if (!this.propDockView) this.propDockView = new PropDockView();
+    this.actionDockNode = this.propDockView.layout({
+      parent: this.node,
+      layer: 1 << 25,
+      propButtons: this.propButtons,
+      buttonCount: this.propButtonNodes.length,
+      viewWidth,
+      viewHeight,
+      horizontalPadding,
+      usedW,
+      btnW,
+      btnH,
+      gap,
+      startX,
+      buttonY: y,
+      choosing,
+      aimingIndex,
+      playing: this.uiState === 'playing',
+    }).node;
 
     this.ensurePropButtonBackgrounds();
     this.propButtonNodes.forEach((btn: Node, i: number) => {
