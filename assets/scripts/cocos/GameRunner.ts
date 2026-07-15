@@ -804,21 +804,28 @@ export class GameRunner extends Component {
     const playNode = new Node('StartPlayIcon');
     playNode.layer = 33554432;
     playNode.parent = btn;
-    const iconSide = Math.min(40, h * 0.58);
+    const iconSide = Math.min(34, h * 0.46);
     playNode.addComponent(UITransform).setContentSize(iconSide, iconSide);
-    playNode.setPosition(-w * 0.155, 5, 0);
+    playNode.setPosition(-w * 0.145, 5, 0);
     const playG = playNode.addComponent(Graphics);
+    playG.fillColor = new Color(255, 252, 246, 238);
+    playG.circle(0, 0, iconSide * 0.58);
+    playG.fill();
+    playG.strokeColor = new Color(166, 125, 88, 116);
+    playG.lineWidth = 2;
+    playG.circle(0, 0, iconSide * 0.58);
+    playG.stroke();
     playG.fillColor = GameRunner.START_TEXT;
-    playG.moveTo(-iconSide * 0.20, -iconSide * 0.29);
-    playG.lineTo(iconSide * 0.27, 0);
-    playG.lineTo(-iconSide * 0.20, iconSide * 0.29);
+    playG.moveTo(-iconSide * 0.10, -iconSide * 0.22);
+    playG.lineTo(iconSide * 0.24, 0);
+    playG.lineTo(-iconSide * 0.10, iconSide * 0.22);
     playG.close();
     playG.fill();
     playG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 150);
     playG.circle(iconSide * 0.36, iconSide * 0.20, Math.max(2.5, iconSide * 0.08));
     playG.fill();
 
-    const labelNode = this.mkLabel(btn, 'StartButtonLabel', 44, 5, text, Math.min(48, Math.max(36, h * 0.48)), w * 0.62, h - 12);
+    const labelNode = this.mkLabel(btn, 'StartButtonLabel', 38, 5, text, Math.min(42, Math.max(32, h * 0.40)), w * 0.64, h - 12);
     const label = labelNode.getComponent(Label);
     if (label) {
       label.fontFamily = 'PingFang SC';
@@ -833,8 +840,8 @@ export class GameRunner extends Component {
     const setPressed = (pressed: boolean) => {
       this.paintStartThickButton(g, w, h, pressed);
       const dy = pressed ? -5 : 0;
-      playNode.setPosition(-w * 0.155, 5 + dy, 0);
-      labelNode.setPosition(44, 5 + dy, 0);
+      playNode.setPosition(-w * 0.145, 5 + dy, 0);
+      labelNode.setPosition(38, 5 + dy, 0);
     };
     btn.on(Node.EventType.TOUCH_START, () => setPressed(true));
     btn.on(Node.EventType.TOUCH_CANCEL, () => setPressed(false));
@@ -1068,7 +1075,6 @@ export class GameRunner extends Component {
     cg.stroke();
 
     const starY = ph / 2 - resultLayout.starTopInset;
-    const starStr = `评价 ${report.stars} / 3`;
     const starW = resultLayout.starWidth;
     cg.fillColor = new Color(76, 67, 58, 28);
     cg.roundRect(-starW / 2 + 3, starY - 22, starW - 6, 40, 12);
@@ -1078,6 +1084,26 @@ export class GameRunner extends Component {
     cg.lineWidth = 2;
     cg.roundRect(-starW / 2, starY - 20, starW, 40, 11);
     cg.fill(); cg.stroke();
+    const ratingBox = 28;
+    const ratingGap = 8;
+    const ratingStartX = 4;
+    for (let i = 0; i < 3; i++) {
+      const rx = ratingStartX + i * (ratingBox + ratingGap);
+      const active = i < report.stars;
+      cg.fillColor = active ? new Color(255, 228, 130, 255) : new Color(245, 238, 225, 255);
+      cg.strokeColor = active ? new Color(202, 148, 56, 230) : new Color(202, 178, 145, 150);
+      cg.lineWidth = active ? 2.5 : 2;
+      cg.roundRect(rx - ratingBox / 2, starY - ratingBox / 2, ratingBox, ratingBox, 7);
+      cg.fill(); cg.stroke();
+      if (active) {
+        cg.strokeColor = new Color(126, 88, 31, 230);
+        cg.lineWidth = 3;
+        cg.moveTo(rx - 7, starY - 1);
+        cg.lineTo(rx - 2, starY - 7);
+        cg.lineTo(rx + 8, starY + 7);
+        cg.stroke();
+      }
+    }
 
     // 三个指标筹码，替代原来一行“表格感”的 stats。
     const chipY = ph / 2 - resultLayout.chipTopInset;
@@ -1116,7 +1142,7 @@ export class GameRunner extends Component {
       UiTokens.color.inkDeep, true);
     this.addResultLabel(this.resultPanelNode, 'ResultBadge', badgeX, statusY,
       won ? '通过' : '淘汰', 18, badgeW - 10, 28, new Color(255, 252, 240, 255), true);
-    this.addResultLabel(this.resultPanelNode, 'Stars', 0, starY, starStr, 30, pw * 0.6, 42,
+    this.addResultLabel(this.resultPanelNode, 'Stars', -starW * 0.28, starY, '评价', 22, 66, 32,
       new Color(166, 112, 0, 255), true);
     this.addResultLabel(this.resultPanelNode, 'StatsApproval', -(chipW + resultLayout.chipGap), chipY,
       `峰值\n${Math.round(report.peakApproval)}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
