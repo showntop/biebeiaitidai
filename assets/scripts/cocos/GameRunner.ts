@@ -582,6 +582,7 @@ export class GameRunner extends Component {
       this.levelSelectRoot = this.createLevelSelectUI();
     }
     this.levelSelectRoot.active = true;
+    this.levelSelectRoot.setSiblingIndex(this.node.children.length - 1);
     this.updateLevelSelectContent();
   }
 

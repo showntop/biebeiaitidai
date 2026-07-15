@@ -75,6 +75,27 @@
 - `git status --short` 不再显示大量截图和工具临时文件。
 - `npm run typecheck` 通过。
 - `npm test` 通过。
+- Cocos 表现层改动必须额外通过 web-mobile 真机比例截图，不允许只用 `tsc` / 单测判断。
+
+### 阶段 A+：Cocos 运行时 QA 门槛
+
+这条规则来自一次真实故障：`tsc` 和 Vitest 都通过，但 Cocos 运行时 UI 没有正常显示。因此后续只要改到 `assets/scripts/cocos/`、场景、资源 `.meta`、UI 资产引用，就必须执行运行时验收。
+
+必做验收：
+
+1. `npm run typecheck`
+2. `npm test`
+3. Cocos Creator 构建 `web-mobile`
+4. 用 390 × 844 视口打开 `build/web-mobile`
+5. 截图确认入口页出现
+6. 点击进入游戏，截图确认主界面出现
+7. 浏览器 console 不应出现 error/warn
+
+注意：
+
+- `web-desktop` 在窄视口下可能仍保留 1280 宽画布，390 截图会只截到画布左侧，看起来像空白；这不是可靠移动端验收。
+- 新增或移动 Cocos 脚本文件风险高于普通 TypeScript 重构，因为 Cocos 还涉及脚本注册、`.meta`、场景绑定和构建产物。
+- 在没有真实截图验证前，不要提交会影响 Cocos 初始化链的重构。
 
 ### 阶段 B：Cocos 表现层模块化
 
@@ -95,6 +116,7 @@
 - `GameRunner.ts` 只做组装和状态分发。
 - 组件自己维护节点结构和刷新接口。
 - 视觉 token 从 `UiTokens.ts` 取，不在各处散落魔法数字。
+- 在 Cocos 初始化链稳定前，优先做 `GameRunner.ts` 内部整理，不贸然新增脚本文件。
 
 ### 阶段 C：反馈爽感与可玩性
 
