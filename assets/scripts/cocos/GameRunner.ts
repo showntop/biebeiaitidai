@@ -83,6 +83,7 @@ export class GameRunner extends Component {
   private lowerHudNode: Node | null = null;
   /** 方案 3 的实体控制台底座与计时器铭牌。 */
   private actionDockNode: Node | null = null;
+  private actionDockHintLabel: Label | null = null;
   private timerPlateNode: Node | null = null;
   private monitorLabelNode: Node | null = null;
   private monitorProcessLabelNode: Node | null = null;
@@ -418,7 +419,7 @@ export class GameRunner extends Component {
     this.clearEventFeed();
     this.eventUnsubs.push(
       this.game.bus.on('CardHit', () => {
-        this.setEventText('');
+        this.setEventText(UiTokens.tutorial.hitHint);
         this.completeTutorial();
       }),
     );
@@ -443,7 +444,7 @@ export class GameRunner extends Component {
       this.hideTutorial();
       return;
     }
-    this.showTutorial('长按一个纸团');
+    this.showTutorial(UiTokens.tutorial.holdHint);
   }
 
   private advanceTutorial(step: number, text: string): void {
@@ -504,7 +505,7 @@ export class GameRunner extends Component {
       label.node.getComponent(UITransform)!.setContentSize(w - 24, h - 6);
     }
     this.layoutTutorialHint();
-    root.active = false;
+    root.active = this.shouldShowTutorial();
     root.setSiblingIndex(this.node.children.length - 1);
   }
 
@@ -974,6 +975,8 @@ export class GameRunner extends Component {
     if (this.reported) return;
     this.reported = true;
     this.uiState = 'result';
+    this.hideTutorial();
+    this.clearPaperAim(true);
     const idx = this.session.currentIndex;
     const report = this.game.buildReport(idx);
     this.session.finishLevel(report);
@@ -1303,10 +1306,10 @@ export class GameRunner extends Component {
         this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
         this.showPaperAim(prop);
         this.aimingProp = prop;
-        this.suppressSyntheticPropCancelUntil = Date.now() + 180;
+        this.suppressSyntheticPropCancelUntil = Date.now() + UiTokens.feedback.syntheticCancelMs;
         { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
         this.updatePaperAim(event);
-        this.setEventText('拖动道具操作区，松手刷出去');
+        this.setEventText(UiTokens.tutorial.dockHint);
       } else {
         this.setEventText(`${this.propDisplayName(prop)}暂时不能用`);
       }
@@ -1319,11 +1322,11 @@ export class GameRunner extends Component {
       this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
       this.showPaperAim(prop);
       this.aimingProp = prop;
-      this.suppressSyntheticPropCancelUntil = Date.now() + 180;
+      this.suppressSyntheticPropCancelUntil = Date.now() + UiTokens.feedback.syntheticCancelMs;
       { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
       this.updatePaperAim(event);
-      this.advanceTutorial(1, '拖向显示器里的任务卡');
-      this.setEventText('拖动道具操作区，对准任务卡松手');
+      this.advanceTutorial(1, UiTokens.tutorial.dragHint);
+      this.setEventText(UiTokens.tutorial.dockHint);
     } else {
       this.setEventText(`${this.propDisplayName(prop)}暂时不能扔`);
     }
@@ -1333,7 +1336,7 @@ export class GameRunner extends Component {
     if (this.aimingProp !== prop) return;
     this.suppressSyntheticPropCancelUntil = 0;
     this.updatePaperAim(event);
-    this.advanceTutorial(2, '松手投出纸团');
+    this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
   }
   private onPropUp(prop: PropType, event?: EventTouch | EventMouse): void {
     this.suppressSyntheticPropCancelUntil = 0;
@@ -1376,7 +1379,7 @@ export class GameRunner extends Component {
     if (this.aimingProp === null) return;
     this.suppressSyntheticPropCancelUntil = 0;
     this.updatePaperAim(event);
-    this.advanceTutorial(2, '松手投出纸团');
+    this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
   }
 
   private onGlobalTouchEnd(event: EventTouch): void {
@@ -1403,7 +1406,7 @@ export class GameRunner extends Component {
     if (this.aimingProp === null) return;
     this.suppressSyntheticPropCancelUntil = 0;
     this.updatePaperAim(event);
-    this.advanceTutorial(2, '松手投出纸团');
+    this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
   }
 
   private onGlobalMouseUp(event: EventMouse): void {
@@ -1463,7 +1466,7 @@ export class GameRunner extends Component {
 
     const propNode = new Node('PropDragAim');
     propNode.layer = 1 << 25;
-    propNode.addComponent(UITransform).setContentSize(92, 92);
+    propNode.addComponent(UITransform).setContentSize(UiTokens.aim.dragSize, UiTokens.aim.dragSize);
     const propG = propNode.addComponent(Graphics);
     propG.clear();
     propG.fillColor = new Color(42, 36, 30, 78);
@@ -1475,7 +1478,7 @@ export class GameRunner extends Component {
     propG.fillColor = new Color(base.r, base.g, base.b, 246);
     propG.strokeColor = new Color(42, 36, 30, 225);
     propG.lineWidth = 4;
-    propG.circle(0, 0, 35);
+    propG.circle(0, 0, UiTokens.aim.dragRadius);
     propG.fill();
     propG.stroke();
     propG.strokeColor = new Color(255, 255, 255, 148);
@@ -1491,7 +1494,7 @@ export class GameRunner extends Component {
       const iconNode = new Node('PropDragIcon');
       iconNode.layer = 1 << 25;
       iconNode.parent = propNode;
-      iconNode.addComponent(UITransform).setContentSize(52, 52);
+      iconNode.addComponent(UITransform).setContentSize(UiTokens.aim.iconSize, UiTokens.aim.iconSize);
       const icon = iconNode.addComponent(Sprite);
       icon.sizeMode = Sprite.SizeMode.CUSTOM;
       icon.spriteFrame = iconFrame;
@@ -1513,7 +1516,7 @@ export class GameRunner extends Component {
 
     const target = new Node('PropAimTarget');
     target.layer = 1 << 25;
-    target.addComponent(UITransform).setContentSize(86, 86);
+    target.addComponent(UITransform).setContentSize(UiTokens.aim.targetSize, UiTokens.aim.targetSize);
     target.addComponent(Graphics);
     target.addComponent(UIOpacity).opacity = 220;
     this.node.addChild(target);
@@ -1527,10 +1530,10 @@ export class GameRunner extends Component {
       const vis = view.getVisibleSize();
       const safe = sys.getSafeAreaRect(false);
       const safeBottomY = safe.y - vis.height / 2;
-      let minX = -vis.width / 2 + 42;
-      let maxX = vis.width / 2 - 42;
-      let minY = safeBottomY + Math.max(58, vis.height * 0.07);
-      let maxY = safeBottomY + Math.max(360, vis.height * 0.42);
+      let minX = -vis.width / 2 + UiTokens.aim.clampInset;
+      let maxX = vis.width / 2 - UiTokens.aim.clampInset;
+      let minY = safeBottomY + Math.max(UiTokens.aim.minFreeY, vis.height * UiTokens.aim.minFreeYRatio);
+      let maxY = safeBottomY + Math.max(UiTokens.aim.minMaxFreeY, vis.height * UiTokens.aim.maxFreeYRatio);
       if (this.actionDockNode?.active) {
         const dockUt = this.actionDockNode.getComponent(UITransform);
         const dockW = dockUt?.contentSize.width ?? 0;
@@ -1538,10 +1541,10 @@ export class GameRunner extends Component {
         const dockX = this.actionDockNode.position.x;
         const dockY = this.actionDockNode.position.y;
         if (dockH > 0) {
-          minX = dockX - dockW / 2 + 48;
-          maxX = dockX + dockW / 2 - 48;
-          minY = dockY - dockH / 2 + 40;
-          maxY = dockY + dockH / 2 - 40;
+          minX = dockX - dockW / 2 + UiTokens.aim.dockClampInset;
+          maxX = dockX + dockW / 2 - UiTokens.aim.dockClampInset;
+          minY = dockY - dockH / 2 + UiTokens.aim.dockClampVerticalInset;
+          maxY = dockY + dockH / 2 - UiTokens.aim.dockClampVerticalInset;
         }
       }
       this.aimPoint = new Vec3(
@@ -1567,17 +1570,17 @@ export class GameRunner extends Component {
       tg.clear();
       tg.strokeColor = new Color(255, 252, 236, 235);
       tg.lineWidth = 5;
-      tg.circle(0, 0, 30);
+      tg.circle(0, 0, UiTokens.aim.targetInnerRadius);
       tg.stroke();
       tg.strokeColor = new Color(base.r, base.g, base.b, 235);
       tg.lineWidth = 3;
-      tg.circle(0, 0, 38);
+      tg.circle(0, 0, UiTokens.aim.targetOuterRadius);
       tg.stroke();
       // 四个短刻线强化“吸附目标”，不遮挡卡面。
       for (let i = 0; i < 4; i++) {
         const a = i * Math.PI / 2;
-        tg.moveTo(Math.cos(a) * 32, Math.sin(a) * 32);
-        tg.lineTo(Math.cos(a) * 43, Math.sin(a) * 43);
+        tg.moveTo(Math.cos(a) * (UiTokens.aim.targetInnerRadius + 2), Math.sin(a) * (UiTokens.aim.targetInnerRadius + 2));
+        tg.lineTo(Math.cos(a) * UiTokens.aim.targetTickOuter, Math.sin(a) * UiTokens.aim.targetTickOuter);
         tg.stroke();
       }
     }
@@ -1604,7 +1607,7 @@ export class GameRunner extends Component {
     // 起点蓄力环：半径随 scanPos 增长，给长按过程一个明确节奏。
     g.strokeColor = new Color(base.r, base.g, base.b, 180);
     g.lineWidth = 3;
-    g.circle(start.x, start.y, 24 + this.scanPos * 12);
+    g.circle(start.x, start.y, UiTokens.aim.startChargeRadius + this.scanPos * UiTokens.aim.startChargePulse);
     g.stroke();
     for (let i = 1; i <= tuning.guideDots; i++) {
       const t = i / (tuning.guideDots + 1);
@@ -1717,10 +1720,10 @@ export class GameRunner extends Component {
     op.opacity = miss ? 130 : prop === PT.ThrowPot ? 230 : 180;
     const scale = miss ? 0.9 : prop === PT.ThrowPot ? 1.55 : prop === PT.ChangeDemand ? 1.35 : 1.2;
     tween(ring)
-      .to(0.16, { scale: new Vec3(scale, scale, 1) }, { easing: 'quadOut' })
+      .to(UiTokens.feedback.impactSec, { scale: new Vec3(scale, scale, 1) }, { easing: 'quadOut' })
       .call(() => { if (ring.isValid) ring.destroy(); })
       .start();
-    tween(op).to(0.16, { opacity: 0 }, { easing: 'quadOut' }).start();
+    tween(op).to(UiTokens.feedback.impactSec, { opacity: 0 }, { easing: 'quadOut' }).start();
   }
 
   private paperOutcomeText(pos: Vec3, prop: PropType, outcome: PaperOutcome): void {
@@ -1744,10 +1747,10 @@ export class GameRunner extends Component {
     const op = node.addComponent(UIOpacity);
     op.opacity = 230;
     tween(node)
-      .by(0.38, { position: new Vec3(0, 22, 0) }, { easing: 'quadOut' })
+      .by(UiTokens.feedback.outcomeRiseSec, { position: new Vec3(0, 22, 0) }, { easing: 'quadOut' })
       .call(() => { if (node.isValid) node.destroy(); })
       .start();
-    tween(op).delay(0.18).to(0.2, { opacity: 0 }, { easing: 'quadOut' }).start();
+    tween(op).delay(UiTokens.feedback.outcomeFadeDelay).to(UiTokens.feedback.outcomeFadeSec, { opacity: 0 }, { easing: 'quadOut' }).start();
   }
 
   private paperOutcomeLabel(prop: PropType, outcome: PaperOutcome): string {
@@ -1766,14 +1769,14 @@ export class GameRunner extends Component {
       ? prop === PT.ThrowPot ? new Vec3(0.95, 0.55, 1) : new Vec3(0.68, 0.46, 1)
       : new Vec3(0.52, 0.36, 1);
     tween(paper)
-      .to(0.06, { scale: squash }, { easing: 'quadOut' })
+      .to(UiTokens.feedback.settleSquashSec, { scale: squash }, { easing: 'quadOut' })
       .delay(hit ? 0.08 : 0.03)
-      .to(0.12, { scale: new Vec3(0.18, 0.18, 1) }, { easing: 'quadIn' })
+      .to(UiTokens.feedback.settleShrinkSec, { scale: new Vec3(0.18, 0.18, 1) }, { easing: 'quadIn' })
       .call(() => { if (paper.isValid) paper.destroy(); })
       .start();
     tween(opacity)
       .delay(hit ? 0.08 : 0.02)
-      .to(0.14, { opacity: 0 }, { easing: 'quadOut' })
+      .to(UiTokens.feedback.settleFadeSec, { opacity: 0 }, { easing: 'quadOut' })
       .start();
   }
 
@@ -2829,11 +2832,16 @@ export class GameRunner extends Component {
     }
 
     // 工位压缩成一条完整的浅色底座带：保留办公室叙事，但不再和玩法区抢视觉权重。
-    const approxBtnW = Math.min((Math.min(visSize.width - Math.max(24, visSize.width * 0.045) * 2, 720) - Math.max(14, visSize.width * 0.024) * (this.propButtonNodes.length - 1)) / Math.max(1, this.propButtonNodes.length), 150);
-    const approxBtnH = Math.min(116, Math.max(86, approxBtnW * 0.78));
-    const approxPanelH = Math.min(118, Math.max(92, visSize.height * 0.096));
-    const approxBtnY = safeBottomY + approxBtnH / 2 + Math.max(20, visSize.height * 0.018);
-    const approxPanelY = approxBtnY + approxBtnH / 2 + approxPanelH / 2 + Math.max(72, visSize.height * 0.075);
+    const propLayout = UiTokens.layout.props;
+    const hudLayout = UiTokens.layout.lowerHud;
+    const approxPad = Math.max(propLayout.minHorizontalPadding, visSize.width * propLayout.horizontalPaddingRatio);
+    const approxGap = Math.max(propLayout.minGap, visSize.width * propLayout.gapRatio);
+    const approxTotalW = Math.min(visSize.width - approxPad * 2, propLayout.maxTotalWidth);
+    const approxBtnW = Math.min((approxTotalW - approxGap * (this.propButtonNodes.length - 1)) / Math.max(1, this.propButtonNodes.length), propLayout.maxButtonWidth);
+    const approxBtnH = Math.min(propLayout.maxButtonHeight, Math.max(propLayout.minButtonHeight, approxBtnW * propLayout.buttonHeightRatio));
+    const approxPanelH = Math.min(hudLayout.maxPanelHeight, Math.max(hudLayout.minPanelHeight, visSize.height * hudLayout.panelHeightRatio));
+    const approxBtnY = safeBottomY + approxBtnH / 2 + Math.max(propLayout.minBottomSafe, visSize.height * propLayout.bottomSafeRatio);
+    const approxPanelY = approxBtnY + approxBtnH / 2 + approxPanelH / 2 + Math.max(hudLayout.minGap, visSize.height * hudLayout.gapRatio);
     const deskTop = monitorY - monitorH / 2 - Math.max(16, visSize.height * 0.018);
     const deskBottom = approxPanelY + approxPanelH / 2 + Math.max(12, visSize.height * 0.012);
     const deskAvailableH = deskTop - deskBottom;
@@ -3032,11 +3040,13 @@ export class GameRunner extends Component {
       this.approvalGaugeView = new ApprovalGaugeView(node);
     }
 
-    const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + 92;
-    const btnH = this.propButtonNodes[0]?.getComponent(UITransform)?.height ?? Math.min(108, Math.max(86, viewHeight * 0.072));
-    const panelW = Math.min(viewWidth * 0.90, 700);
-    const panelH = Math.min(118, Math.max(92, viewHeight * 0.096));
-    const panelY = btnY + btnH / 2 + panelH / 2 + Math.max(72, viewHeight * 0.075);
+    const hudLayout = UiTokens.layout.lowerHud;
+    const btnY = this.propButtons?.position.y ?? -viewHeight / 2 + hudLayout.buttonFallbackY;
+    const btnH = this.propButtonNodes[0]?.getComponent(UITransform)?.height
+      ?? Math.min(hudLayout.maxButtonFallbackHeight, Math.max(hudLayout.minButtonFallbackHeight, viewHeight * hudLayout.buttonFallbackHeightRatio));
+    const panelW = Math.min(viewWidth * hudLayout.panelWidthRatio, hudLayout.maxPanelWidth);
+    const panelH = Math.min(hudLayout.maxPanelHeight, Math.max(hudLayout.minPanelHeight, viewHeight * hudLayout.panelHeightRatio));
+    const panelY = btnY + btnH / 2 + panelH / 2 + Math.max(hudLayout.minGap, viewHeight * hudLayout.gapRatio);
 
     const node = this.lowerHudNode;
     node.setSiblingIndex(this.node.children.length - 1);
@@ -3110,16 +3120,18 @@ export class GameRunner extends Component {
    *  按钮高度加高一档以容纳大纸团。 */
   private layoutPropButtons(viewWidth: number, viewHeight: number): void {
     if (!this.propButtons || this.propButtonNodes.length === 0) return;
+    const propLayout = UiTokens.layout.props;
+    const dockLayout = UiTokens.layout.actionDock;
     const safe = sys.getSafeAreaRect(false);
     const safeBottomY = safe.y - viewHeight / 2;
-    const horizontalPadding = Math.max(24, viewWidth * 0.045);
-    const gap = Math.max(14, viewWidth * 0.024);
-    const totalW = Math.min(viewWidth - horizontalPadding * 2, 720);
-    const btnW = Math.min((totalW - gap * (this.propButtonNodes.length - 1)) / this.propButtonNodes.length, 150);
+    const horizontalPadding = Math.max(propLayout.minHorizontalPadding, viewWidth * propLayout.horizontalPaddingRatio);
+    const gap = Math.max(propLayout.minGap, viewWidth * propLayout.gapRatio);
+    const totalW = Math.min(viewWidth - horizontalPadding * 2, propLayout.maxTotalWidth);
+    const btnW = Math.min((totalW - gap * (this.propButtonNodes.length - 1)) / this.propButtonNodes.length, propLayout.maxButtonWidth);
     const usedW = btnW * this.propButtonNodes.length + gap * (this.propButtonNodes.length - 1);
-    const btnH = Math.min(116, Math.max(86, btnW * 0.78));
+    const btnH = Math.min(propLayout.maxButtonHeight, Math.max(propLayout.minButtonHeight, btnW * propLayout.buttonHeightRatio));
     const startX = -usedW / 2 + btnW / 2;
-    const y = safeBottomY + btnH / 2 + Math.max(20, viewHeight * 0.018);
+    const y = safeBottomY + btnH / 2 + Math.max(propLayout.minBottomSafe, viewHeight * propLayout.bottomSafeRatio);
     const aimingIndex = this.aimingProp ? GameRunner.PROP_TYPES.indexOf(this.aimingProp) : -1;
     const choosing = aimingIndex >= 0;
     this.propButtons.setPosition(0, y, 0);
@@ -3130,13 +3142,21 @@ export class GameRunner extends Component {
       this.actionDockNode.parent = this.node;
       this.actionDockNode.addComponent(UITransform);
       this.actionDockNode.addComponent(Graphics);
+      const hint = new Node('ActionDockHint');
+      hint.layer = 1 << 25;
+      hint.parent = this.actionDockNode;
+      hint.addComponent(UITransform);
+      this.actionDockHintLabel = hint.addComponent(Label);
+      this.actionDockHintLabel.horizontalAlign = 1;
+      this.actionDockHintLabel.verticalAlign = 1;
+      this.actionDockHintLabel.enableWrapText = false;
     }
-    const dockW = Math.min(usedW + 32, viewWidth - horizontalPadding * 2 + 16);
-    const lowerHudGap = Math.max(72, viewHeight * 0.075);
-    const dockBottom = y - btnH / 2 - Math.max(6, btnH * 0.06);
-    const dockTopLimit = y + btnH / 2 + lowerHudGap - Math.max(14, viewHeight * 0.012);
-    const dockAvailableH = Math.max(112, dockTopLimit - dockBottom);
-    const dockH = choosing ? Math.max(98, Math.min(136, dockAvailableH)) : btnH + 14;
+    const dockW = Math.min(usedW + dockLayout.sidePadding, viewWidth - horizontalPadding * 2 + dockLayout.extraWidth);
+    const lowerHudGap = Math.max(dockLayout.minHudGap, viewHeight * dockLayout.hudGapRatio);
+    const dockBottom = y - btnH / 2 - Math.max(dockLayout.minBottomGap, btnH * dockLayout.bottomGapRatio);
+    const dockTopLimit = y + btnH / 2 + lowerHudGap - Math.max(dockLayout.minTopInset, viewHeight * dockLayout.topInsetRatio);
+    const dockAvailableH = Math.max(dockLayout.minAvailableHeight, dockTopLimit - dockBottom);
+    const dockH = choosing ? Math.max(dockLayout.minHeight, Math.min(dockLayout.maxHeight, dockAvailableH)) : btnH + dockLayout.idleExtraHeight;
     const dockY = choosing ? dockBottom + dockH / 2 : y - 4;
     this.actionDockNode.getComponent(UITransform)!.setContentSize(dockW, dockH);
     this.actionDockNode.setPosition(0, dockY, 0);
@@ -3144,8 +3164,15 @@ export class GameRunner extends Component {
     this.actionDockNode.active = choosing && this.uiState === 'playing';
     const dockG = this.actionDockNode.getComponent(Graphics)!;
     dockG.clear();
+    if (this.actionDockHintLabel) {
+      this.actionDockHintLabel.node.active = choosing;
+      this.actionDockHintLabel.string = UiTokens.tutorial.dockHint;
+      UiPainter.label(this.actionDockHintLabel, UiTokens.type.micro, new Color(118, 96, 72, 210), true);
+      this.actionDockHintLabel.node.getComponent(UITransform)?.setContentSize(dockW - 52, dockLayout.hintHeight);
+      this.actionDockHintLabel.node.setPosition(0, dockH / 2 - dockLayout.hintTopOffset, 0);
+    }
     if (choosing) {
-      const dockRadius = Math.min(20, Math.max(14, dockH * 0.15));
+      const dockRadius = Math.min(dockLayout.radiusMax, Math.max(dockLayout.radiusMin, dockH * 0.15));
       dockG.fillColor = new Color(54, 48, 42, 32);
       dockG.roundRect(-dockW / 2 + 6, -dockH / 2 - 6, dockW - 12, dockH, dockRadius);
       dockG.fill();
@@ -3161,31 +3188,31 @@ export class GameRunner extends Component {
       dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 14, dockW - 44, 6, 3);
       dockG.fill();
 
-      const railY = -dockH * 0.04;
+      const railY = -dockH * 0.12;
       dockG.strokeColor = new Color(166, 125, 88, 150);
       dockG.lineWidth = 4;
-      dockG.moveTo(-dockW / 2 + 42, railY);
-      dockG.lineTo(dockW / 2 - 42, railY);
+      dockG.moveTo(-dockW / 2 + dockLayout.railInset, railY);
+      dockG.lineTo(dockW / 2 - dockLayout.railInset, railY);
       dockG.stroke();
       for (let i = 0; i < this.propButtonNodes.length; i++) {
         const x = startX + i * (btnW + gap);
         if (i === aimingIndex) {
           dockG.fillColor = new Color(54, 48, 42, 34);
-          dockG.circle(x + 3, railY - 3, 19);
+          dockG.circle(x + 3, railY - 3, dockLayout.handleRadius + 4);
           dockG.fill();
           dockG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 46);
-          dockG.circle(x, railY, 18);
+          dockG.circle(x, railY, dockLayout.handleRadius + 3);
           dockG.fill();
           dockG.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 178);
           dockG.lineWidth = 3;
-          dockG.circle(x, railY, 12);
+          dockG.circle(x, railY, dockLayout.handleRadius - 3);
           dockG.stroke();
           dockG.fillColor = GameRunner.START_BLUE;
-          dockG.circle(x, railY, 6);
+          dockG.circle(x, railY, dockLayout.dotRadius + 1.5);
           dockG.fill();
         } else {
           dockG.fillColor = new Color(202, 190, 172, 210);
-          dockG.circle(x, railY, 5);
+          dockG.circle(x, railY, dockLayout.dotRadius);
           dockG.fill();
         }
       }
