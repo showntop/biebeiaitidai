@@ -15,5 +15,12 @@ Thumbs.db
 dist/
 build/
 
+# Local QA / browser automation artifacts
+.playwright-mcp/
+.serena/
+qa-*.png
+final-refined-*.png
+refined-current-page.png
+
 # Cocos Creator user-specific settings (optional, keep if team-shared)
 # profiles/

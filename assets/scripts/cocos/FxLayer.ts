@@ -79,7 +79,7 @@ export class FxLayer {
 
   private bind(): void {
     this.on('CardHit', ({ slot, quality, prop }) => this.fxCardHit(slot, quality, prop));
-    this.on('CardResolved', ({ delta }) => this.fxCardResolved(delta));
+    this.on('CardResolved', ({ delta, card }) => this.fxCardResolved(delta, card));
     this.on('ApprovalChanged', ({ delta }) => this.fxApprovalChange(delta));
     this.on('ZoneChanged', ({ to }) => this.fxZoneChange(to));
     this.on('ComboUpdated', ({ combo }) => this.fxCombo(combo));
@@ -227,13 +227,21 @@ export class FxLayer {
 
   /* ---------- 卡牌结算（浮动 ±N） ---------- */
 
-  private fxCardResolved(delta: number): void {
-    if (delta === 0 || !this.approvalLabel) return;
-    const sign = delta > 0 ? '+' : '';
-    const color = delta > 0 ? new Color(100, 255, 100) : new Color(255, 80, 80);
-    const target = this.robotHeadPoint();
-    this.flyResolvedCard(`${sign}${Math.round(delta)}`, color, target);
-    this.floatText(`${sign}${Math.round(delta)}`, target.x, target.y + 18, color, 0.75);
+  private fxCardResolved(delta: number, card: GameEvents['CardResolved']['card']): void {
+    const startNode = this.getSlotVisual(0) ?? this.slots[0] ?? this.approvalLabel?.node;
+    if (!startNode?.isValid) return;
+    const start = this.pointInRoot(startNode);
+    const target = this.approvalTargetPoint();
+    const color = this.resolveColor(delta);
+    const text = this.resolveText(delta, card.state);
+    this.scanProcessingCard(startNode, delta);
+    if (delta !== 0) {
+      this.flyResolvedCard(text, color, start, target);
+      this.floatText(text, target.x, target.y + 24, color, 0.72, 24);
+      this.approvalPulse(delta, target);
+    } else {
+      this.floatText('已归档', start.x, start.y + 38, new Color(122, 113, 101, 230), 0.52, 18);
+    }
   }
 
   /* ---------- 认可度变化（Label 闪色） ---------- */
@@ -346,30 +354,94 @@ export class FxLayer {
     this.floatText(perfect ? '完美拍中!' : '拍中!', 0, 40, new Color(255, 200, 220), 0.8);
   }
 
-  private flyResolvedCard(text: string, color: Color, target: Vec3): void {
-    const startNode = this.slots[0] ?? this.approvalLabel?.node;
-    if (!startNode?.isValid) return;
-    const start = this.pointInRoot(startNode);
+  private scanProcessingCard(cardNode: Node, delta: number): void {
+    const ut = cardNode.getComponent(UITransform);
+    const w = Math.max(70, ut?.width ?? 86);
+    const h = Math.max(62, ut?.height ?? 78);
+    const color = this.resolveColor(delta);
+    const scan = new Node('ProcessingScan');
+    scan.layer = UI_2D;
+    scan.parent = cardNode;
+    scan.addComponent(UITransform).setContentSize(w, h);
+    scan.setPosition(0, 0, 0);
+    const g = scan.addComponent(Graphics);
+    g.fillColor = new Color(color.r, color.g, color.b, delta === 0 ? 22 : 34);
+    g.roundRect(-w * 0.43, -h * 0.36, w * 0.86, h * 0.72, 12);
+    g.fill();
+    g.strokeColor = new Color(color.r, color.g, color.b, delta === 0 ? 116 : 168);
+    g.lineWidth = 2;
+    g.roundRect(-w * 0.43, -h * 0.36, w * 0.86, h * 0.72, 12);
+    g.stroke();
+
+    const line = new Node('ProcessingScanLine');
+    line.layer = UI_2D;
+    line.parent = scan;
+    line.addComponent(UITransform).setContentSize(w, h);
+    line.setPosition(-w * 0.34, 0, 0);
+    const lg = line.addComponent(Graphics);
+    lg.fillColor = new Color(255, 252, 236, 210);
+    lg.roundRect(-2, -h * 0.30, 4, h * 0.60, 2);
+    lg.fill();
+    lg.fillColor = new Color(color.r, color.g, color.b, 160);
+    lg.roundRect(2, -h * 0.24, 3, h * 0.48, 2);
+    lg.fill();
+
+    const labelNode = new Node('ProcessingLabel');
+    labelNode.layer = UI_2D;
+    labelNode.parent = scan;
+    labelNode.addComponent(UITransform).setContentSize(w, 24);
+    labelNode.setPosition(0, h * 0.03, 0);
+    const label = labelNode.addComponent(Label);
+    label.string = delta > 0 ? '风险录入' : delta < 0 ? '风险回收' : '已处理';
+    label.fontSize = 16;
+    label.lineHeight = 20;
+    label.isBold = true;
+    label.color = new Color(color.r, color.g, color.b, 238);
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+
+    const op = scan.addComponent(UIOpacity);
+    op.opacity = 0;
+    tween(op)
+      .to(0.04, { opacity: 255 }, { easing: 'quadOut' })
+      .delay(0.26)
+      .to(0.14, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+    tween(line)
+      .to(0.22, { position: new Vec3(w * 0.34, 0, 0) }, { easing: 'quadInOut' })
+      .start();
+    tween(scan)
+      .to(0.05, { scale: new Vec3(1.04, 1.04, 1) }, { easing: 'quadOut' })
+      .to(0.10, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
+      .delay(0.24)
+      .call(() => { if (scan.isValid) scan.destroy(); })
+      .start();
+  }
+
+  private flyResolvedCard(text: string, color: Color, start: Vec3, target: Vec3): void {
     const node = new Node('ResolvedCardFly');
     node.layer = UI_2D;
     const ut = node.addComponent(UITransform);
-    ut.setContentSize(66, 46);
+    ut.setContentSize(82, 46);
     const g = node.addComponent(Graphics);
     g.fillColor = new Color(250, 246, 236, 255);
     g.strokeColor = color;
     g.lineWidth = 3;
-    g.roundRect(-33, -23, 66, 46, 10);
+    g.roundRect(-41, -23, 82, 46, 12);
     g.fill();
     g.stroke();
+    g.fillColor = new Color(color.r, color.g, color.b, 95);
+    g.roundRect(-30, -17, 60, 5, 3);
+    g.fill();
     // Graphics 和 Label 都是可渲染组件，Cocos 不允许挂在同一节点。
     const labelNode = new Node('ResolvedCardValue');
     labelNode.layer = UI_2D;
     labelNode.parent = node;
-    labelNode.addComponent(UITransform).setContentSize(66, 46);
+    labelNode.addComponent(UITransform).setContentSize(82, 46);
     labelNode.setPosition(0, 0, 0);
     const label = labelNode.addComponent(Label);
     label.string = text;
-    label.fontSize = 24;
+    label.fontSize = 22;
     label.lineHeight = 28;
     label.isBold = true;
     label.color = color;
@@ -379,23 +451,58 @@ export class FxLayer {
     this.root.addChild(node);
     const op = node.addComponent(UIOpacity);
     op.opacity = 255;
-    const peak = new Vec3((start.x + target.x) / 2, Math.max(start.y, target.y) + 70, 0);
+    const peak = new Vec3((start.x + target.x) / 2, Math.max(start.y, target.y) + 86, 0);
     tween(node)
-      .to(0.18, { position: peak, scale: new Vec3(0.82, 0.82, 1) }, { easing: 'quadOut' })
-      .to(0.26, { position: target, scale: new Vec3(0.38, 0.38, 1) }, { easing: 'quadIn' })
+      .to(0.18, { position: peak, scale: new Vec3(0.86, 0.86, 1), angle: text.includes('-') ? -8 : 8 }, { easing: 'quadOut' })
+      .to(0.28, { position: target, scale: new Vec3(0.36, 0.36, 1), angle: 0 }, { easing: 'quadIn' })
       .call(() => { if (node.isValid) node.destroy(); })
       .start();
     tween(op).delay(0.28).to(0.16, { opacity: 0 }, { easing: 'quadIn' }).start();
   }
 
-  private robotHeadPoint(): Vec3 {
-    const char = this.root.getChildByName('Char');
-    if (char?.isValid) {
-      const ut = char.getComponent(UITransform);
-      return new Vec3(char.position.x, char.position.y + (ut?.height ?? 180) * 0.42, 0);
+  private approvalTargetPoint(): Vec3 {
+    if (this.approvalLabel?.node?.isValid) {
+      const p = this.pointInRoot(this.approvalLabel.node);
+      return new Vec3(p.x + 8, p.y - 8, 0);
     }
-    const p = this.approvalLabel?.node.position ?? new Vec3(0, 0, 0);
-    return new Vec3(p.x + 120, p.y, 0);
+    return new Vec3(0, -260, 0);
+  }
+
+  private approvalPulse(delta: number, target: Vec3): void {
+    const color = this.resolveColor(delta);
+    const pulse = new Node('ApprovalPulse');
+    pulse.layer = UI_2D;
+    pulse.addComponent(UITransform).setContentSize(130, 56);
+    const g = pulse.addComponent(Graphics);
+    g.strokeColor = new Color(color.r, color.g, color.b, delta > 0 ? 180 : 140);
+    g.lineWidth = delta > 0 ? 4 : 3;
+    g.roundRect(-60, -22, 120, 44, 22);
+    g.stroke();
+    pulse.setPosition(target.x, target.y, 0);
+    pulse.setScale(0.82, 0.82, 1);
+    this.root.addChild(pulse);
+    const op = pulse.addComponent(UIOpacity);
+    op.opacity = delta > 0 ? 210 : 160;
+    tween(pulse)
+      .to(delta > 0 ? 0.34 : 0.26, { scale: new Vec3(delta > 0 ? 1.24 : 1.10, delta > 0 ? 1.24 : 1.10, 1) }, { easing: 'quadOut' })
+      .call(() => { if (pulse.isValid) pulse.destroy(); })
+      .start();
+    tween(op).to(delta > 0 ? 0.34 : 0.26, { opacity: 0 }, { easing: 'quadIn' }).start();
+    if (delta > 0) this.flashOverlay(new Color(226, 64, 54, Math.min(80, 30 + Math.abs(delta) * 5)), 0.24);
+  }
+
+  private resolveText(delta: number, state: string): string {
+    if (delta > 0) return `替代 +${Math.round(delta)}`;
+    if (delta < 0) return `替代 ${Math.round(delta)}`;
+    if (state === 'inserted') return '拖延';
+    if (state === 'idle') return '空转';
+    return '归档';
+  }
+
+  private resolveColor(delta: number): Color {
+    if (delta > 0) return new Color(226, 64, 54, 255);
+    if (delta < 0) return new Color(78, 170, 74, 255);
+    return new Color(122, 113, 101, 235);
   }
 
   /** 将节点坐标近似折算到 root 局部坐标；本项目 UI 节点无旋转/缩放嵌套。 */
@@ -414,15 +521,15 @@ export class FxLayer {
   /* ---------- 工具方法 ---------- */
 
   /** 浮动文字：从指定位置向上飘 50px 并淡出。 */
-  private floatText(text: string, x: number, y: number, color: Color, duration: number): void {
+  private floatText(text: string, x: number, y: number, color: Color, duration: number, fontSize = 28): void {
     const node = new Node('FxText');
     node.layer = UI_2D;
     const ut = node.addComponent(UITransform);
     ut.setContentSize(300, 40);
     const label = node.addComponent(Label);
     label.string = text;
-    label.fontSize = 28;
-    label.lineHeight = 34;
+    label.fontSize = fontSize;
+    label.lineHeight = fontSize + 6;
     label.color = color;
     label.horizontalAlign = 1;
     label.verticalAlign = 1;

@@ -1,7 +1,11 @@
-# 《别让AI替代你》—— 核心规则层（M0 地基）
+# 《别让AI替代你》—— 可玩 Demo 与核心规则层
 
 > 纯 TypeScript 实现的**数值判定层**，零 Cocos 依赖，可在 Node 下独立单测。
-> 对应 `docs/` 三份策划文档，落地开发计划 §2 的系统架构与 M0 验收要求。
+> Cocos Creator 3.8.8 表现层负责 UI、动效、输入与美术资产组装。
+
+当前项目已经从早期 M0 规则地基，推进到可运行的 Cocos Demo 阶段。最新状态、技术债和后续路线见：
+
+- [docs/CURRENT_STATE_AND_ROADMAP.md](docs/CURRENT_STATE_AND_ROADMAP.md)
 
 ## 为什么是这一层先做（维护性命门）
 
@@ -22,8 +26,8 @@ assets/
       config.ts           JSON 数值表强类型加载 + 分区/阶段查表
       systems/
         ApprovalSystem.ts 认可度分区/增减来源/Boss只加不减/双路径胜负
-      (待补) ConveyorSystem PropSystem AIActorSystem LevelSystem Game.ts
-    cocos/                ← 薄适配层（后续阶段）：import cc，订阅 core 事件驱动节点
+      ConveyorSystem PropSystem AIActorSystem LevelSystem Game.ts
+    cocos/                ← Cocos 表现层：UI、输入、资产、动效，订阅 core 事件
   config/                 ← 策划改这里：数值表（Excel/CSV 导出为 JSON）
     cards.json props.json balance.json level-default.json
 tests/                    ← Vitest：断言文档里的每条规则
@@ -39,7 +43,7 @@ tests/                    ← Vitest：断言文档里的每条规则
 
 ```bash
 npm install
-npm test            # 全部规则单测（50 项，排除 sim）
+npm test            # 全部规则单测与验收测试（当前 92 项，排除 sim）
 npm run test:watch  # 监听
 npm run typecheck   # 全量类型检查
 npm run sim         # 贪婪 bot 千局模拟，输出胜负/星级/峰值分布（平衡诊断）
@@ -47,7 +51,7 @@ npm run sim         # 贪婪 bot 千局模拟，输出胜负/星级/峰值分布
 
 ## 当前状态
 
-**核心规则层已全部实现，50 项单测 + 类型检查全绿：**
+**核心规则层已全部实现，92 项单测 + 类型检查全绿：**
 
 | 系统 | 职责（对应策划文档） |
 |---|---|
@@ -65,13 +69,15 @@ npm run sim         # 贪婪 bot 千局模拟，输出胜负/星级/峰值分布
 - 结论：游戏可玩可赢，但默认数值偏紧（M4 调优范畴）；**猎杀路径实战 0/1000，实测印证了设计文档自己留的 M4 诫语**——猎杀线 15 在当前减分预算下偏难。现在调平衡 = 改 `config/*.json` + 重跑 `npm run sim`，2 秒出结果，无需编辑器。
 
 **下一步：**
-1. 接入 Cocos 表现层：用编辑器建工程后，在 `assets/scripts/cocos/` 写薄组件订阅 core 事件驱动节点/UI/动效。
-2. 用 `npm run sim` 做 M4 数值调优（首关通过率、猎杀达成率、危机骤死等量化验收，见开发计划 M4 行）。
-3. M1 手感验证：`蓄力扫描-松手`在大盘用户上的 30 秒上手率（开发计划§5 风险表已记代价须知）。
+1. 收口 Cocos 表现层：把过重的 `GameRunner.ts` 拆成页面/组件视图，降低后续视觉精修成本。
+2. 完善爽感反馈：卡片命中、任务结算、认可度变化、倒计时危险、AI 表情与音效。
+3. 做新手前 30 秒教学：长按、拖动、松手投出必须在第一关自然学会。
+4. 用 `npm run sim` 做 M4 数值调优（首关通过率、猎杀达成率、危机骤死等量化验收）。
 
-## 接入 Cocos（后续）
+## Cocos 表现层
 
-当用 Cocos Creator 3.8.x 在本目录新建/打开工程后，编辑器会生成
-`project.json / settings / library / temp` 及各资源 `.meta`，
-与 `assets/scripts/core` 源码不冲突。之后在 `assets/scripts/cocos/` 写薄组件，
-订阅 core 事件驱动节点即可。core 无需任何改动。
+当前 Cocos 表现层位于 `assets/scripts/cocos/`。后续必须继续守住一条纪律：
+
+- `core/` 不依赖 Cocos。
+- Cocos 层只通过公开 API 推进游戏，通过事件订阅驱动 UI 和动效。
+- 主视觉质感尽量走 Sprite / 九宫格资产，Graphics 只做动态填充、扫光、拖拽、命中特效等动态层。
