@@ -30,6 +30,79 @@ export const UiTokens = Object.freeze({
     danger: new Color(226, 64, 54, 255),
     gold: new Color(246, 200, 42, 255),
   }),
+  asset: Object.freeze({
+    propArtKeys: Object.freeze(['prop-add-demand', 'prop-change-demand', 'prop-throw-pot', 'prop-kiss-up']),
+    cardArtKeys: Object.freeze({
+      routine: 'task-normal-doc',
+      report: 'task-report-stamp',
+      key: 'task-key-tag',
+      proposal: 'task-key-tag',
+      urgent: 'task-urgent-memo',
+      meeting: 'card-coffee',
+      document: 'task-normal-doc',
+      boss: 'card-boss-audit',
+    }),
+    cardAccentArtKeys: Object.freeze({
+      routine: 'task-card-accent-normal',
+      report: 'task-card-accent-report',
+      key: 'task-card-accent-key',
+      proposal: 'task-card-accent-proposal',
+      urgent: 'task-card-accent-urgent',
+      meeting: 'task-card-accent-idle',
+      document: 'task-card-accent-normal',
+      boss: 'task-card-accent-boss',
+    }),
+    queuePreviewArtKeys: Object.freeze(['card-doc-blue-a', 'card-doc-stack', 'card-target', 'card-idea', 'card-alarm', 'card-coffee']),
+  }),
+  prop: Object.freeze({
+    labels: Object.freeze(['白纸团', '紫纸团', '咖啡团', '粉便签']),
+    actionLabels: Object.freeze(['加需求', '改需求', '甩锅', '拍马屁']),
+    // 道具主色收敛到暖纸质世界观：功能区分靠图标 + 键帽底部细色带，不靠整面高饱和糖果色。
+    colors: Object.freeze([
+      new Color(168, 124, 88),   // 加需求：胡桃木
+      new Color(196, 152, 64),   // 改需求：琥珀
+      new Color(198, 92, 70),    // 甩锅：暖警示红
+      new Color(168, 124, 88),   // 拍马屁：胡桃木
+    ]),
+  }),
+  card: Object.freeze({
+    previewColors: Object.freeze([
+      new Color(68, 150, 236),
+      new Color(134, 132, 126),
+      new Color(160, 86, 224),
+      new Color(58, 186, 202),
+      new Color(244, 172, 32),
+      new Color(112, 111, 106),
+    ]),
+    borderColors: Object.freeze({
+      routine: new Color(68, 150, 236),
+      report: new Color(246, 142, 44),
+      key: new Color(160, 86, 224),
+      proposal: new Color(58, 186, 202),
+      urgent: new Color(244, 172, 32),
+      meeting: new Color(112, 111, 106),
+      document: new Color(112, 111, 106),
+      boss: new Color(82, 78, 72),
+    }),
+    fill: new Color(245, 240, 232, 255),
+    borderWidth: 4,
+    radius: 16,
+    idleDim: 0.45,
+    strokeDim: 0.55,
+    rework: new Color(220, 76, 76, 255),
+    inserted: new Color(160, 160, 160, 255),
+  }),
+  environment: Object.freeze({
+    panel: new Color(250, 245, 235, 240),
+    wall: new Color(235, 225, 210, 255),
+    dark: new Color(60, 58, 55, 255),
+    startBg: new Color(238, 229, 215, 255),
+    startCard: new Color(255, 252, 246, 255),
+    startSoft: new Color(238, 232, 222, 255),
+    startBlueDark: new Color(58, 94, 124, 255),
+    startText: new Color(50, 40, 33, 255),
+    startMuted: new Color(116, 106, 95, 255),
+  }),
   radius: Object.freeze({
     small: 7,
     medium: 12,

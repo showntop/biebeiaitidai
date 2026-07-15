@@ -128,20 +128,14 @@ export class GameRunner extends Component {
   private lastEventText = '';
   private compactHeader = false;
 
-  private static readonly PROP_LABELS = ['白纸团', '紫纸团', '咖啡团', '粉便签'];
-  private static readonly PROP_ACTION_LABELS = ['加需求', '改需求', '甩锅', '拍马屁'];
+  private static readonly PROP_LABELS = UiTokens.prop.labels;
+  private static readonly PROP_ACTION_LABELS = UiTokens.prop.actionLabels;
   private static readonly PROP_TYPES: PropType[] = [PT.AddDemand, PT.ChangeDemand, PT.ThrowPot, PT.KissUp];
 
-  /** 道具按钮主色：收敛到 胡桃木/琥珀 暖色家族，甩锅保留警示红族。
-   *  功能区分靠图标 + 键帽底部细色带，不再整面换高饱和糖果色。 */
-  private static readonly PROP_COLORS: ReadonlyArray<Readonly<Color>> = [
-    new Color(168, 124, 88),   // 加需求：胡桃木
-    new Color(196, 152, 64),   // 改需求：琥珀
-    new Color(198, 92, 70),    // 甩锅：暖警示红（与危险红同族、低饱和）
-    new Color(168, 124, 88),   // 拍马屁：胡桃木（粉便签图标已承担识别）
-  ];
+  /** 道具按钮主色由 UiTokens.prop.colors 统一维护，避免按钮视觉到处散落。 */
+  private static readonly PROP_COLORS: ReadonlyArray<Readonly<Color>> = UiTokens.prop.colors;
   /** 道具 key → artSprites 索引名（与 props/ 目录文件名约定一致）。 */
-  private static readonly PROP_ART_KEYS = ['prop-add-demand', 'prop-change-demand', 'prop-throw-pot', 'prop-kiss-up'];
+  private static readonly PROP_ART_KEYS = UiTokens.asset.propArtKeys;
   /** 纸团飞行手感参数：表现层先集中调，手感稳定后再沉到 JSON。 */
   private static readonly PAPER_TUNING: Readonly<Record<PropType, PaperTuning>> = {
     [PT.AddDemand]: {
@@ -186,61 +180,31 @@ export class GameRunner extends Component {
     },
   };
   /** 任务队列使用专用图标卡，不再回退成英文类别文字。 */
-  private static readonly CARD_ART_KEYS: Record<string, string> = {
-    routine: 'task-normal-doc',
-    report: 'task-report-stamp',
-    key: 'task-key-tag',
-    proposal: 'task-key-tag',
-    urgent: 'task-urgent-memo',
-    meeting: 'card-coffee',
-    document: 'task-normal-doc',
-    boss: 'card-boss-audit',
-  };
+  private static readonly CARD_ART_KEYS: Readonly<Record<string, string>> = UiTokens.asset.cardArtKeys;
   /** 卡片角标切片：底板统一，类别色只来自这层资产。 */
-  private static readonly CARD_ACCENT_ART_KEYS: Record<string, string> = {
-    routine: 'task-card-accent-normal',
-    report: 'task-card-accent-report',
-    key: 'task-card-accent-key',
-    proposal: 'task-card-accent-proposal',
-    urgent: 'task-card-accent-urgent',
-    meeting: 'task-card-accent-idle',
-    document: 'task-card-accent-normal',
-    boss: 'task-card-accent-boss',
-  };
+  private static readonly CARD_ACCENT_ART_KEYS: Readonly<Record<string, string>> = UiTokens.asset.cardAccentArtKeys;
   /** 空槽也显示即将到来的任务预览，避免队列退化成一排 "---"。 */
-  private static readonly QUEUE_PREVIEW_ART_KEYS = ['card-doc-blue-a', 'card-doc-stack', 'card-target', 'card-idea', 'card-alarm', 'card-coffee'];
-  private static readonly QUEUE_PREVIEW_COLORS: ReadonlyArray<Readonly<Color>> = [
-    new Color(68, 150, 236), new Color(134, 132, 126), new Color(160, 86, 224),
-    new Color(58, 186, 202), new Color(244, 172, 32), new Color(112, 111, 106),
-  ];
+  private static readonly QUEUE_PREVIEW_ART_KEYS = UiTokens.asset.queuePreviewArtKeys;
+  private static readonly QUEUE_PREVIEW_COLORS: ReadonlyArray<Readonly<Color>> = UiTokens.card.previewColors;
 
   /** 卡牌 Graphics 背景样式常量。卡牌 = 代码画圆角矩形底 + 纯图标 Sprite（见美术指南「卡牌/按钮=代码画底+纯图标」）。 */
-  private static readonly CARD_BORDER_COLORS: Readonly<Record<string, Readonly<Color>>> = Object.freeze({
-    routine:  new Color(68, 150, 236),   // 蓝：目标图蓝，但降低荧光
-    report:   new Color(246, 142, 44),   // 橙：更暖、更厚实
-    key:      new Color(160, 86, 224),   // 紫：少一点霓虹感
-    proposal: new Color(58, 186, 202),   // 青：偏蓝绿，和暖底更融
-    urgent:   new Color(244, 172, 32),   // 琥珀：保留威胁感
-    meeting:  new Color(112, 111, 106),  // 灰：暖灰
-    document: new Color(112, 111, 106),  // 灰：暖灰
-    boss:     new Color(82, 78, 72),     // Boss：暖深灰，不用脏黑
-  });
-  private static readonly CARD_FILL_COLOR = new Color(245, 240, 232, 255); // 米色 #F5F0E8
-  private static readonly CARD_BORDER_WIDTH = 4;
-  private static readonly CARD_CORNER_RADIUS = 16;
+  private static readonly CARD_BORDER_COLORS: Readonly<Record<string, Readonly<Color>>> = UiTokens.card.borderColors;
+  private static readonly CARD_FILL_COLOR = UiTokens.card.fill;
+  private static readonly CARD_BORDER_WIDTH = UiTokens.card.borderWidth;
+  private static readonly CARD_CORNER_RADIUS = UiTokens.card.radius;
   /** Rework 返工卡底色（红底覆盖） */
-  private static readonly COLOR_REWORK = new Color(220, 76, 76, 255);
+  private static readonly COLOR_REWORK = UiTokens.card.rework;
   /** Inserted 杂活卡底色（灰底斜纹覆盖） */
-  private static readonly COLOR_INSERTED = new Color(160, 160, 160, 255);
+  private static readonly COLOR_INSERTED = UiTokens.card.inserted;
   /** Idle 摸鱼卡底色（压暗原色） */
-  private static readonly CARD_IDLE_DIM = 0.45;
+  private static readonly CARD_IDLE_DIM = UiTokens.card.idleDim;
   /** ActiveWhite 边框亮度（正常色），非活跃状态压暗系数 */
-  private static readonly CARD_STROKE_DIM = 0.55;
+  private static readonly CARD_STROKE_DIM = UiTokens.card.strokeDim;
 
   /** 环境色（视觉规范§1.5，非功能区氛围底色）。 */
-  private static readonly ENV_PANEL = new Color(250, 245, 235, 240);  // 面板底色 #FAF5EB
-  private static readonly ENV_WALL = new Color(235, 225, 210, 255);   // 墙面色 #EBE1D2
-  private static readonly ENV_DARK = new Color(60, 58, 55, 255);      // 显示器外壳 #3C3A37
+  private static readonly ENV_PANEL = UiTokens.environment.panel;
+  private static readonly ENV_WALL = UiTokens.environment.wall;
+  private static readonly ENV_DARK = UiTokens.environment.dark;
 
   /** “精密桌面玩具”主题令牌：环境克制，功能色爆发。 */
   private static readonly UI_IVORY = new Color(244, 235, 221, 255);
@@ -249,13 +213,13 @@ export class GameRunner extends Component {
   private static readonly UI_MUTED = new Color(126, 114, 99, 255);
   private static readonly UI_WALNUT = new Color(168, 124, 88, 255);
   private static readonly UI_DANGER = new Color(220, 60, 60, 255);
-  private static readonly START_BG = new Color(238, 229, 215, 255);
-  private static readonly START_CARD = new Color(255, 252, 246, 255);
-  private static readonly START_SOFT = new Color(238, 232, 222, 255);
+  private static readonly START_BG = UiTokens.environment.startBg;
+  private static readonly START_CARD = UiTokens.environment.startCard;
+  private static readonly START_SOFT = UiTokens.environment.startSoft;
   private static readonly START_BLUE = UiTokens.color.blue;
-  private static readonly START_BLUE_DARK = new Color(58, 94, 124, 255);
-  private static readonly START_TEXT = new Color(50, 40, 33, 255);
-  private static readonly START_MUTED = new Color(116, 106, 95, 255);
+  private static readonly START_BLUE_DARK = UiTokens.environment.startBlueDark;
+  private static readonly START_TEXT = UiTokens.environment.startText;
+  private static readonly START_MUTED = UiTokens.environment.startMuted;
 
   private startCardMetrics(): { width: number; height: number; cy: number; narrow: boolean } {
     const vis = view.getVisibleSize();
