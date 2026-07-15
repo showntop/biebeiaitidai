@@ -237,6 +237,7 @@ export class GameRunner extends Component {
 
   onLoad(): void {
     this.hideDebugOverlays();
+    this.hideScenePlaceholderLabels();
     this.session = new Session(new CocosStorage());
     this.session.continueProgress(); // 继续"最高解锁关"进度
 
@@ -574,6 +575,13 @@ export class GameRunner extends Component {
         el.style.pointerEvents = 'none';
       });
     }
+  }
+
+  /** 清理 Cocos 场景模板里遗留的默认 Label="label"，避免显示器/按钮区域冒出白色占位字。 */
+  private hideScenePlaceholderLabels(): void {
+    this.node.getComponentsInChildren(Label).forEach((label) => {
+      if (label.string.trim().toLowerCase() === 'label') label.enabled = false;
+    });
   }
 
   /** 动态创建开始页覆盖层 —— 简洁纸感小游戏入口。 */
@@ -2236,8 +2244,9 @@ export class GameRunner extends Component {
   }
 
   private renderSlot(node: Node, card: Card | null, slotIndex: number): void {
-    const legacyLabel = node.getComponent(Label);
-    if (legacyLabel) legacyLabel.enabled = false;
+    // 场景模板/复制出的 CardVisual 里可能残留默认 Label="label"。
+    // 任务卡现在完全走图标 + 卡壳状态，不让任何旧文字参与显示。
+    node.getComponentsInChildren(Label).forEach((label) => { label.enabled = false; });
     const title = TaskCardView.titleLabelFor(node);
     const value = TaskCardView.valueLabelFor(node);
     const sprite = this.taskIconFor(node);
