@@ -78,7 +78,7 @@ export class FxLayer {
   /* ---------- 事件绑定 ---------- */
 
   private bind(): void {
-    this.on('CardHit', ({ slot, quality }) => this.fxCardHit(slot, quality));
+    this.on('CardHit', ({ slot, quality, prop }) => this.fxCardHit(slot, quality, prop));
     this.on('CardResolved', ({ delta }) => this.fxCardResolved(delta));
     this.on('ApprovalChanged', ({ delta }) => this.fxApprovalChange(delta));
     this.on('ZoneChanged', ({ to }) => this.fxZoneChange(to));
@@ -102,26 +102,127 @@ export class FxLayer {
 
   /* ---------- 道具命中 ---------- */
 
-  private fxCardHit(slot: number, quality: HitQuality): void {
+  private fxCardHit(slot: number, quality: HitQuality, prop: GameEvents['CardHit']['prop']): void {
     const node = this.getSlotVisual(slot) ?? this.slots[slot];
     if (!node || !node.isValid) return;
 
-    const punch = quality === 'perfect' ? 1.5 : 1.25;
-    // 缩放打击
+    const punch = quality === 'perfect' ? 1.16 : 1.08;
+    const origin = this.pointInRoot(node);
+    // 小幅卡面弹性即可；强反馈交给盖章和碎纸粒，避免整张卡撞到相邻卡。
     tween(node)
-      .to(0.05, { scale: new Vec3(punch, punch, 1) })
-      .to(0.1, { scale: new Vec3(1, 1, 1) })
+      .to(0.045, { scale: new Vec3(punch, 0.96, 1) }, { easing: 'quadOut' })
+      .to(0.10, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
       .start();
-    // 横向抖动（+5, -10, +5 = 0 净位移）
-    tween(node)
-      .by(0.02, { position: new Vec3(5, 0, 0) })
-      .by(0.02, { position: new Vec3(-10, 0, 0) })
-      .by(0.02, { position: new Vec3(5, 0, 0) })
-      .start();
+    this.cardImpactBurst(origin, prop, quality);
+    this.cardHitStamp(node, prop, quality);
     // Perfect 额外金字
     if (quality === 'perfect') {
-      this.floatText('PERFECT!', node.position.x, node.position.y + 30, new Color(255, 215, 0), 0.7);
+      this.floatText('PERFECT!', origin.x, origin.y + 46, new Color(255, 204, 64), 0.58);
     }
+  }
+
+  private cardHitStamp(cardNode: Node, prop: GameEvents['CardHit']['prop'], quality: HitQuality): void {
+    const ut = cardNode.getComponent(UITransform);
+    const w = ut?.width ?? 86;
+    const h = ut?.height ?? 80;
+    const color = this.propAccent(prop);
+    const text = this.propStampText(prop, quality);
+
+    const stamp = new Node('CardHitStamp');
+    stamp.layer = UI_2D;
+    stamp.parent = cardNode;
+    stamp.addComponent(UITransform).setContentSize(Math.min(70, w * 0.72), 34);
+    stamp.setPosition(w * 0.17, -h * 0.14, 0);
+    stamp.angle = -8;
+    stamp.setScale(1.38, 1.38, 1);
+    const g = stamp.addComponent(Graphics);
+    g.fillColor = new Color(255, 252, 246, 238);
+    g.strokeColor = color;
+    g.lineWidth = 3;
+    g.roundRect(-34, -15, 68, 30, 8);
+    g.fill(); g.stroke();
+    g.strokeColor = new Color(color.r, color.g, color.b, 126);
+    g.lineWidth = 1.5;
+    g.roundRect(-28, -10, 56, 20, 5);
+    g.stroke();
+
+    const labelNode = new Node('CardHitStampText');
+    labelNode.layer = UI_2D;
+    labelNode.parent = stamp;
+    labelNode.addComponent(UITransform).setContentSize(66, 28);
+    const label = labelNode.addComponent(Label);
+    label.string = text;
+    label.fontSize = quality === 'perfect' ? 18 : 16;
+    label.lineHeight = 20;
+    label.isBold = true;
+    label.color = color;
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+
+    const op = stamp.addComponent(UIOpacity);
+    op.opacity = 0;
+    tween(op)
+      .to(0.04, { opacity: 255 }, { easing: 'quadOut' })
+      .delay(0.34)
+      .to(0.18, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+    tween(stamp)
+      .to(0.05, { scale: new Vec3(0.94, 0.94, 1) }, { easing: 'backOut' })
+      .delay(0.34)
+      .to(0.18, { scale: new Vec3(0.74, 0.74, 1) }, { easing: 'quadIn' })
+      .call(() => { if (stamp.isValid) stamp.destroy(); })
+      .start();
+  }
+
+  private cardImpactBurst(origin: Vec3, prop: GameEvents['CardHit']['prop'], quality: HitQuality): void {
+    const burst = new Node('CardImpactBurst');
+    burst.layer = UI_2D;
+    burst.addComponent(UITransform).setContentSize(96, 96);
+    const g = burst.addComponent(Graphics);
+    const color = this.propAccent(prop);
+    const strong = quality === 'perfect';
+    g.clear();
+    g.strokeColor = new Color(color.r, color.g, color.b, strong ? 230 : 185);
+    g.lineWidth = strong ? 4 : 3;
+    g.circle(0, 0, strong ? 21 : 16);
+    g.stroke();
+    g.fillColor = new Color(color.r, color.g, color.b, strong ? 230 : 185);
+    const rays = strong ? 10 : 7;
+    for (let i = 0; i < rays; i++) {
+      const a = (Math.PI * 2 * i) / rays;
+      const inner = strong ? 27 : 22;
+      const outer = strong ? 40 : 34;
+      g.circle(Math.cos(a) * outer, Math.sin(a) * outer, i % 2 === 0 ? 3.5 : 2.5);
+      g.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
+      g.lineTo(Math.cos(a) * outer, Math.sin(a) * outer);
+    }
+    g.fill();
+    g.stroke();
+    burst.setPosition(origin.x, origin.y, 0);
+    burst.setScale(0.72, 0.72, 1);
+    this.root.addChild(burst);
+    const op = burst.addComponent(UIOpacity);
+    op.opacity = strong ? 235 : 190;
+    tween(burst)
+      .to(strong ? 0.30 : 0.24, { scale: new Vec3(strong ? 1.40 : 1.20, strong ? 1.40 : 1.20, 1), angle: strong ? 12 : 8 }, { easing: 'quadOut' })
+      .call(() => { if (burst.isValid) burst.destroy(); })
+      .start();
+    tween(op).delay(0.08).to(strong ? 0.22 : 0.18, { opacity: 0 }, { easing: 'quadIn' }).start();
+  }
+
+  private propStampText(prop: GameEvents['CardHit']['prop'], quality: HitQuality): string {
+    if (quality === 'perfect') return '完美';
+    if (prop === 'add-demand') return '加急';
+    if (prop === 'change-demand') return '返工';
+    if (prop === 'throw-pot') return '甩锅';
+    return '拍中';
+  }
+
+  private propAccent(prop: GameEvents['CardHit']['prop']): Color {
+    if (prop === 'add-demand') return new Color(106, 140, 168, 255);
+    if (prop === 'change-demand') return new Color(150, 80, 190, 255);
+    if (prop === 'throw-pot') return new Color(198, 92, 70, 255);
+    return new Color(244, 172, 32, 255);
   }
 
   /* ---------- 卡牌结算（浮动 ±N） ---------- */

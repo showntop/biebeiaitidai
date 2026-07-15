@@ -2378,7 +2378,10 @@ export class GameRunner extends Component {
     if (slotIndex === last) {
       const gap = this.slotGap();
       node.setPosition(target.x + gap, target.y, target.z);
-      this.moveCardVisual(visual, slotIndex, this.entryDuration(), true);
+      node.setScale(0.92, 0.96, 1);
+      const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+      opacity.opacity = 0;
+      this.enterCardVisual(visual, slotIndex);
     } else {
       node.setPosition(target);
     }
@@ -2393,6 +2396,33 @@ export class GameRunner extends Component {
     this.renderSlot(visual.node, card, visual.slotIndex);
     visual.signature = this.cardSignature(card);
     visual.pendingCard = null;
+  }
+
+  /** 新卡进入队列：仍保持同一像素速度，但给卡面一个轻微“落位”弹性，避免像网页轮播一样硬滑入。 */
+  private enterCardVisual(visual: CardVisual, slotIndex: number): void {
+    const node = visual.node;
+    if (!node.isValid) return;
+    const target = this.slotPosition(slotIndex);
+    const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    visual.slotIndex = slotIndex;
+    visual.moving = true;
+    tween(opacity)
+      .to(Math.min(0.14, this.entryDuration() * 0.45), { opacity: 255 }, { easing: 'quadOut' })
+      .start();
+    tween(node)
+      .to(this.entryDuration(), { position: target, scale: new Vec3(1.02, 1.02, 1) }, { easing: 'sineOut' })
+      .to(0.07, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
+      .call(() => {
+        if (!node.isValid) return;
+        node.setPosition(target);
+        node.setScale(1, 1, 1);
+        opacity.opacity = 255;
+        visual.moving = false;
+        if (visual.pendingCard) this.paintCardVisual(visual, visual.pendingCard);
+      })
+      .start();
   }
 
   /** 槽位变化时始终从当前位置线性移到新槽，不瞬移、不缩放、不渐变。 */
