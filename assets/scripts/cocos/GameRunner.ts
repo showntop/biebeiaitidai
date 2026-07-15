@@ -115,6 +115,7 @@ export class GameRunner extends Component {
   private aimingSlot = 0;
   private aimStart = new Vec3();
   private aimPoint = new Vec3();
+  private aimLastPoint = new Vec3();
   private paperAimNode: Node | null = null;
   private aimGuideNode: Node | null = null;
   private scanPos = 0;
@@ -1517,6 +1518,7 @@ export class GameRunner extends Component {
     }
     this.node.addChild(propNode);
     this.paperAimNode = propNode;
+    this.aimLastPoint = this.aimPoint.clone();
 
     const guide = new Node('PropThrowGuide');
     guide.layer = 1 << 25;
@@ -1537,6 +1539,7 @@ export class GameRunner extends Component {
   }
 
   private updatePaperAim(event?: EventTouch | EventMouse): void {
+    const prev = this.aimLastPoint.clone();
     if (event) {
       const raw = this.pointFromPointer(event);
       const vis = view.getVisibleSize();
@@ -1568,9 +1571,18 @@ export class GameRunner extends Component {
     this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
     if (this.paperAimNode?.isValid) {
       this.paperAimNode.setPosition(this.aimPoint.x, this.aimPoint.y, 0);
-      const stretch = Math.min(1.18, 0.96 + Math.abs(this.aimPoint.y - this.aimStart.y) / 900);
+      const dx = this.aimPoint.x - prev.x;
+      const dy = this.aimPoint.y - prev.y;
+      const speed = Math.hypot(dx, dy);
+      const stretch = Math.min(
+        UiTokens.aim.dragStretchMax,
+        0.96 + Math.abs(this.aimPoint.y - this.aimStart.y) / 900 + speed * UiTokens.aim.dragSpeedStretch,
+      );
       this.paperAimNode.setScale(stretch, 1 / stretch, 1);
+      const tilt = Math.max(-UiTokens.aim.dragTiltMaxDeg, Math.min(UiTokens.aim.dragTiltMaxDeg, dx * UiTokens.aim.dragTiltPerPixel));
+      this.paperAimNode.angle = tilt;
     }
+    this.aimLastPoint = this.aimPoint.clone();
     if (this.aimTargetNode?.isValid) {
       const target = this.targetPointForSlot(this.aimingSlot);
       this.aimTargetNode.setPosition(target);
@@ -1662,7 +1674,9 @@ export class GameRunner extends Component {
     op.opacity = 255;
     const outDuration = tuning.duration * (prop === PT.ThrowPot ? 0.42 : 0.48);
     const inDuration = Math.max(0.08, tuning.duration - outDuration);
+    const launchScale = new Vec3(tuning.startScale.x * 1.16, tuning.startScale.y * 0.76, 1);
     tween(paper)
+      .to(UiTokens.feedback.releaseSquashSec, { scale: launchScale }, { easing: 'quadOut' })
       .to(outDuration, { position: peak, angle: tuning.spin * 0.52, scale: tuning.midScale }, { easing: 'quadOut' })
       .to(inDuration, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn' })
       .call(() => {
@@ -3197,8 +3211,16 @@ export class GameRunner extends Component {
       dockG.fillColor = new Color(255, 255, 255, 64);
       dockG.roundRect(-dockW / 2 + 18, dockH / 2 - 20, dockW - 36, 5, 3);
       dockG.fill();
-      dockG.fillColor = new Color(166, 125, 88, 40);
-      dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 14, dockW - 44, 6, 3);
+      // 内层拇指操作槽：让玩家一眼知道这里是“拖动/松手”的手感区域。
+      dockG.fillColor = new Color(244, 229, 205, 152);
+      dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 15, dockW - 44, dockH - 44, Math.max(10, dockRadius - 5));
+      dockG.fill();
+      dockG.strokeColor = new Color(166, 125, 88, 68);
+      dockG.lineWidth = 1.5;
+      dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 15, dockW - 44, dockH - 44, Math.max(10, dockRadius - 5));
+      dockG.stroke();
+      dockG.fillColor = new Color(166, 125, 88, 54);
+      dockG.roundRect(-dockW / 2 + 34, -dockH / 2 + 24, dockW - 68, 5, 3);
       dockG.fill();
 
       const railY = -dockH * 0.12;
@@ -3207,6 +3229,16 @@ export class GameRunner extends Component {
       dockG.moveTo(-dockW / 2 + dockLayout.railInset, railY);
       dockG.lineTo(dockW / 2 - dockLayout.railInset, railY);
       dockG.stroke();
+      const chevronY = railY + 18;
+      dockG.strokeColor = new Color(106, 140, 168, 118);
+      dockG.lineWidth = 2.5;
+      [-1, 1].forEach((dir) => {
+        const cx = dir * Math.min(86, dockW * 0.18);
+        dockG.moveTo(cx - dir * 10, chevronY + 7);
+        dockG.lineTo(cx, chevronY);
+        dockG.lineTo(cx - dir * 10, chevronY - 7);
+        dockG.stroke();
+      });
       for (let i = 0; i < this.propButtonNodes.length; i++) {
         const x = startX + i * (btnW + gap);
         if (i === aimingIndex) {
