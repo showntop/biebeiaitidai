@@ -1116,13 +1116,21 @@ export class GameRunner extends Component {
     this.addResultLabel(this.resultPanelNode, 'Meme', 0, -30,
       meme, 15, noteW - 28, 62, new Color(100, 88, 72, 255), false);
 
-    // 内嵌可点击按钮：3 个横排在卡片底部
-    this.makeResultButton(this.resultPanelNode, 'BtnRetry', -pw * 0.31, -ph / 2 + 46, pw * 0.27, 58, '重试', UiTokens.color.walnut, () => this.onRetry());
-    this.makeResultButton(this.resultPanelNode, 'BtnNext', 0, -ph / 2 + 46, pw * 0.27, 58,
-      canNext ? '下一关' : '回到选关', GameRunner.PROP_COLORS[0], () => canNext ? this.onNext() : this.onBackToSelect());
+    // 内嵌可点击按钮：根据实际按钮数量自动居中，避免胜利/失败状态下出现空槽偏移。
+    const buttons: Array<{ name: string; text: string; color: Readonly<Color>; tap: () => void }> = [
+      { name: 'BtnRetry', text: '重试', color: UiTokens.color.walnut, tap: () => this.onRetry() },
+      { name: 'BtnNext', text: canNext ? '下一关' : '回到选关', color: GameRunner.PROP_COLORS[0], tap: () => canNext ? this.onNext() : this.onBackToSelect() },
+    ];
     if (canRevive) {
-      this.makeResultButton(this.resultPanelNode, 'BtnRevive', pw * 0.31, -ph / 2 + 46, pw * 0.27, 58, '复活', UiTokens.color.amber, () => this.onRevive());
+      buttons.push({ name: 'BtnRevive', text: '复活', color: UiTokens.color.amber, tap: () => this.onRevive() });
     }
+    const btnGap = Math.min(18, Math.max(10, pw * 0.03));
+    const btnW = Math.min(pw * 0.27, (pw * 0.78 - btnGap * (buttons.length - 1)) / buttons.length);
+    const btnY = -ph / 2 + 46;
+    const btnSpan = (buttons.length - 1) * (btnW + btnGap);
+    buttons.forEach((button, i) => {
+      this.makeResultButton(this.resultPanelNode!, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, 58, button.text, button.color, button.tap);
+    });
     // 结果出现采用一次短促“落桌”反馈，避免常驻漂浮动画。
     const panelOpacity = this.resultPanelNode.getComponent(UIOpacity) ?? this.resultPanelNode.addComponent(UIOpacity);
     panelOpacity.opacity = 0;
