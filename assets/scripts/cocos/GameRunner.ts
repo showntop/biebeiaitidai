@@ -888,29 +888,18 @@ export class GameRunner extends Component {
     g.roundRect(-w / 2 + 2, -h / 2 + 4 + faceShift, w - 4, h - lift - 5, radius);
     g.fill(); g.stroke();
 
-    g.strokeColor = new Color(171, 129, 92, pressed ? 92 : 145);
-    g.lineWidth = 2;
+    g.strokeColor = new Color(125, 91, 65, pressed ? 160 : 220);
+    g.lineWidth = 2.5;
     g.moveTo(-w / 2 + radius + 8, h / 2 - lift - 6 + faceShift);
     g.lineTo(w / 2 - radius - 8, h / 2 - lift - 6 + faceShift);
     g.stroke();
 
-    g.strokeColor = new Color(255, 255, 255, pressed ? 42 : 90);
-    g.lineWidth = 2;
-    g.roundRect(-w / 2 + 10, -h / 2 + 12 + faceShift, w - 20, h - lift - 22, Math.max(10, radius - 7));
-    g.stroke();
-    g.moveTo(-w / 2 + radius + 10, h / 2 - lift - 11 + faceShift);
-    g.lineTo(w / 2 - radius - 10, h / 2 - lift - 11 + faceShift);
-    g.stroke();
+    g.fillColor = new Color(255, 255, 255, pressed ? 28 : 54);
+    g.roundRect(-w / 2 + radius + 10, h / 2 - lift - 14 + faceShift, w - radius * 2 - 20, 6, 3);
+    g.fill();
 
     g.fillColor = new Color(166, 125, 88, pressed ? 128 : 178);
     g.roundRect(-w / 2 + 24, -h / 2 + 12 + faceShift, w - 48, 5, 3);
-    g.fill();
-    g.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, pressed ? 32 : 50);
-    g.roundRect(-w / 2 + 30, -h / 2 + 18 + faceShift, w * 0.22, 4, 2);
-    g.fill();
-
-    g.fillColor = new Color(255, 255, 255, pressed ? 42 : 74);
-    g.roundRect(-w / 2 + radius + 12, h / 2 - lift - 12 + faceShift, w - radius * 2 - 24, 5, 3);
     g.fill();
   }
 
@@ -1074,29 +1063,37 @@ export class GameRunner extends Component {
     const cg = this.resultPanelNode.getComponent(Graphics)!;
     UiPainter.panel(cg, pw, ph, false);
 
-    // 顶部战报状态胶囊：收窄并带落影，避免一整条红块像系统错误弹窗。
+    // 顶部战报状态牌：纸质底 + 小状态章，避免纯红/绿系统条破坏当前暖纸质世界观。
     const statusW = pw * 0.70;
     const statusH = 48;
     const statusY = ph / 2 - 48;
     cg.fillColor = new Color(72, 58, 44, 48);
     cg.roundRect(-statusW / 2 + 4, statusY - statusH / 2 - 4, statusW - 8, statusH, 14);
     cg.fill();
-    cg.fillColor = won ? new Color(82, 172, 92, 246) : new Color(222, 84, 72, 246);
-    cg.strokeColor = new Color(104, 92, 78, 96);
-    cg.lineWidth = 1.5;
+    cg.fillColor = new Color(255, 250, 241, 255);
+    cg.strokeColor = new Color(166, 125, 88, 214);
+    cg.lineWidth = 3;
     cg.roundRect(-statusW / 2, statusY - statusH / 2, statusW, statusH, 14);
     cg.fill(); cg.stroke();
-    cg.strokeColor = new Color(255, 255, 255, 80);
+    const badgeW = 86;
+    const badgeX = statusW / 2 - badgeW / 2 - 12;
+    cg.fillColor = won ? new Color(83, 170, 93, 235) : new Color(222, 84, 72, 238);
+    cg.roundRect(badgeX - badgeW / 2, statusY - 16, badgeW, 32, 11);
+    cg.fill();
+    cg.strokeColor = new Color(255, 255, 255, 78);
     cg.lineWidth = 2;
-    cg.moveTo(-statusW / 2 + 22, statusY + statusH / 2 - 10);
-    cg.lineTo(statusW / 2 - 22, statusY + statusH / 2 - 10);
+    cg.moveTo(-statusW / 2 + 18, statusY + statusH / 2 - 10);
+    cg.lineTo(statusW / 2 - badgeW - 20, statusY + statusH / 2 - 10);
     cg.stroke();
 
     const starY = ph / 2 - 110;
     const starStr = `评价 ${report.stars} / 3`;
     const starW = 160;
+    cg.fillColor = new Color(76, 67, 58, 28);
+    cg.roundRect(-starW / 2 + 3, starY - 22, starW - 6, 40, 12);
+    cg.fill();
     cg.fillColor = new Color(255, 248, 225, 255);
-    cg.strokeColor = new Color(230, 178, 56, 180);
+    cg.strokeColor = new Color(202, 148, 56, 210);
     cg.lineWidth = 2;
     cg.roundRect(-starW / 2, starY - 20, starW, 40, 11);
     cg.fill(); cg.stroke();
@@ -1106,27 +1103,38 @@ export class GameRunner extends Component {
     const chipW = (pw - 70) / 3;
     [-1, 0, 1].forEach((offset) => {
       const cx = offset * (chipW + 10);
-      cg.fillColor = new Color(249, 243, 232, 255);
-      cg.strokeColor = new Color(185, 169, 145, 86);
-      cg.lineWidth = 1.5;
+      cg.fillColor = new Color(76, 67, 58, 22);
+      cg.roundRect(cx - chipW / 2 + 3, chipY - 27, chipW - 6, 48, 13);
+      cg.fill();
+      cg.fillColor = new Color(255, 250, 241, 255);
+      cg.strokeColor = new Color(185, 149, 112, 150);
+      cg.lineWidth = 2;
       cg.roundRect(cx - chipW / 2, chipY - 24, chipW, 48, 12);
       cg.fill(); cg.stroke();
+      cg.fillColor = new Color(166, 125, 88, 98);
+      cg.roundRect(cx - chipW / 2 + 12, chipY - 21, chipW - 24, 4, 2);
+      cg.fill();
     });
 
     // 正文纸条：独立承载吐槽文本，不再在大空白里飘一行字。
     const noteW = pw - 54;
     const noteH = 82;
     const noteY = -30;
+    cg.fillColor = new Color(76, 67, 58, 18);
+    cg.roundRect(-noteW / 2 + 4, noteY - noteH / 2 - 4, noteW - 8, noteH, 14);
+    cg.fill();
     cg.fillColor = new Color(255, 252, 244, 255);
-    cg.strokeColor = new Color(219, 204, 178, 82);
-    cg.lineWidth = 1.5;
+    cg.strokeColor = new Color(202, 178, 145, 128);
+    cg.lineWidth = 2;
     cg.roundRect(-noteW / 2, noteY - noteH / 2, noteW, noteH, 13);
     cg.fill(); cg.stroke();
 
     // 创建标签子节点
-    this.addResultLabel(this.resultPanelNode, 'Title', 0, statusY,
+    this.addResultLabel(this.resultPanelNode, 'Title', -badgeW * 0.42, statusY,
       won ? '岗位守住!' : '被 AI 优化了…', 28, pw * 0.85, 42,
-      new Color(255, 252, 240, 255), true);
+      UiTokens.color.inkDeep, true);
+    this.addResultLabel(this.resultPanelNode, 'ResultBadge', badgeX, statusY,
+      won ? '通过' : '淘汰', 18, badgeW - 10, 28, new Color(255, 252, 240, 255), true);
     this.addResultLabel(this.resultPanelNode, 'Stars', 0, starY, starStr, 30, pw * 0.6, 42,
       new Color(166, 112, 0, 255), true);
     this.addResultLabel(this.resultPanelNode, 'StatsApproval', -(chipW + 10), chipY,
@@ -1179,20 +1187,52 @@ export class GameRunner extends Component {
     btn.addComponent(UITransform).setContentSize(w, h);
     btn.setPosition(x, y, 0);
     const g = btn.addComponent(Graphics);
-    UiPainter.keycap(g, w, h, base, 'ready');
+    const paint = (pressed: boolean) => this.paintResultKeycap(g, w, h, base, pressed);
+    paint(false);
     const labelNode = new Node(`${name}Label`);
     labelNode.layer = 1 << 25;
     labelNode.parent = btn;
     labelNode.addComponent(UITransform).setContentSize(w - 12, h - 6);
+    labelNode.setPosition(0, 1, 0);
     const lbl = labelNode.addComponent(Label);
     lbl.string = text;
     // 键帽面已统一为纸色系，文字一律用深墨保证对比。
     UiPainter.label(lbl, 19, UiTokens.color.inkDeep, true);
     lbl.horizontalAlign = 1;
     lbl.verticalAlign = 1;
-    btn.on(Node.EventType.TOUCH_END, () => { btn.setScale(1, 1, 1); onTap(); });
-    btn.on(Node.EventType.TOUCH_START, () => btn.setScale(0.95, 0.95, 1));
-    btn.on(Node.EventType.TOUCH_CANCEL, () => btn.setScale(1, 1, 1));
+    const setPressed = (pressed: boolean) => {
+      paint(pressed);
+      labelNode.setPosition(0, pressed ? -3 : 1, 0);
+    };
+    btn.on(Node.EventType.TOUCH_END, () => { setPressed(false); onTap(); });
+    btn.on(Node.EventType.TOUCH_START, () => setPressed(true));
+    btn.on(Node.EventType.TOUCH_CANCEL, () => setPressed(false));
+  }
+
+  private paintResultKeycap(g: Graphics, w: number, h: number, accent: Readonly<Color>, pressed: boolean): void {
+    g.clear();
+    const faceShift = pressed ? -3 : 0;
+    const lift = pressed ? 2 : 7;
+    const radius = Math.min(18, Math.max(12, h * 0.24));
+    g.fillColor = new Color(54, 48, 42, pressed ? 20 : 38);
+    g.roundRect(-w / 2 + 5, -h / 2 - lift - 2, w - 10, h, radius);
+    g.fill();
+    g.fillColor = new Color(178, 139, 102, 206);
+    g.roundRect(-w / 2 + 1, -h / 2 - lift, w - 2, h - 2, radius);
+    g.fill();
+    g.fillColor = GameRunner.START_CARD;
+    g.strokeColor = new Color(146, 106, 76, pressed ? 205 : 236);
+    g.lineWidth = 3;
+    g.roundRect(-w / 2 + 2, -h / 2 + 4 + faceShift, w - 4, h - lift - 5, radius);
+    g.fill(); g.stroke();
+    g.strokeColor = new Color(255, 255, 255, pressed ? 44 : 92);
+    g.lineWidth = 2;
+    g.moveTo(-w / 2 + radius + 5, h / 2 - lift - 10 + faceShift);
+    g.lineTo(w / 2 - radius - 5, h / 2 - lift - 10 + faceShift);
+    g.stroke();
+    g.fillColor = new Color(accent.r, accent.g, accent.b, pressed ? 108 : 158);
+    g.roundRect(-w / 2 + 16, -h / 2 + 11 + faceShift, w - 32, 5, 3);
+    g.fill();
   }
 
   private hideReport(): void {
@@ -1458,29 +1498,35 @@ export class GameRunner extends Component {
 
     const propNode = new Node('PropDragAim');
     propNode.layer = 1 << 25;
-    propNode.addComponent(UITransform).setContentSize(78, 78);
+    propNode.addComponent(UITransform).setContentSize(92, 92);
     const propG = propNode.addComponent(Graphics);
     propG.clear();
-    propG.fillColor = new Color(42, 36, 30, 70);
-    propG.circle(4, -5, 34);
+    propG.fillColor = new Color(42, 36, 30, 78);
+    propG.circle(5, -6, 39);
+    propG.fill();
+    propG.fillColor = new Color(178, 139, 102, 230);
+    propG.circle(0, -4, 39);
     propG.fill();
     propG.fillColor = new Color(base.r, base.g, base.b, 246);
     propG.strokeColor = new Color(42, 36, 30, 225);
     propG.lineWidth = 4;
-    propG.circle(0, 0, 31);
+    propG.circle(0, 0, 35);
     propG.fill();
     propG.stroke();
-    propG.strokeColor = new Color(255, 255, 255, 132);
-    propG.lineWidth = 3;
-    propG.arc(0, 0, 22, Math.PI * 0.92, Math.PI * 1.82, false);
+    propG.strokeColor = new Color(255, 255, 255, 148);
+    propG.lineWidth = 3.5;
+    propG.arc(-1, 1, 25, Math.PI * 0.92, Math.PI * 1.82, false);
     propG.stroke();
+    propG.fillColor = new Color(255, 255, 255, 62);
+    propG.circle(-9, 10, 6);
+    propG.fill();
 
     const iconFrame = this.propSfFor(prop);
     if (iconFrame) {
       const iconNode = new Node('PropDragIcon');
       iconNode.layer = 1 << 25;
       iconNode.parent = propNode;
-      iconNode.addComponent(UITransform).setContentSize(45, 45);
+      iconNode.addComponent(UITransform).setContentSize(52, 52);
       const icon = iconNode.addComponent(Sprite);
       icon.sizeMode = Sprite.SizeMode.CUSTOM;
       icon.spriteFrame = iconFrame;
@@ -1529,8 +1575,8 @@ export class GameRunner extends Component {
         if (dockH > 0) {
           minX = dockX - dockW / 2 + 48;
           maxX = dockX + dockW / 2 - 48;
-          minY = dockY - dockH / 2 + 58;
-          maxY = dockY + dockH / 2 - 58;
+          minY = dockY - dockH / 2 + 40;
+          maxY = dockY + dockH / 2 - 40;
         }
       }
       this.aimPoint = new Vec3(
@@ -3095,7 +3141,7 @@ export class GameRunner extends Component {
     const dockBottom = y - btnH / 2 - Math.max(6, btnH * 0.06);
     const dockTopLimit = y + btnH / 2 + lowerHudGap - Math.max(14, viewHeight * 0.012);
     const dockAvailableH = Math.max(112, dockTopLimit - dockBottom);
-    const dockH = choosing ? Math.max(118, Math.min(168, dockAvailableH)) : btnH + 14;
+    const dockH = choosing ? Math.max(98, Math.min(136, dockAvailableH)) : btnH + 14;
     const dockY = choosing ? dockBottom + dockH / 2 : y - 4;
     this.actionDockNode.getComponent(UITransform)!.setContentSize(dockW, dockH);
     this.actionDockNode.setPosition(0, dockY, 0);
@@ -3104,37 +3150,36 @@ export class GameRunner extends Component {
     const dockG = this.actionDockNode.getComponent(Graphics)!;
     dockG.clear();
     if (choosing) {
-      const dockRadius = Math.min(24, Math.max(18, dockH * 0.16));
+      const dockRadius = Math.min(20, Math.max(14, dockH * 0.15));
       dockG.fillColor = new Color(54, 48, 42, 32);
-      dockG.roundRect(-dockW / 2 + 6, -dockH / 2 - 7, dockW - 12, dockH, dockRadius);
+      dockG.roundRect(-dockW / 2 + 6, -dockH / 2 - 6, dockW - 12, dockH, dockRadius);
       dockG.fill();
       dockG.fillColor = new Color(255, 252, 246, 246);
       dockG.strokeColor = new Color(166, 125, 88, 218);
       dockG.lineWidth = 3;
       dockG.roundRect(-dockW / 2, -dockH / 2, dockW, dockH, dockRadius);
       dockG.fill(); dockG.stroke();
-      dockG.strokeColor = new Color(255, 255, 255, 96);
-      dockG.lineWidth = 2;
-      dockG.roundRect(-dockW / 2 + 10, -dockH / 2 + 10, dockW - 20, dockH - 22, Math.max(12, dockRadius - 7));
-      dockG.stroke();
-      dockG.fillColor = new Color(166, 125, 88, 42);
-      dockG.roundRect(-dockW / 2 + 20, dockH / 2 - 24, dockW - 40, 6, 3);
+      dockG.fillColor = new Color(255, 255, 255, 64);
+      dockG.roundRect(-dockW / 2 + 18, dockH / 2 - 20, dockW - 36, 5, 3);
       dockG.fill();
-      dockG.fillColor = new Color(106, 140, 168, 28);
-      dockG.roundRect(-dockW / 2 + 26, -dockH / 2 + 18, dockW - 52, 7, 4);
+      dockG.fillColor = new Color(166, 125, 88, 40);
+      dockG.roundRect(-dockW / 2 + 22, -dockH / 2 + 14, dockW - 44, 6, 3);
       dockG.fill();
 
-      const railY = -dockH * 0.08;
-      dockG.strokeColor = new Color(166, 125, 88, 128);
-      dockG.lineWidth = 3;
+      const railY = -dockH * 0.04;
+      dockG.strokeColor = new Color(166, 125, 88, 150);
+      dockG.lineWidth = 4;
       dockG.moveTo(-dockW / 2 + 42, railY);
       dockG.lineTo(dockW / 2 - 42, railY);
       dockG.stroke();
       for (let i = 0; i < this.propButtonNodes.length; i++) {
         const x = startX + i * (btnW + gap);
         if (i === aimingIndex) {
-          dockG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 42);
-          dockG.circle(x, railY, 17);
+          dockG.fillColor = new Color(54, 48, 42, 34);
+          dockG.circle(x + 3, railY - 3, 19);
+          dockG.fill();
+          dockG.fillColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 46);
+          dockG.circle(x, railY, 18);
           dockG.fill();
           dockG.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 178);
           dockG.lineWidth = 3;
