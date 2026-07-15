@@ -14,6 +14,7 @@ import { PropButtonView } from './ui/PropButtonView';
 import { TaskCardView } from './ui/TaskCardView';
 import { UiPainter, type CardShellState, type KeycapState } from './ui/UiPainter';
 import { UiTokens } from './ui/UiTokens';
+import { getStartCardMetrics } from './ui/StartPageLayout';
 
 const { ccclass, property } = _decorator;
 
@@ -256,17 +257,6 @@ export class GameRunner extends Component {
   private static readonly START_BLUE_DARK = new Color(58, 94, 124, 255);
   private static readonly START_TEXT = new Color(50, 40, 33, 255);
   private static readonly START_MUTED = new Color(116, 106, 95, 255);
-
-  private startCardMetrics(): { width: number; height: number; cy: number; narrow: boolean } {
-    const vis = view.getVisibleSize();
-    const narrow = vis.height / Math.max(1, vis.width) >= 1.5;
-    const width = Math.min(vis.width * (narrow ? 0.895 : 0.82), narrow ? 1000 : 860);
-    const height = narrow
-      ? Math.min(vis.height * 0.455, width * 1.12)
-      : Math.min(vis.height * 0.47, width * 0.90);
-    const cy = narrow ? vis.height * 0.02 : vis.height * 0.095;
-    return { width, height, cy, narrow };
-  }
 
   onLoad(): void {
     this.hideDebugOverlays();
@@ -616,7 +606,7 @@ export class GameRunner extends Component {
     this.node.addChild(root);
 
     const vis = view.getVisibleSize();
-    const metrics = this.startCardMetrics();
+    const metrics = getStartCardMetrics(vis.width, vis.height);
     const cardW = metrics.width;
     const cardH = metrics.height;
     const cardCY = metrics.cy;
