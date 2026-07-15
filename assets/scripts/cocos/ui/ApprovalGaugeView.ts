@@ -7,7 +7,7 @@ import { UiTokens, alphaColor, mixColor } from './UiTokens';
  *
  * 信息降噪原则（小游戏 HUD 语言）：
  *  - 不显示阈值刻度数字：绿/黄/红分区颜色本身就是信息；
- *  - 不显示事件控制台：事件反馈全部走 FxLayer 飘字；
+ *  - 不显示事件控制台：只显示短战报提示，重反馈仍走 FxLayer 飘字；
  *  - 危险态只保留一个抖动徽章，不再叠加外圈脉冲描边。
  * 底部保留一行无框提示小字（教学引导用），视觉权重最低。
  */
@@ -94,7 +94,7 @@ export class ApprovalGaugeView {
     this.dynamic.node.setPosition(0, 0, 0);
   }
 
-  update(approval: number, zone: string, _hintText: string, elapsed: number): void {
+  update(approval: number, zone: string, hintText: string, elapsed: number): void {
     const copy: Record<string, string> = { hunt: '优秀', good: '良好', ok: '一般', danger: '危险!' };
     const colors: Record<string, Readonly<Color>> = {
       hunt: UiTokens.color.hunt,
@@ -107,7 +107,9 @@ export class ApprovalGaugeView {
     const danger = zone === 'danger';
     this.value.string = `认可度  ${approval}`;
     this.zone.string = copy[zone] ?? zone;
-    this.hint.string = '';
+    const hint = hintText.trim();
+    this.hint.string = hint ? `战报 · ${hint}` : '';
+    this.hint.node.active = !!hint;
 
     const shakeX = danger ? Math.sin(elapsed * 18) * 1.4 : 0;
     this.zone.node.setPosition(this.zoneBaseX + shakeX, this.zoneBaseY, 0);
@@ -134,6 +136,20 @@ export class ApprovalGaugeView {
       g.fillColor = alphaColor(Color.WHITE, 58);
       g.roundRect(left + 4, this.barY + innerH * 0.10, Math.max(0, fillW - 8), innerH * 0.30, innerH * 0.15);
       g.fill();
+    }
+
+    if (hint) {
+      const pulse = 0.88 + Math.sin(elapsed * 9) * 0.08;
+      const hintW = Math.min(this.barW, 320);
+      const hintH = 22;
+      const hintY = -this.root.getComponent(UITransform)!.height / 2 + 12;
+      g.fillColor = alphaColor(UiTokens.color.paper, 220);
+      g.roundRect(-hintW / 2, hintY - hintH / 2, hintW, hintH, hintH / 2);
+      g.fill();
+      g.strokeColor = alphaColor(zoneColor, 80 + pulse * 45);
+      g.lineWidth = 1.5;
+      g.roundRect(-hintW / 2, hintY - hintH / 2, hintW, hintH, hintH / 2);
+      g.stroke();
     }
   }
 

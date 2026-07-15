@@ -127,6 +127,7 @@ export class GameRunner extends Component {
   private fx: FxLayer | null = null;
   private eventUnsubs: Array<() => void> = [];
   private lastEventText = '';
+  private eventTextUntilSec = 0;
   private compactHeader = false;
 
   private static readonly PROP_LABELS = UiTokens.prop.labels;
@@ -393,7 +394,7 @@ export class GameRunner extends Component {
     this.scanPos = 0;
     this.reported = false;
     this.uiState = 'playing';
-    this.lastEventText = '长按纸团，拖向任务卡';
+    this.setEventText('长按纸团，拖向任务卡', 6);
     this.hideReport();
     this.hideLevelSelect();
     this.setGameUIVisible(true);
@@ -430,8 +431,10 @@ export class GameRunner extends Component {
     this.eventUnsubs = [];
   }
 
-  private setEventText(text: string): void {
+  private setEventText(text: string, ttlSec = UiTokens.feedback.eventHintTtlSec): void {
     this.lastEventText = text.replace(/^事件\s*[·:：]\s*/, '');
+    const elapsed = this.game?.getSnapshot().elapsed ?? 0;
+    this.eventTextUntilSec = elapsed + Math.max(0.1, ttlSec);
   }
 
   private shouldShowTutorial(): boolean {
@@ -3068,7 +3071,8 @@ export class GameRunner extends Component {
   private updateLowerHud(approval: number, zone: string): void {
     const elapsed = this.game?.getSnapshot().elapsed ?? 0;
     const displayZone = approval >= 69 ? 'danger' : approval >= 49 ? 'ok' : approval >= 18 ? 'good' : zone;
-    this.approvalGaugeView?.update(approval, displayZone, this.lastEventText, elapsed);
+    const hint = elapsed <= this.eventTextUntilSec ? this.lastEventText : '';
+    this.approvalGaugeView?.update(approval, displayZone, hint, elapsed);
   }
 
   /** 把 Belt 下的 6 个卡槽横向等距重新排布到指定区域内（居中）。 */

@@ -219,6 +219,7 @@ export const UiTokens = Object.freeze({
     startChargePulse: 12,
   }),
   feedback: Object.freeze({
+    eventHintTtlSec: 3.2,
     syntheticCancelMs: 180,
     impactSec: 0.16,
     outcomeRiseSec: 0.38,
