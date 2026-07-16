@@ -18,6 +18,7 @@ build/
 # Local QA / browser automation artifacts
 .playwright-mcp/
 .serena/
+asset-backup/
 qa-*.png
 final-refined-*.png
 refined-current-page.png

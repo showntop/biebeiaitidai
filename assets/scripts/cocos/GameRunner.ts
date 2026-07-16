@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, Rect, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate, profiler } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, Rect, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -630,11 +630,6 @@ export class GameRunner extends Component {
   }
 
   private hideDebugOverlays(): void {
-    try {
-      profiler.hideStats();
-    } catch {
-      /* profiler 在部分运行环境可能不存在，忽略即可 */
-    }
     const doc = (globalThis as { document?: Document }).document;
     if (!doc) return;
     const selectors = ['#vConsole', '.vc-switch', '.vc-mask', '.vc-panel', '.vConsole'];
