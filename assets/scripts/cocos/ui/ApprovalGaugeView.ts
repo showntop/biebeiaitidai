@@ -17,11 +17,19 @@ export class ApprovalGaugeView {
   private readonly value: Label;
   private readonly zone: Label;
   private readonly hint: Label;
+  private readonly delta: Label;
   private barW = 0;
   private barH = 0;
   private barY = 0;
   private zoneBaseX = 0;
   private zoneBaseY = 0;
+  private displayedApproval = Number.NaN;
+  private targetApproval = Number.NaN;
+  private lastElapsed = Number.NaN;
+  private lastZone = '';
+  private deltaText = '';
+  private deltaUntil = 0;
+  private zoneFlashUntil = 0;
 
   constructor(private readonly root: Node) {
     this.frame = root.getComponent(Graphics) ?? root.addComponent(Graphics);
@@ -29,6 +37,7 @@ export class ApprovalGaugeView {
     this.value = this.ensureLabel('ApprovalValue');
     this.zone = this.ensureLabel('Zone');
     this.hint = this.ensureLabel('Hint');
+    this.delta = this.ensureLabel('Delta');
     // 清理旧版本残留的刻度/事件节点（热更或重复布局时避免叠影）
     ['Scale', 'EventTag', 'Event'].forEach((name) => {
       const stale = root.getChildByName(name);
@@ -52,10 +61,12 @@ export class ApprovalGaugeView {
     this.place(this.value, this.valueBaseX + width * 0.22, rowY, width * 0.46, 38);
     this.place(this.zone, this.zoneBaseX, this.zoneBaseY, 78, 30);
     this.place(this.hint, 0, -height / 2 + 12, this.barW, 20);
+    this.place(this.delta, this.valueBaseX + width * 0.35, rowY + 28, 74, 26);
 
     UiPainter.label(this.value, Math.min(30, Math.max(22, width * 0.040)), UiTokens.color.inkDeep, true);
     UiPainter.label(this.zone, UiTokens.type.caption, UiTokens.color.inkDeep, true);
     UiPainter.label(this.hint, UiTokens.type.micro, alphaColor(UiTokens.color.muted, 170));
+    UiPainter.label(this.delta, UiTokens.type.caption, UiTokens.color.danger, true);
     this.value.horizontalAlign = 0;
 
     this.frame.clear();
@@ -102,14 +113,37 @@ export class ApprovalGaugeView {
       ok: UiTokens.color.gold,
       danger: UiTokens.color.danger,
     };
-    const pct = Math.max(0, Math.min(1, approval / 100));
+    if (Number.isNaN(this.displayedApproval)) {
+      this.displayedApproval = approval;
+      this.targetApproval = approval;
+      this.lastElapsed = elapsed;
+      this.lastZone = zone;
+    }
+    if (approval !== this.targetApproval) {
+      const delta = approval - this.targetApproval;
+      this.deltaText = delta > 0 ? `+${delta}` : `${delta}`;
+      this.deltaUntil = elapsed + 0.72;
+      this.targetApproval = approval;
+    }
+    if (zone !== this.lastZone) {
+      this.lastZone = zone;
+      this.zoneFlashUntil = elapsed + 0.64;
+    }
+    const dt = Number.isFinite(this.lastElapsed) ? Math.max(0, Math.min(0.1, elapsed - this.lastElapsed)) : 0;
+    this.lastElapsed = elapsed;
+    const lerp = Math.min(1, dt * 10);
+    this.displayedApproval += (this.targetApproval - this.displayedApproval) * lerp;
+    if (Math.abs(this.targetApproval - this.displayedApproval) < 0.35) this.displayedApproval = this.targetApproval;
+    const shownApproval = Math.round(this.displayedApproval);
+    const pct = Math.max(0, Math.min(1, this.displayedApproval / 100));
     const zoneColor = colors[zone] ?? UiTokens.color.gold;
     const danger = zone === 'danger';
-    this.value.string = `认可度  ${approval}`;
+    this.value.string = `认可度  ${shownApproval}`;
     this.zone.string = copy[zone] ?? zone;
     const hint = hintText.trim();
     this.hint.string = hint ? `战报 · ${hint}` : '';
     this.hint.node.active = !!hint;
+    this.delta.node.active = elapsed < this.deltaUntil && !!this.deltaText;
 
     const shakeX = danger ? Math.sin(elapsed * 18) * 1.4 : 0;
     this.zone.node.setPosition(this.zoneBaseX + shakeX, this.zoneBaseY, 0);
@@ -120,7 +154,10 @@ export class ApprovalGaugeView {
     const badgeW = 76;
     const badgeH = 30;
     const bx = this.zoneBaseX + shakeX;
-    g.fillColor = danger ? alphaColor(UiTokens.color.danger, 42) : new Color(253, 234, 195, 255);
+    const zoneFlash = Math.max(0, this.zoneFlashUntil - elapsed);
+    g.fillColor = danger
+      ? alphaColor(UiTokens.color.danger, 42 + zoneFlash * 80)
+      : new Color(253, 234, 195, 255);
     g.roundRect(bx - badgeW / 2, this.zoneBaseY - badgeH / 2, badgeW, badgeH, badgeH / 2);
     g.fill();
 
@@ -136,6 +173,28 @@ export class ApprovalGaugeView {
       g.fillColor = alphaColor(Color.WHITE, 58);
       g.roundRect(left + 4, this.barY + innerH * 0.10, Math.max(0, fillW - 8), innerH * 0.30, innerH * 0.15);
       g.fill();
+    }
+
+    if (elapsed < this.deltaUntil && this.deltaText) {
+      const remain = this.deltaUntil - elapsed;
+      const positive = this.deltaText.startsWith('+');
+      const badgeText = this.deltaText;
+      const chipW = Math.max(42, 22 + badgeText.length * 11);
+      const chipH = 24;
+      const dx = this.valueBaseX + this.root.getComponent(UITransform)!.width * 0.35;
+      const dy = this.zoneBaseY + 26 + (0.72 - remain) * 12;
+      const dc = positive ? UiTokens.color.danger : UiTokens.color.good;
+      this.delta.string = badgeText;
+      this.delta.color = dc;
+      this.delta.node.setPosition(dx, dy, 0);
+      this.delta.node.getComponent(UITransform)?.setContentSize(chipW, chipH);
+      g.fillColor = alphaColor(UiTokens.color.paper, 230);
+      g.roundRect(dx - chipW / 2, dy - chipH / 2, chipW, chipH, chipH / 2);
+      g.fill();
+      g.strokeColor = alphaColor(dc, Math.round(120 + remain * 80));
+      g.lineWidth = 1.8;
+      g.roundRect(dx - chipW / 2, dy - chipH / 2, chipW, chipH, chipH / 2);
+      g.stroke();
     }
 
     if (hint) {

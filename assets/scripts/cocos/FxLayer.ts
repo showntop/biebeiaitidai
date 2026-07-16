@@ -1,6 +1,6 @@
 import { tween, Tween, Vec3, Node, Label, Color, UITransform, UIOpacity, Graphics } from 'cc';
 import type { EventBus } from '../core/EventBus';
-import type { GameEvents, HitQuality, ApprovalZone } from '../core/types';
+import type { ExpressionId, GameEvents, HitQuality, ApprovalZone } from '../core/types';
 
 const UI_2D = 1 << 25; // 33554432
 
@@ -47,6 +47,8 @@ export class FxLayer {
     private slots: Node[],
     private approvalLabel: Label | null,
     private getSlotVisual: (slot: number) => Node | null = () => null,
+    private getCardVisual: (cardId: number) => Node | null = () => null,
+    private getCharacterNode: () => Node | null = () => null,
   ) {
     this.rootBase = root.position.clone();
     if (approvalLabel && approvalLabel.isValid) this.approvalBaseColor = approvalLabel.color.clone();
@@ -94,6 +96,7 @@ export class FxLayer {
     this.on('PropUnavailable', () => this.fxMiss());
     this.on('PropCanceled', () => this.fxCancel());
     this.on('AIHit', ({ quality }) => this.fxAIHit(quality));
+    this.on('AIExpression', ({ expression, durationSec }) => this.fxAIExpression(expression, durationSec));
   }
 
   private on<K extends keyof GameEvents>(name: K, fn: (p: GameEvents[K]) => void): void {
@@ -113,12 +116,46 @@ export class FxLayer {
       .to(0.045, { scale: new Vec3(punch, 0.96, 1) }, { easing: 'quadOut' })
       .to(0.10, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
       .start();
+    this.cardEdgeSweep(node, prop, quality);
     this.cardImpactBurst(origin, prop, quality);
     this.cardHitStamp(node, prop, quality);
+    this.shake(quality === 'perfect' ? 3.6 : 2.2, quality === 'perfect' ? 0.16 : 0.10);
     // Perfect 额外金字
     if (quality === 'perfect') {
       this.floatText('PERFECT!', origin.x, origin.y + 46, new Color(255, 204, 64), 0.58);
     }
+  }
+
+  private cardEdgeSweep(cardNode: Node, prop: GameEvents['CardHit']['prop'], quality: HitQuality): void {
+    const ut = cardNode.getComponent(UITransform);
+    const w = Math.max(70, ut?.width ?? 86);
+    const h = Math.max(62, ut?.height ?? 78);
+    const color = this.propAccent(prop);
+    const sweep = new Node('CardEdgeSweep');
+    sweep.layer = UI_2D;
+    sweep.parent = cardNode;
+    sweep.addComponent(UITransform).setContentSize(w, h);
+    sweep.setPosition(0, 0, 0);
+    const g = sweep.addComponent(Graphics);
+    const strong = quality === 'perfect';
+    g.strokeColor = new Color(color.r, color.g, color.b, strong ? 220 : 168);
+    g.lineWidth = strong ? 4 : 3;
+    g.roundRect(-w * 0.43, -h * 0.38, w * 0.86, h * 0.76, 14);
+    g.stroke();
+    g.fillColor = new Color(255, 255, 255, strong ? 76 : 48);
+    g.roundRect(-w * 0.38, h * 0.23, w * 0.30, 5, 3);
+    g.fill();
+    const op = sweep.addComponent(UIOpacity);
+    op.opacity = 0;
+    sweep.setScale(0.92, 0.92, 1);
+    tween(op)
+      .to(0.04, { opacity: strong ? 255 : 205 }, { easing: 'quadOut' })
+      .to(strong ? 0.26 : 0.20, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+    tween(sweep)
+      .to(strong ? 0.30 : 0.24, { scale: new Vec3(strong ? 1.12 : 1.06, strong ? 1.12 : 1.06, 1) }, { easing: 'quadOut' })
+      .call(() => { if (sweep.isValid) sweep.destroy(); })
+      .start();
   }
 
   private cardHitStamp(cardNode: Node, prop: GameEvents['CardHit']['prop'], quality: HitQuality): void {
@@ -228,7 +265,7 @@ export class FxLayer {
   /* ---------- 卡牌结算（浮动 ±N） ---------- */
 
   private fxCardResolved(delta: number, card: GameEvents['CardResolved']['card']): void {
-    const startNode = this.getSlotVisual(0) ?? this.slots[0] ?? this.approvalLabel?.node;
+    const startNode = this.getCardVisual(card.id) ?? this.getSlotVisual(0) ?? this.slots[0] ?? this.approvalLabel?.node;
     if (!startNode?.isValid) return;
     const start = this.pointInRoot(startNode);
     const target = this.approvalTargetPoint();
@@ -252,10 +289,14 @@ export class FxLayer {
     // 停掉上一次的延迟恢复，否则连续触发会排队把基准色覆盖成中间色
     Tween.stopAllByTarget(label.node);
     label.color = delta > 0 ? new Color(100, 255, 100) : new Color(255, 80, 80);
+    const pop = delta > 0 ? 1.13 : 1.09;
+    label.node.setScale(pop, pop, 1);
     tween(label.node)
-      .delay(0.2)
+      .to(0.16, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+      .delay(0.10)
       .call(() => { if (label?.isValid) label.color = this.approvalBaseColor!; })
       .start();
+    if (Math.abs(delta) >= 6) this.shake(delta > 0 ? 3.4 : 2.0, 0.14);
   }
 
   /* ---------- 分区跨越（全屏色闪） ---------- */
@@ -351,7 +392,96 @@ export class FxLayer {
   private fxAIHit(quality: HitQuality): void {
     const perfect = quality === 'perfect';
     this.flashOverlay(new Color(255, 180, 200, perfect ? 100 : 50), 0.4);
-    this.floatText(perfect ? '完美拍中!' : '拍中!', 0, 40, new Color(255, 200, 220), 0.8);
+    const ai = this.getCharacterNode();
+    const p = ai?.isValid ? this.pointInRoot(ai) : new Vec3(0, 40, 0);
+    this.floatText(perfect ? '完美拍中!' : '拍中!', p.x, p.y + 72, new Color(255, 200, 220), 0.8);
+    this.pulseCharacter(perfect ? 'shy' : 'confident', perfect ? 0.72 : 0.46);
+  }
+
+  private fxAIExpression(expression: ExpressionId, durationSec: number): void {
+    this.pulseCharacter(expression, durationSec);
+    const ai = this.getCharacterNode();
+    if (!ai?.isValid) return;
+    const p = this.pointInRoot(ai);
+    const copy: Partial<Record<ExpressionId, string>> = {
+      'slight-frown': '警觉',
+      surprised: '被打断!',
+      bewildered: '甩懵了',
+      'combo-face': '连击!',
+      confident: '稳住',
+      sweat: '有点慌',
+      panic: '危险!',
+      'busy-pretend': '装忙中',
+      shy: '被夸了',
+      'idle-look': '摸鱼?',
+      tense: '紧张',
+      'called-in': '约谈',
+    };
+    const color = this.expressionColor(expression);
+    this.aiStatusChip(copy[expression] ?? '状态变化', p.x, p.y + 92, color, Math.min(1.0, Math.max(0.42, durationSec)));
+  }
+
+  private pulseCharacter(expression: ExpressionId, durationSec: number): void {
+    const ai = this.getCharacterNode();
+    if (!ai?.isValid) return;
+    Tween.stopAllByTarget(ai);
+    const stress = expression === 'panic' || expression === 'tense' || expression === 'busy-pretend';
+    const happy = expression === 'confident' || expression === 'shy' || expression === 'combo-face';
+    const sx = stress ? 0.97 : happy ? 1.04 : 1.02;
+    const sy = stress ? 1.05 : happy ? 0.97 : 1.02;
+    const angle = stress ? 3 : happy ? -2 : 0;
+    tween(ai)
+      .to(0.08, { scale: new Vec3(sx, sy, 1), angle }, { easing: 'quadOut' })
+      .delay(Math.min(0.28, Math.max(0.08, durationSec * 0.35)))
+      .to(0.16, { scale: new Vec3(1, 1, 1), angle: 0 }, { easing: 'backOut' })
+      .start();
+  }
+
+  private aiStatusChip(text: string, x: number, y: number, color: Color, duration: number): void {
+    const node = new Node('AIStatusChip');
+    node.layer = UI_2D;
+    node.addComponent(UITransform).setContentSize(96, 30);
+    const g = node.addComponent(Graphics);
+    g.fillColor = new Color(255, 252, 246, 235);
+    g.strokeColor = new Color(color.r, color.g, color.b, 210);
+    g.lineWidth = 2.5;
+    g.roundRect(-48, -15, 96, 30, 12);
+    g.fill(); g.stroke();
+    g.fillColor = new Color(color.r, color.g, color.b, 54);
+    g.roundRect(-38, -11, 76, 5, 3);
+    g.fill();
+    const labelNode = new Node('AIStatusText');
+    labelNode.layer = UI_2D;
+    labelNode.parent = node;
+    labelNode.addComponent(UITransform).setContentSize(90, 26);
+    const label = labelNode.addComponent(Label);
+    label.string = text;
+    label.fontSize = 16;
+    label.lineHeight = 20;
+    label.isBold = true;
+    label.color = color;
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+    node.setPosition(x, y, 0);
+    this.root.addChild(node);
+    const op = node.addComponent(UIOpacity);
+    op.opacity = 0;
+    tween(op)
+      .to(0.08, { opacity: 245 }, { easing: 'quadOut' })
+      .delay(duration)
+      .to(0.18, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+    tween(node)
+      .by(duration + 0.26, { position: new Vec3(0, 22, 0) }, { easing: 'quadOut' })
+      .call(() => { if (node.isValid) node.destroy(); })
+      .start();
+  }
+
+  private expressionColor(expression: ExpressionId): Color {
+    if (expression === 'panic' || expression === 'tense' || expression === 'busy-pretend') return new Color(226, 64, 54, 255);
+    if (expression === 'surprised' || expression === 'bewildered' || expression === 'combo-face') return new Color(244, 172, 32, 255);
+    if (expression === 'confident' || expression === 'shy' || expression === 'called-in') return new Color(78, 170, 74, 255);
+    return new Color(106, 140, 168, 255);
   }
 
   private scanProcessingCard(cardNode: Node, delta: number): void {

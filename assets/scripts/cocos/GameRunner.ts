@@ -225,6 +225,7 @@ export class GameRunner extends Component {
   private static readonly START_BLUE_DARK = UiTokens.environment.startBlueDark;
   private static readonly START_TEXT = UiTokens.environment.startText;
   private static readonly START_MUTED = UiTokens.environment.startMuted;
+  private static readonly TUTORIAL_DONE_KEY = 'biebeiaitidai.tutorial.done.v1';
 
   private startCardMetrics(): { width: number; height: number; cy: number; narrow: boolean } {
     const vis = view.getVisibleSize();
@@ -240,6 +241,7 @@ export class GameRunner extends Component {
   onLoad(): void {
     this.hideDebugOverlays();
     this.hideScenePlaceholderLabels();
+    this.tutorialDone = sys.localStorage?.getItem(GameRunner.TUTORIAL_DONE_KEY) === '1';
     this.session = new Session(new CocosStorage());
     this.session.continueProgress(); // 继续"最高解锁关"进度
 
@@ -413,6 +415,8 @@ export class GameRunner extends Component {
       this.slotNodes,
       this.lowerHudNode?.getChildByName('ApprovalValue')?.getComponent(Label) ?? this.approvalLabel,
       (slot) => this.visualNodeAtSlot(slot),
+      (cardId) => this.cardVisuals.get(cardId)?.node ?? null,
+      () => this.charNode,
     );
     this.bindEventFeed();
     this.beginTutorialIfNeeded();
@@ -423,9 +427,29 @@ export class GameRunner extends Component {
   private bindEventFeed(): void {
     this.clearEventFeed();
     this.eventUnsubs.push(
-      this.game.bus.on('CardHit', () => {
-        this.setEventText(UiTokens.tutorial.hitHint);
+      this.game.bus.on('CardHit', ({ prop, quality }) => {
+        const perfect = quality === 'perfect';
+        this.setEventText(perfect ? `完美命中：${this.propDisplayName(prop)}压住了任务` : UiTokens.tutorial.hitHint);
         this.completeTutorial();
+      }),
+      this.game.bus.on('PropUnavailable', ({ reason }) => {
+        this.setEventText(reason === 'empty' ? '空位没砸中，换个任务卡试试' : '这个目标不吃这招，换道具试试', 2.0);
+      }),
+      this.game.bus.on('ApprovalChanged', ({ delta }) => {
+        if (delta > 0) this.setEventText(`危险上升 ${Math.round(delta)}，赶紧拦截任务`, 2.2);
+        else if (delta < 0) this.setEventText(`漂亮！认可度回落 ${Math.abs(Math.round(delta))}`, 2.2);
+      }),
+      this.game.bus.on('ZoneChanged', ({ to }) => {
+        const copy: Record<string, string> = {
+          hunt: '猎杀线！稳住两秒就能反杀',
+          good: '状态良好，可以继续控节奏',
+          ok: '进入一般区，任务会更烦',
+          danger: '危险！AI 正在接管你的工作',
+        };
+        this.setEventText(copy[to] ?? '状态变化', 3.0);
+      }),
+      this.game.bus.on('AIHit', () => {
+        this.setEventText('拍马屁生效，传送带短暂停住', 2.4);
       }),
     );
   }
@@ -464,6 +488,7 @@ export class GameRunner extends Component {
   private completeTutorial(): void {
     if (!this.shouldShowTutorial()) return;
     this.tutorialDone = true;
+    sys.localStorage?.setItem(GameRunner.TUTORIAL_DONE_KEY, '1');
     this.hideTutorial();
   }
 
@@ -489,13 +514,14 @@ export class GameRunner extends Component {
       label.overflow = Label.Overflow.SHRINK;
       this.tutorialRoot = root;
     }
-    // 教学直接复用事件条，避免浮层压住认可度刻度与当前值。
     this.setEventText(`教学 · ${text}`);
     const vis = view.getVisibleSize();
     const w = Math.min(vis.width * 0.68, 420);
     const h = 40;
     const root = this.tutorialRoot;
     root.getComponent(UITransform)!.setContentSize(w, h);
+    const placement = this.tutorialPlacement(w, h);
+    root.setPosition(placement.x, placement.y, 0);
     const g = root.getComponent(Graphics)!;
     g.clear();
     g.fillColor = new Color(35, 32, 28, 230);
@@ -503,6 +529,22 @@ export class GameRunner extends Component {
     g.lineWidth = 2;
     g.roundRect(-w / 2, -h / 2, w, h, 14);
     g.fill(); g.stroke();
+    g.fillColor = new Color(35, 32, 28, 230);
+    g.strokeColor = new Color(255, 236, 160, 255);
+    g.lineWidth = 2;
+    const px = Math.max(-w / 2 + 22, Math.min(w / 2 - 22, placement.pointerX));
+    if (placement.pointerDown) {
+      g.moveTo(px - 9, -h / 2 + 2);
+      g.lineTo(px + 9, -h / 2 + 2);
+      g.lineTo(px, -h / 2 - 12);
+    } else {
+      g.moveTo(px - 9, h / 2 - 2);
+      g.lineTo(px + 9, h / 2 - 2);
+      g.lineTo(px, h / 2 + 12);
+    }
+    g.close();
+    g.fill();
+    g.stroke();
     const label = root.getChildByName('TutorialText')?.getComponent(Label);
     if (label) {
       label.string = text;
@@ -511,16 +553,41 @@ export class GameRunner extends Component {
       label.color = new Color(255, 246, 220, 255);
       label.node.getComponent(UITransform)!.setContentSize(w - 24, h - 6);
     }
-    this.layoutTutorialHint();
     root.active = this.shouldShowTutorial();
     root.setSiblingIndex(this.node.children.length - 1);
   }
 
   private layoutTutorialHint(): void {
     if (!this.tutorialRoot?.isValid) return;
+    const ut = this.tutorialRoot.getComponent(UITransform);
+    const placement = this.tutorialPlacement(ut?.width ?? 260, ut?.height ?? 40);
+    this.tutorialRoot.setPosition(placement.x, placement.y, 0);
+  }
+
+  private tutorialPlacement(w: number, h: number): { x: number; y: number; pointerX: number; pointerDown: boolean } {
     const vis = view.getVisibleSize();
-    const propY = this.propButtons?.position.y ?? -vis.height / 2 + 180;
-    this.tutorialRoot.setPosition(0, propY + Math.max(92, vis.height * 0.09), 0);
+    const margin = 26;
+    const clampX = (x: number) => Math.max(-vis.width / 2 + w / 2 + margin, Math.min(vis.width / 2 - w / 2 - margin, x));
+    if (this.tutorialStep >= 2) {
+      const target = this.targetPointForSlot(this.aimingSlot);
+      const y = Math.max(-vis.height / 2 + 210, target.y - h / 2 - 70);
+      const x = clampX(target.x);
+      return { x, y, pointerX: target.x - x, pointerDown: false };
+    }
+    if (this.tutorialStep >= 1 && this.actionDockNode?.active) {
+      const dockUt = this.actionDockNode.getComponent(UITransform);
+      const dockTop = this.actionDockNode.position.y + (dockUt?.height ?? 90) / 2;
+      const x = clampX(this.aimPoint.x || 0);
+      return { x, y: dockTop + h / 2 + 18, pointerX: this.aimPoint.x - x, pointerDown: true };
+    }
+    const source = this.propSourcePoint(PT.AddDemand);
+    const x = clampX(source.x);
+    return {
+      x,
+      y: source.y + h / 2 + Math.max(56, vis.height * 0.07),
+      pointerX: source.x - x,
+      pointerDown: true,
+    };
   }
 
   private onNext(): void {
