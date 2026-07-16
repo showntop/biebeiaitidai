@@ -32,6 +32,12 @@ export interface RunReport {
   bossInspectionsFired: number;
   /** §4.4 最高连击数。 */
   maxCombo: number;
+  /** 有效命中任务卡次数。 */
+  effectiveHits: number;
+  /** Perfect 命中次数。 */
+  perfectHits: number;
+  /** 空挡或无效目标次数。 */
+  missedThrows: number;
   /** 是否使用了复活（§2.1）。 */
   revived: boolean;
 }
@@ -49,6 +55,9 @@ export interface RunReportInput {
   durationSec: number;
   bossInspectionsFired: number;
   maxCombo: number;
+  effectiveHits: number;
+  perfectHits: number;
+  missedThrows: number;
   revived: boolean;
 }
 
@@ -60,5 +69,5 @@ export function buildRunReport(input: RunReportInput): RunReport {
 export function summarizeReport(r: RunReport): string {
   const verdict =
     r.result === 'win-hunt' ? '猎杀通关' : r.result === 'win-survive' ? '生存通关' : '失败';
-  return `[${r.levelTitle}] ${verdict} ★${r.stars} | 峰值${Math.round(r.peakApproval)} | ${r.timeUsedSec.toFixed(1)}s | Boss临检${r.bossInspectionsFired} | 连击${r.maxCombo}`;
+  return `[${r.levelTitle}] ${verdict} ★${r.stars} | 峰值${Math.round(r.peakApproval)} | ${r.timeUsedSec.toFixed(1)}s | Perfect${r.perfectHits} | 连击${r.maxCombo}`;
 }

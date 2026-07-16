@@ -10,7 +10,7 @@ import { phaseFor } from './config';
 import { defaultRng } from './rng';
 import type { Rng } from './rng';
 import type { LevelDef } from './config';
-import type { ApprovalZone, GamePhase, GameResult, PropType } from './types';
+import type { ApprovalZone, GamePhase, GameResult, HitQuality, PropType } from './types';
 import { PropType as PT } from './types';
 
 /**
@@ -41,6 +41,9 @@ export class Game {
   result: GameResult = 'ongoing';
   stars = 0;
   maxCombo = 0;
+  effectiveHits = 0;
+  perfectHits = 0;
+  missedThrows = 0;
   /** §2.1 是否使用过复活（每关限1次，RunReport 采集）。 */
   revived = false;
   /** §2.1 复活后额外时长（秒）。 */
@@ -69,7 +72,14 @@ export class Game {
     this.bus.on('BossSpawned', () => this.prop.onBossSpawned());
     this.bus.on('KissUpFreeze', ({ durationSec }) => this.applyFreeze(durationSec));
     // §4.2 道具生效：CardHit → Conveyor 变更
-    this.bus.on('CardHit', ({ prop, slot }) => this.applyPropEffect(prop, slot));
+    this.bus.on('CardHit', ({ prop, slot, quality }) => {
+      this.applyPropEffect(prop, slot);
+      this.effectiveHits++;
+      if (quality === 'perfect') this.perfectHits++;
+    });
+    this.bus.on('PropUnavailable', () => {
+      this.missedThrows++;
+    });
     this.bus.on('ApprovalChanged', ({ to }) => {
       if (to > this.peakApproval) this.peakApproval = to;
     });
@@ -107,10 +117,12 @@ export class Game {
       return; // §4.2 冻结期间 belt/approval/生成暂停
     }
 
+    const phaseBefore = this.phase;
     this.elapsed += dt;
     this.approval.tick(dt);
 
     const phase = this.phase;
+    if (phase !== phaseBefore) this.bus.emit('PhaseChanged', { from: phaseBefore, to: phase });
     const zone = this.approval.currentZone;
     const bonus = BalanceConfig.zones[zone].genBonus;
     const slotPeriod = BalanceConfig.phases[phase].slotPeriodSec;
@@ -148,8 +160,8 @@ export class Game {
     return this.prop.release(prop);
   }
 
-  releaseAtSlot(prop: PropType, slot: number): boolean {
-    return this.prop.releaseAtSlot(prop, slot);
+  releaseAtSlot(prop: PropType, slot: number, quality?: HitQuality): boolean {
+    return this.prop.releaseAtSlot(prop, slot, quality);
   }
   cancel(prop: PropType): void {
     this.prop.cancel(prop);
@@ -245,6 +257,9 @@ export class Game {
       durationSec: def.durationSec + this.bonusDuration,
       bossInspectionsFired: this.bossInspectionsFired,
       maxCombo: this.maxCombo,
+      effectiveHits: this.effectiveHits,
+      perfectHits: this.perfectHits,
+      missedThrows: this.missedThrows,
       revived: this.revived,
     };
   }

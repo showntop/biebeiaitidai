@@ -1,7 +1,25 @@
 # Cocos 表现层接入（M2 占位 → M3 关卡流）
 
 > 在 Cocos Creator 3.8.x 中搭场景，验证 core 规则层 + 关卡流（Session）能正确驱动画面。
-> GameRunner 现在是 `core/Session` 的薄壳：继续进度 / 选关开打 / 结算战报 / 解锁段位 / 下一关重试。
+> GameRunner 负责流程组装；`PropDockView`、`ApprovalGaugeView`、`PropButtonView`、`TaskCardView`、`ResultDialogView` 已承接主要纯视图职责。
+
+## 可复现视觉验收入口
+
+Web 构建启动后，可用查询参数直接进入关键画面。所有 QA 场景使用内存存档、固定随机种子，
+不会修改玩家进度；场景建立后会冻结规则推进，适合 390×844 截图回归。
+
+```text
+?qa=entry&seed=424242&level=1
+?qa=playing&seed=424242&level=1
+?qa=drag&seed=424242&level=1
+?qa=perfect&seed=424242&level=1
+?qa=crisis&seed=424242&level=1
+?qa=result-lose&seed=424242&level=1
+?qa=result-survive&seed=424242&level=1
+?qa=result-hunt&seed=424242&level=1
+```
+
+浏览器自动化可等待 `globalThis.__BRAATN_QA__.ready === true`，并读取其中的卡片签名验证同种子复现。
 
 ## 场景搭建步骤
 
@@ -37,8 +55,9 @@ Canvas
 4. **运行**（编辑器预览或微信小游戏构建）：
    - 进入"最高解锁关"（首次为第 1 关），当前反替代任务显示在顶部
    - 传送带 6 格刷新卡牌、认可度/分区/倒计时实时变化
-   - 按住道具按钮 → 扫描指示器移动 → 松手命中；**未解锁道具按钮置灰**（如第 1 关的丢锅/拍马屁）
-   - 局结束 → 战报面板出现，通关则解锁下一关、可点 NextBtn 继续；失败/重玩可点 RetryBtn
+   - 长按加需求/改需求/甩锅 → 进入底部投掷滑轨 → 左右选择任务 → 金色准星表示 Perfect → 松手投出
+   - 拍马屁是即时技能，点按后直接飞向 AI，不进入任务卡瞄准
+   - 局结束 → 战报面板出现；通关显示下一关，失败只显示立即重试/复活/回到选关
    - 进度自动存档（微信 `wx.setStorageSync`，Web 预览走 `localStorage`）
 
 ## 注意事项（cc 层，需在编辑器实测）
@@ -47,10 +66,16 @@ Canvas
 - 关卡/解锁/段位/战报数值若不一致，优先查 `assets/config/levels/*.json` 与 `core/profile.ts`，不在 cc 层调。
 - 占位渲染（文字+色块），美术资源接入后替换 `renderSlot`/`reportLabel` 的渲染即可，core 无需改动。
 
-## 下一步
+## 运行时 QA 门槛
 
-- 编辑器实测节点接线与本说明一致后，接入正式美术（AI 表情序列帧/卡牌贴图/道具动效/命中特效）。
-- 扩关到 20 关，引入 Boss 临检关（§1.2 的 16~20），用 `npm run sim` 验证 Boss 关平衡。
+改动 `assets/scripts/cocos/`、场景或资源后必须完成：
+
+1. `npm run typecheck`
+2. `npm test`
+3. Cocos Creator `web-mobile` 构建
+4. 390×844 入口页、主界面、拖拽态、结算态截图
+5. 浏览器无业务 error
+6. 微信小游戏包体不超过 4 MB，且保持引擎插件分离
 
 ## 排查：打不了 / 画面不动 / 按钮没反应
 

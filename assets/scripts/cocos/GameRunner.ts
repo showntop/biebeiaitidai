@@ -2,12 +2,14 @@ import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, twee
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
-import { Session } from '../core/Session';
+import { InMemoryStorage, Session } from '../core/Session';
 import type { Storage } from '../core/Session';
+import { parseQaLaunchConfig } from '../core/QaLaunchConfig';
+import type { QaLaunchConfig } from '../core/QaLaunchConfig';
 import { buildReportText } from '../core/profile';
 import type { PlayerProfile } from '../core/profile';
-import { CardState as CS, PropType as PT } from '../core/types';
-import type { Card, PropType } from '../core/types';
+import { CardState as CS, HitQuality as HQ, PropType as PT } from '../core/types';
+import type { Card, HitQuality, PerfectRewardType, PropType } from '../core/types';
 import { FxLayer } from './FxLayer';
 import { ApprovalGaugeView } from './ui/ApprovalGaugeView';
 import { PropDockView } from './ui/PropDockView';
@@ -39,6 +41,7 @@ interface PaperTuning {
 }
 
 type PaperOutcome = 'hit' | 'miss' | 'invalid';
+type PropInteractionState = 'idle' | 'arming' | 'dragging' | 'launching';
 
 /**
  * Cocos 表现层薄壳 —— 持有 core.Session + core.Game，只做：驱动 tick、转发输入、按 Session 状态渲染。
@@ -101,6 +104,8 @@ export class GameRunner extends Component {
   private slotNodes: Node[] = [];
   /** 每个卡槽的 Graphics 背景节点（代码画圆角矩形底）。创建/定位见 ensureSlotBackgrounds / layoutBeltSlots。 */
   private slotBackgrounds: Node[] = [];
+  private readonly cardBackgroundSignatures = new Map<string, string>();
+  private readonly emptySlotRendered = new Set<string>();
   /**
    * 卡片视觉按 card.id 持有，不再按槽位复用。
    * 这是保证"移动中内容不换卡"和出口物理裁切的核心。
@@ -113,12 +118,24 @@ export class GameRunner extends Component {
   private propButtonViews: PropButtonView[] = [];
   private approvalGaugeView: ApprovalGaugeView | null = null;
   private aimingProp: PropType | null = null;
+  private propInteractionState: PropInteractionState = 'idle';
   private suppressSyntheticPropCancelUntil = 0;
   private aimingSlot = 0;
   private aimStart = new Vec3();
   private aimPoint = new Vec3();
-  private aimLastPoint = new Vec3();
+  /** 触摸事件只更新目标点；真正的视觉跟随在 update 中每帧最多执行一次。 */
+  private aimDesiredPoint = new Vec3();
+  private aimSlotTargets: Vec3[] = [];
+  private aimRenderedSlot = -1;
+  private aimVelocityX = 0;
+  private aimVisualTime = 0;
+  private aimTargetKick = 0;
+  private aimLockSec = 0;
+  private aimPerfectReady = false;
+  private aimTargetValid = true;
+  private lastAimHapticAt = 0;
   private paperAimNode: Node | null = null;
+  private paperAimShadowNode: Node | null = null;
   private aimGuideNode: Node | null = null;
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
@@ -127,11 +144,18 @@ export class GameRunner extends Component {
   private tutorialRoot: Node | null = null;
   private tutorialStep = 0;
   private tutorialDone = false;
+  private perfectTipShown = false;
   private fx: FxLayer | null = null;
   private eventUnsubs: Array<() => void> = [];
   private lastEventText = '';
   private eventTextUntilSec = 0;
+  private eventTextPriority = 0;
   private compactHeader = false;
+  /** URL 驱动的无存档 QA 场景；正式启动时始终为 null。 */
+  private qaConfig: QaLaunchConfig | null = null;
+  private qaApplied = false;
+  private lastTimerText = '';
+  private lastTimerPaintSignature = '';
 
   private static readonly PROP_LABELS = UiTokens.prop.labels;
   private static readonly PROP_ACTION_LABELS = UiTokens.prop.actionLabels;
@@ -226,6 +250,7 @@ export class GameRunner extends Component {
   private static readonly START_TEXT = UiTokens.environment.startText;
   private static readonly START_MUTED = UiTokens.environment.startMuted;
   private static readonly TUTORIAL_DONE_KEY = 'biebeiaitidai.tutorial.done.v1';
+  private static readonly PERFECT_TIP_KEY = 'biebeiaitidai.perfect.tip.v1';
 
   private startCardMetrics(): { width: number; height: number; cy: number; narrow: boolean } {
     const vis = view.getVisibleSize();
@@ -241,8 +266,12 @@ export class GameRunner extends Component {
   onLoad(): void {
     this.hideDebugOverlays();
     this.hideScenePlaceholderLabels();
-    this.tutorialDone = sys.localStorage?.getItem(GameRunner.TUTORIAL_DONE_KEY) === '1';
-    this.session = new Session(new CocosStorage());
+    const locationSearch = (globalThis as { location?: { search?: string } }).location?.search;
+    this.qaConfig = parseQaLaunchConfig(locationSearch);
+    this.tutorialDone = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.TUTORIAL_DONE_KEY) === '1';
+    this.perfectTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.PERFECT_TIP_KEY) === '1';
+    this.session = new Session(this.qaConfig ? new InMemoryStorage() : new CocosStorage());
+    if (this.qaConfig) this.session.profile.highestUnlockedLevel = this.qaConfig.levelIndex;
     this.session.continueProgress(); // 继续"最高解锁关"进度
 
     if (this.beltNode) this.beltNode.children.forEach((c: Node) => this.slotNodes.push(c));
@@ -267,11 +296,6 @@ export class GameRunner extends Component {
     input.on(Input.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
     input.on(Input.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
     input.on(Input.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
-    this.node.on(Node.EventType.TOUCH_MOVE, this.onGlobalTouchMove, this);
-    this.node.on(Node.EventType.TOUCH_END, this.onGlobalTouchEnd, this);
-    this.node.on(Node.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
-    this.node.on(Node.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
-    this.node.on(Node.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
 
     // 美术资源自动加载：扫描 resources/art/ 下所有 PNG，按文件名建索引
     // 加载完成后自动建 Bg/Char 节点并接线，编辑器里无需任何手动操作
@@ -289,6 +313,7 @@ export class GameRunner extends Component {
     if (infos.length === 0) {
       // eslint-disable-next-line no-console
       console.warn('[GameRunner] 没找到任何 Texture2D → 请检查 resources/art/ 下是否有 PNG 文件且 .meta 已生成（编辑器需重新打开/导入）');
+      this.applyQaScenarioOnce();
       return;
     }
     let remaining = infos.length;
@@ -310,6 +335,7 @@ export class GameRunner extends Component {
           // eslint-disable-next-line no-console
           console.log(`[GameRunner] 美术资源已加载 ${this.artSprites.size} 张：`, Array.from(this.artSprites.keys()));
           this.applyBgCharSprites();
+          this.applyQaScenarioOnce();
         }
       });
     }
@@ -338,11 +364,6 @@ export class GameRunner extends Component {
     input.off(Input.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
     input.off(Input.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
     input.off(Input.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
-    this.node.off(Node.EventType.TOUCH_MOVE, this.onGlobalTouchMove, this);
-    this.node.off(Node.EventType.TOUCH_END, this.onGlobalTouchEnd, this);
-    this.node.off(Node.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
-    this.node.off(Node.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
-    this.node.off(Node.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
     this.fx?.dispose();
     this.resetCardVisuals();
     this.clearPaperAim(true);
@@ -394,13 +415,18 @@ export class GameRunner extends Component {
     this.resetCardVisuals();
     this.clearPaperAim(true);
     const idx = this.session.currentIndex;
-    const seed = (Date.now() % 100000) ^ ((idx + 1) * 2654435761); // 每关/每次尝试不同
+    const seed = this.qaConfig?.seed
+      ?? ((Date.now() % 100000) ^ ((idx + 1) * 2654435761)); // QA 固定；正式游玩每次尝试不同
     this.game = new Game(getLevel(idx), new SeededRng(seed >>> 0), this.session.allowedPropsFor(idx));
     this.accumulator = 0;
     this.scanPos = 0;
+    this.lastTimerText = '';
+    this.lastTimerPaintSignature = '';
     this.reported = false;
     this.uiState = 'playing';
-    this.setEventText('长按纸团，拖向任务卡', 6);
+    this.eventTextPriority = 0;
+    this.eventTextUntilSec = 0;
+    if (this.tutorialDone) this.setEventText('任务队列启动，先处理高风险卡片', 2.8, 1);
     this.hideReport();
     this.hideLevelSelect();
     this.setGameUIVisible(true);
@@ -422,6 +448,125 @@ export class GameRunner extends Component {
     this.beginTutorialIfNeeded();
   }
 
+  /**
+   * 一次性建立截图验收场景。所有状态使用内存存档与固定 RNG，不会污染玩家进度。
+   * 该入口只会在 URL 带合法 qa 参数时执行。
+   */
+  private applyQaScenarioOnce(): void {
+    const qa = this.qaConfig;
+    if (!qa || this.qaApplied) return;
+    this.qaApplied = true;
+
+    if (qa.scenario === 'entry') {
+      this.publishQaReady();
+      return;
+    }
+
+    this.session.profile.highestUnlockedLevel = Math.max(
+      this.session.profile.highestUnlockedLevel,
+      qa.levelIndex,
+    );
+    this.session.startLevel(qa.levelIndex);
+    this.startGame();
+
+    // P0 是静态布局基线，不把一次性事件 tween 混进截图；动态反馈由后续手感专项验收。
+    if (qa.scenario === 'crisis' || qa.scenario.startsWith('result-')) {
+      this.fx?.dispose();
+      this.fx = null;
+    }
+
+    if (qa.scenario === 'crisis') {
+      this.fillQaBelt(true);
+      this.game.elapsed = Math.max(0, this.game.level.def.durationSec - 8);
+      const delta = Math.max(0, 78 - this.game.approval.value);
+      if (delta > 0) this.game.approval.resolveCard(this.qaCard(CS.ActiveWhite, delta));
+    } else {
+      this.fillQaBelt(false);
+    }
+
+    this.render();
+
+    if (qa.scenario === 'drag' || qa.scenario === 'perfect') {
+      const targetSlot = this.game.conveyor.cards.findIndex((card, index) => index >= 2 && card !== null);
+      const slot = targetSlot >= 0 ? targetSlot : Math.max(0, Math.floor(this.slotNodes.length / 2));
+      this.onPropDown(PT.AddDemand);
+      const target = this.aimSlotTargets[slot] ?? this.targetPointForSlot(slot);
+      this.aimDesiredPoint.set(target.x, this.actionDockNode?.position.y ?? this.aimPoint.y, 0);
+      this.propInteractionState = 'dragging';
+      this.updateAimFrame(1 / 60, true);
+      if (qa.scenario === 'perfect') {
+        this.updateAimFrame(UiTokens.aim.perfectLockSec + 0.04, true);
+      }
+    } else if (qa.scenario.startsWith('result-')) {
+      this.game.effectiveHits = 7;
+      this.game.perfectHits = qa.scenario === 'result-lose' ? 1 : 3;
+      this.game.maxCombo = qa.scenario === 'result-hunt' ? 5 : 3;
+      this.game.missedThrows = qa.scenario === 'result-lose' ? 2 : 0;
+      if (qa.scenario === 'result-lose') {
+        this.game.approval.resolveCard(this.qaCard(CS.ActiveWhite, 100));
+      } else if (qa.scenario === 'result-survive') {
+        this.game.elapsed = this.game.level.def.durationSec;
+        this.game.approval.declareSurviveOnTimeout();
+      } else {
+        const reduceBy = Math.max(1, this.game.approval.value - 8);
+        this.game.approval.resolveCard(this.qaCard(CS.Rework, reduceBy));
+        this.game.approval.tick((BalanceConfig.zones.hunt.holdSec ?? 2) + 0.1);
+      }
+      this.finishAndShowReport();
+    }
+
+    this.publishQaReady();
+  }
+
+  /** 稳定填充队列；Boss 版本固定把临检卡放在中间可见槽。 */
+  private fillQaBelt(includeBoss: boolean): void {
+    this.game.conveyor.reset();
+    const phase = this.game.phase;
+    if (includeBoss) {
+      this.game.conveyor.generate(phase);
+      this.game.conveyor.step();
+      this.game.conveyor.generate(phase, { forceBoss: true });
+      this.game.conveyor.step();
+      this.game.conveyor.generate(phase);
+      this.game.conveyor.step();
+      this.game.conveyor.generate(phase);
+      return;
+    }
+    for (let i = 0; i < this.game.level.def.slots; i++) {
+      this.game.conveyor.generate(phase);
+      if (i < this.game.level.def.slots - 1) this.game.conveyor.step();
+    }
+  }
+
+  private qaCard(state: Card['state'], weight: number): Card {
+    return {
+      id: -1,
+      category: 'urgent',
+      state,
+      weight,
+      isThreat: state === CS.ActiveWhite,
+    };
+  }
+
+  /** Playwright 只等待这份只读快照，不接触 GameRunner 私有实现。 */
+  private publishQaReady(): void {
+    const qa = this.qaConfig;
+    if (!qa) return;
+    const cards = this.game
+      ? this.game.conveyor.cards.map((card) => card ? `${card.category}:${card.state}:${card.weight}` : null)
+      : [];
+    (globalThis as unknown as { __BRAATN_QA__: unknown }).__BRAATN_QA__ = {
+      ready: true,
+      scenario: qa.scenario,
+      seed: qa.seed,
+      levelIndex: qa.levelIndex,
+      uiState: this.uiState,
+      result: this.game?.result ?? 'not-started',
+      cards,
+      perfectReady: this.aimPerfectReady,
+    };
+  }
+
   /** 命中/认可度/Boss 等即时反馈全部由 FxLayer 飘字承担；
    *  HUD 提示行只保留教学引导文案，命中后清空，避免变成第二个控制台。 */
   private bindEventFeed(): void {
@@ -429,15 +574,18 @@ export class GameRunner extends Component {
     this.eventUnsubs.push(
       this.game.bus.on('CardHit', ({ prop, quality }) => {
         const perfect = quality === 'perfect';
-        this.setEventText(perfect ? `完美命中：${this.propDisplayName(prop)}压住了任务` : UiTokens.tutorial.hitHint);
         this.completeTutorial();
+        this.setEventText(perfect ? `完美命中：${this.propDisplayName(prop)}压住了任务` : UiTokens.tutorial.hitHint, 2.6, perfect ? 5 : 3);
+      }),
+      this.game.bus.on('PerfectRewardGranted', ({ reward }) => {
+        this.setEventText(`Perfect 奖励：${this.perfectRewardLabel(reward)}`, 2.8, 6);
       }),
       this.game.bus.on('PropUnavailable', ({ reason }) => {
-        this.setEventText(reason === 'empty' ? '空位没砸中，换个任务卡试试' : '这个目标不吃这招，换道具试试', 2.0);
+        this.setEventText(reason === 'empty' ? '空位没砸中，换个任务卡试试' : '这个目标不吃这招，换道具试试', 2.0, 4);
       }),
       this.game.bus.on('ApprovalChanged', ({ delta }) => {
-        if (delta > 0) this.setEventText(`危险上升 ${Math.round(delta)}，赶紧拦截任务`, 2.2);
-        else if (delta < 0) this.setEventText(`漂亮！认可度回落 ${Math.abs(Math.round(delta))}`, 2.2);
+        if (delta > 0) this.setEventText(`危险上升 ${Math.round(delta)}，赶紧拦截任务`, 2.2, 1);
+        else if (delta < 0) this.setEventText(`漂亮！认可度回落 ${Math.abs(Math.round(delta))}`, 2.2, 2);
       }),
       this.game.bus.on('ZoneChanged', ({ to }) => {
         const copy: Record<string, string> = {
@@ -446,10 +594,16 @@ export class GameRunner extends Component {
           ok: '进入一般区，任务会更烦',
           danger: '危险！AI 正在接管你的工作',
         };
-        this.setEventText(copy[to] ?? '状态变化', 3.0);
+        this.setEventText(copy[to] ?? '状态变化', 3.0, 6);
       }),
       this.game.bus.on('AIHit', () => {
-        this.setEventText('拍马屁生效，传送带短暂停住', 2.4);
+        this.setEventText('拍马屁生效，传送带短暂停住', 2.4, 5);
+      }),
+      this.game.bus.on('PhaseChanged', ({ to }) => {
+        const phaseText = to === 'mid'
+          ? '中盘加速：任务生成变快了'
+          : '最后冲刺：守住岗位别让队列爆掉';
+        this.setEventText(phaseText, 3.0, 6);
       }),
     );
   }
@@ -459,10 +613,20 @@ export class GameRunner extends Component {
     this.eventUnsubs = [];
   }
 
-  private setEventText(text: string, ttlSec = UiTokens.feedback.eventHintTtlSec): void {
-    this.lastEventText = text.replace(/^事件\s*[·:：]\s*/, '');
+  private setEventText(text: string, ttlSec = UiTokens.feedback.eventHintTtlSec, priority = 0): void {
     const elapsed = this.game?.getSnapshot().elapsed ?? 0;
+    const active = elapsed <= this.eventTextUntilSec;
+    const normalized = text.replace(/^事件\s*[·:：]\s*/, '');
+    if (active && priority < this.eventTextPriority && normalized !== this.lastEventText) return;
+    this.lastEventText = normalized;
     this.eventTextUntilSec = elapsed + Math.max(0.1, ttlSec);
+    this.eventTextPriority = priority;
+  }
+
+  private perfectRewardLabel(reward: PerfectRewardType): string {
+    if (reward === 'extra-use') return '次数 +1';
+    if (reward === 'energy-full') return '立即充满';
+    return '冷却回退 10%';
   }
 
   private shouldShowTutorial(): boolean {
@@ -481,14 +645,20 @@ export class GameRunner extends Component {
   private advanceTutorial(step: number, text: string): void {
     if (!this.shouldShowTutorial() || step <= this.tutorialStep) return;
     this.tutorialStep = step;
+    // 进入投掷滑轨后，操作区本身就是教学。隐藏旧黑色气泡，避免遮住任务卡与吸附目标。
+    if (this.aimingProp !== null) {
+      this.hideTutorial();
+      return;
+    }
     this.showTutorial(text);
-    this.setEventText(text);
   }
 
   private completeTutorial(): void {
     if (!this.shouldShowTutorial()) return;
     this.tutorialDone = true;
     sys.localStorage?.setItem(GameRunner.TUTORIAL_DONE_KEY, '1');
+    this.eventTextUntilSec = 0;
+    this.eventTextPriority = 0;
     this.hideTutorial();
   }
 
@@ -514,23 +684,25 @@ export class GameRunner extends Component {
       label.overflow = Label.Overflow.SHRINK;
       this.tutorialRoot = root;
     }
-    this.setEventText(`教学 · ${text}`);
     const vis = view.getVisibleSize();
-    const w = Math.min(vis.width * 0.68, 420);
-    const h = 40;
+    const w = Math.min(vis.width * 0.64, 390);
+    const h = 42;
     const root = this.tutorialRoot;
     root.getComponent(UITransform)!.setContentSize(w, h);
     const placement = this.tutorialPlacement(w, h);
     root.setPosition(placement.x, placement.y, 0);
     const g = root.getComponent(Graphics)!;
     g.clear();
-    g.fillColor = new Color(35, 32, 28, 230);
-    g.strokeColor = new Color(255, 236, 160, 255);
+    g.fillColor = new Color(54, 48, 42, 34);
+    g.roundRect(-w / 2 + 3, -h / 2 - 4, w - 6, h, 15);
+    g.fill();
+    g.fillColor = new Color(255, 252, 246, 250);
+    g.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 205);
     g.lineWidth = 2;
     g.roundRect(-w / 2, -h / 2, w, h, 14);
     g.fill(); g.stroke();
-    g.fillColor = new Color(35, 32, 28, 230);
-    g.strokeColor = new Color(255, 236, 160, 255);
+    g.fillColor = new Color(255, 252, 246, 250);
+    g.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 205);
     g.lineWidth = 2;
     const px = Math.max(-w / 2 + 22, Math.min(w / 2 - 22, placement.pointerX));
     if (placement.pointerDown) {
@@ -550,7 +722,7 @@ export class GameRunner extends Component {
       label.string = text;
       label.fontSize = 18;
       label.lineHeight = 24;
-      label.color = new Color(255, 246, 220, 255);
+      label.color = UiTokens.color.inkDeep;
       label.node.getComponent(UITransform)!.setContentSize(w - 24, h - 6);
     }
     root.active = this.shouldShowTutorial();
@@ -1063,6 +1235,7 @@ export class GameRunner extends Component {
     const idx = this.session.currentIndex;
     const report = this.game.buildReport(idx);
     this.session.finishLevel(report);
+    this.approvalGaugeView?.snap(report.finalApproval, this.game.approval.currentZone, '', report.timeUsedSec);
 
     const vis = view.getVisibleSize();
     const resultLayout = UiTokens.layout.result;
@@ -1073,7 +1246,7 @@ export class GameRunner extends Component {
     const rank = this.session.rankLabel;
     const day = this.session.daysEmployed;
     const canRevive = report.result === 'lose' && !this.game.revived;
-    const canNext = this.session.hasNext;
+    const canNext = won && this.session.hasNext;
 
     if (this.reportLabel) this.reportLabel.node.active = false;
     if (this.retryBtn) this.retryBtn.active = false;
@@ -1081,13 +1254,24 @@ export class GameRunner extends Component {
     if (this.reviveBtn) this.reviveBtn.active = false;
 
     // 内嵌可点击按钮：根据实际按钮数量自动居中，避免胜利/失败状态下出现空槽偏移。
-    const buttons: ResultDialogButton[] = [
-      { name: 'BtnRetry', text: '重试', color: UiTokens.color.walnut, tap: () => this.onRetry() },
-      { name: 'BtnNext', text: canNext ? '下一关' : '回到选关', color: GameRunner.PROP_COLORS[0], tap: () => canNext ? this.onNext() : this.onBackToSelect() },
-    ];
-    if (canRevive) {
-      buttons.push({ name: 'BtnRevive', text: '复活', color: UiTokens.color.amber, tap: () => this.onRevive() });
-    }
+    const buttons: ResultDialogButton[] = won
+      ? [
+        { name: 'BtnRetry', text: '再玩一次', color: UiTokens.color.walnut, variant: 'secondary', tap: () => this.onRetry() },
+        {
+          name: 'BtnNext',
+          text: canNext ? '下一关' : '回到选关',
+          color: UiTokens.color.blue,
+          variant: 'primary',
+          tap: () => canNext ? this.onNext() : this.onBackToSelect(),
+        },
+      ]
+      : [
+        { name: 'BtnRetry', text: '立即重试', color: UiTokens.color.blue, variant: 'primary', tap: () => this.onRetry() },
+        ...(canRevive
+          ? [{ name: 'BtnRevive', text: '复活 +8s', color: UiTokens.color.amber, variant: 'reward' as const, tap: () => this.onRevive() }]
+          : []),
+        { name: 'BtnBack', text: '回到选关', color: UiTokens.color.walnut, variant: 'secondary', tap: () => this.onBackToSelect() },
+      ];
 
     if (!this.resultDialogView) this.resultDialogView = new ResultDialogView();
     const nodes = this.resultDialogView.show({
@@ -1098,12 +1282,17 @@ export class GameRunner extends Component {
       width: pw,
       height: ph,
       won,
-      title: won ? '岗位守住!' : '被 AI 优化了…',
-      badgeText: won ? '通过' : '淘汰',
+      result: report.result,
+      title: report.result === 'win-hunt' ? '反杀成功!' : report.result === 'win-survive' ? '岗位守住!' : '被 AI 优化了…',
+      badgeText: report.result === 'win-hunt' ? '猎杀通关' : report.result === 'win-survive' ? '生存通关' : '淘汰',
       stars: report.stars,
       peakApproval: report.peakApproval,
+      finalApproval: report.finalApproval,
       timeUsedSec: report.timeUsedSec,
       maxCombo: report.maxCombo,
+      effectiveHits: report.effectiveHits,
+      perfectHits: report.perfectHits,
+      missedThrows: report.missedThrows,
       rank,
       day,
       meme,
@@ -1132,6 +1321,9 @@ export class GameRunner extends Component {
     // 选关页：不驱动游戏逻辑
     if (this.uiState === 'select') return;
 
+    // QA URL 是静态视觉基线：场景建立完成后冻结规则推进，保证等待多久截图都一致。
+    if (this.qaConfig && this.qaApplied) return;
+
     if (this.game.over) {
       if (!this.reported) this.finishAndShowReport();
       return;
@@ -1144,6 +1336,7 @@ export class GameRunner extends Component {
     } else {
       this.scanPos = 0;
     }
+    if (this.aimingProp !== null) this.updateAimFrame(dt);
 
     // 逻辑固定步进
     this.accumulator += dt;
@@ -1197,10 +1390,9 @@ export class GameRunner extends Component {
         iconNode.setSiblingIndex(0); // 图标在文字之下层（先绘制），避免遮住状态文字
         this.propIconSprites[i] = icon;
       }
+      // 起手由按钮命中区负责；移动、松手、取消统一交给全局输入，
+      // 避免按钮隐藏/重排时重复派发 TOUCH_END / TOUCH_CANCEL。
       btn.on(Node.EventType.TOUCH_START, (event: EventTouch) => this.onPropDown(type, event));
-      btn.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => this.onPropMove(type, event));
-      btn.on(Node.EventType.TOUCH_END, (event: EventTouch) => this.onPropUp(type, event));
-      btn.on(Node.EventType.TOUCH_CANCEL, () => this.onPropCancel(type));
     });
   }
 
@@ -1211,23 +1403,19 @@ export class GameRunner extends Component {
   }
 
   private onPropDown(prop: PropType, event?: EventTouch): void {
+    if (this.propInteractionState !== 'idle') return;
     if (prop === PT.KissUp) {
       const st = this.game.prop.getState(prop);
       const usable = this.game.prop.isUnlocked(prop) && st.uses > 0 && st.ready;
       if (usable) {
-        this.aimStart = this.propSourcePoint(prop);
-        this.aimPoint = event ? this.pointFromPointer(event) : this.aimStart.clone();
-        this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
-        this.showPaperAim(prop);
-        this.aimingProp = prop;
-        this.suppressSyntheticPropCancelUntil = Date.now() + UiTokens.feedback.syntheticCancelMs;
-        { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
-        this.updatePaperAim(event);
-        this.setEventText(UiTokens.tutorial.dockHint);
+        this.propInteractionState = 'launching';
+        this.game.useKissUp();
+        this.animatePaperToRobot(prop);
       } else {
         this.setEventText(`${this.propDisplayName(prop)}暂时不能用`);
       }
       this.punchButton(prop, true);
+      this.scheduleOnce(() => this.punchButton(prop, false), UiTokens.motion.releaseSec);
       return;
     }
     if (this.game.beginCharge(prop)) {
@@ -1235,38 +1423,28 @@ export class GameRunner extends Component {
       this.aimPoint = event ? this.pointFromPointer(event) : this.aimStart.clone();
       this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
       this.showPaperAim(prop);
+      this.propInteractionState = 'arming';
       this.aimingProp = prop;
       this.suppressSyntheticPropCancelUntil = Date.now() + UiTokens.feedback.syntheticCancelMs;
       { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
-      this.updatePaperAim(event);
+      if (event) this.queueAimPointer(event);
+      this.updateAimFrame(1 / 60, true);
       this.advanceTutorial(1, UiTokens.tutorial.dragHint);
-      this.setEventText(UiTokens.tutorial.dockHint);
+      this.setEventText(UiTokens.tutorial.dockHint, UiTokens.feedback.eventHintTtlSec, 7);
     } else {
       this.setEventText(`${this.propDisplayName(prop)}暂时不能扔`);
     }
     this.punchButton(prop, true);
   }
-  private onPropMove(prop: PropType, event: EventTouch): void {
-    if (this.aimingProp !== prop) return;
-    this.suppressSyntheticPropCancelUntil = 0;
-    this.updatePaperAim(event);
-    this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
-  }
   private onPropUp(prop: PropType, event?: EventTouch | EventMouse): void {
+    if (this.propInteractionState !== 'arming' && this.propInteractionState !== 'dragging') return;
     this.suppressSyntheticPropCancelUntil = 0;
-    if (prop === PT.KissUp) {
-      if (this.aimingProp === prop) {
-        if (event) this.updatePaperAim(event);
-        if (this.game.useKissUp()) this.animatePaperToRobot(prop);
-        this.clearPaperAim(true);
-      }
-      this.punchButton(prop, false);
-      return;
-    }
+    if (prop === PT.KissUp) return;
     this.finishPaperThrow(prop, event);
     this.punchButton(prop, false);
   }
   private onPropCancel(prop: PropType): void {
+    if (this.propInteractionState === 'launching' || this.propInteractionState === 'idle') return;
     if (this.aimingProp === prop) {
       // 按住后会把原按钮隐藏，Cocos 会给这个按钮派发 TOUCH_CANCEL。
       // 这是视觉切换产生的按钮级取消，不是玩家取消拖拽；真实取消仍由 onGlobalTouchCancel 处理。
@@ -1282,17 +1460,21 @@ export class GameRunner extends Component {
 
   private finishPaperThrow(prop: PropType, event?: EventTouch | EventMouse): void {
     if (this.aimingProp !== prop) return;
-    if (event) this.updatePaperAim(event);
+    if (event) this.queueAimPointer(event);
+    this.updateAimFrame(1 / 60, true);
     const slot = this.aimingSlot;
-    this.animatePaperThrow(prop, slot, () => this.game.releaseAtSlot(prop, slot));
+    const quality = this.currentDragHitQuality();
+    this.propInteractionState = 'launching';
+    this.animatePaperThrow(prop, slot, quality, () => this.game.releaseAtSlot(prop, slot, quality));
     this.clearPaperAim(false);
     this.punchButton(prop, false);
   }
 
   private onGlobalTouchMove(event: EventTouch): void {
     if (this.aimingProp === null) return;
+    this.propInteractionState = 'dragging';
     this.suppressSyntheticPropCancelUntil = 0;
-    this.updatePaperAim(event);
+    this.queueAimPointer(event);
     this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
   }
 
@@ -1311,15 +1493,16 @@ export class GameRunner extends Component {
       return;
     }
     this.suppressSyntheticPropCancelUntil = 0;
-    this.game.cancel(prop);
+    if (prop !== PT.KissUp) this.game.cancel(prop);
     this.clearPaperAim(true);
     this.punchButton(prop, false);
   }
 
   private onGlobalMouseMove(event: EventMouse): void {
     if (this.aimingProp === null) return;
+    this.propInteractionState = 'dragging';
     this.suppressSyntheticPropCancelUntil = 0;
-    this.updatePaperAim(event);
+    this.queueAimPointer(event);
     this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
   }
 
@@ -1359,11 +1542,14 @@ export class GameRunner extends Component {
   }
 
   private slotFromAimPoint(point: Vec3): number {
-    if (this.slotNodes.length === 0) return 0;
+    const targets = this.aimSlotTargets.length === this.slotNodes.length
+      ? this.aimSlotTargets
+      : this.slotNodes.map((_, i) => this.targetPointForSlot(i));
+    if (targets.length === 0) return 0;
     let best = 0;
     let bestDist = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < this.slotNodes.length; i++) {
-      const p = this.targetPointForSlot(i);
+    for (let i = 0; i < targets.length; i++) {
+      const p = targets[i];
       const dx = Math.abs(point.x - p.x);
       if (dx < bestDist) {
         best = i;
@@ -1377,37 +1563,52 @@ export class GameRunner extends Component {
     this.clearPaperAim(true);
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
+    this.aimSlotTargets = this.slotNodes.map((_, i) => this.targetPointForSlot(i));
+    this.aimRenderedSlot = -1;
+    this.aimVelocityX = 0;
+    this.aimVisualTime = 0;
+    this.aimTargetKick = 0;
+    this.aimLockSec = 0;
+    this.aimPerfectReady = false;
+    this.aimTargetValid = true;
+    this.aimDesiredPoint.set(this.aimPoint.x, this.aimPoint.y, 0);
 
     const propNode = new Node('PropDragAim');
     propNode.layer = 1 << 25;
     propNode.addComponent(UITransform).setContentSize(UiTokens.aim.dragSize, UiTokens.aim.dragSize);
-    const propG = propNode.addComponent(Graphics);
-    propG.clear();
-    propG.fillColor = new Color(42, 36, 30, 78);
-    propG.circle(5, -6, 39);
-    propG.fill();
-    propG.fillColor = new Color(178, 139, 102, 230);
-    propG.circle(0, -4, 39);
+    propNode.setPosition(this.aimPoint);
+
+    const visualNode = new Node('PropDragVisual');
+    visualNode.layer = 1 << 25;
+    visualNode.parent = propNode;
+    visualNode.addComponent(UITransform).setContentSize(UiTokens.aim.dragSize, UiTokens.aim.dragSize);
+    const propG = visualNode.addComponent(Graphics);
+    propG.fillColor = new Color(54, 48, 42, 220);
+    propG.circle(0, -5, UiTokens.aim.dragRadius + 3);
     propG.fill();
     propG.fillColor = new Color(base.r, base.g, base.b, 246);
-    propG.strokeColor = new Color(42, 36, 30, 225);
-    propG.lineWidth = 4;
+    propG.strokeColor = new Color(255, 250, 241, 238);
+    propG.lineWidth = 3;
     propG.circle(0, 0, UiTokens.aim.dragRadius);
     propG.fill();
     propG.stroke();
-    propG.strokeColor = new Color(255, 255, 255, 148);
-    propG.lineWidth = 3.5;
-    propG.arc(-1, 1, 25, Math.PI * 0.92, Math.PI * 1.82, false);
+    propG.strokeColor = new Color(54, 48, 42, 210);
+    propG.lineWidth = 2.5;
+    propG.circle(0, 0, UiTokens.aim.dragRadius - 3);
     propG.stroke();
-    propG.fillColor = new Color(255, 255, 255, 62);
-    propG.circle(-9, 10, 6);
+    propG.strokeColor = new Color(255, 255, 255, 158);
+    propG.lineWidth = 3;
+    propG.arc(-2, 2, 24, Math.PI * 0.90, Math.PI * 1.75, false);
+    propG.stroke();
+    propG.fillColor = new Color(255, 255, 255, 72);
+    propG.circle(-10, 10, 5.5);
     propG.fill();
 
     const iconFrame = this.propSfFor(prop);
     if (iconFrame) {
       const iconNode = new Node('PropDragIcon');
       iconNode.layer = 1 << 25;
-      iconNode.parent = propNode;
+      iconNode.parent = visualNode;
       iconNode.addComponent(UITransform).setContentSize(UiTokens.aim.iconSize, UiTokens.aim.iconSize);
       const icon = iconNode.addComponent(Sprite);
       icon.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -1415,11 +1616,8 @@ export class GameRunner extends Component {
       icon.color = Color.WHITE;
       iconNode.setPosition(0, 1, 0);
     } else {
-      this.drawPaperWad(propNode, prop, 1);
+      this.drawPaperWad(visualNode, prop, 1);
     }
-    this.node.addChild(propNode);
-    this.paperAimNode = propNode;
-    this.aimLastPoint = this.aimPoint.clone();
 
     const guide = new Node('PropThrowGuide');
     guide.layer = 1 << 25;
@@ -1435,81 +1633,226 @@ export class GameRunner extends Component {
     target.addComponent(Graphics);
     target.addComponent(UIOpacity).opacity = 220;
     this.node.addChild(target);
-    target.setSiblingIndex(Math.max(0, propNode.getSiblingIndex() - 1));
     this.aimTargetNode = target;
+    this.paintAimTarget(prop, false, true);
+
+    const shadow = new Node('PropDragShadow');
+    shadow.layer = 1 << 25;
+    shadow.addComponent(UITransform).setContentSize(UiTokens.aim.dragSize + 22, 40);
+    const shadowG = shadow.addComponent(Graphics);
+    shadowG.fillColor = new Color(54, 48, 42, 62);
+    shadowG.ellipse(0, 0, UiTokens.aim.dragRadius + 9, 13);
+    shadowG.fill();
+    shadow.addComponent(UIOpacity).opacity = 150;
+    shadow.setPosition(this.aimPoint.x + 4, this.aimPoint.y - UiTokens.aim.shadowDrop, 0);
+    this.node.addChild(shadow);
+    this.paperAimShadowNode = shadow;
+
+    this.node.addChild(propNode);
+    this.paperAimNode = propNode;
+    visualNode.setScale(0.72, 0.72, 1);
+    tween(visualNode)
+      .to(UiTokens.aim.liftSec, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'backOut' })
+      .to(0.06, { scale: new Vec3(1, 1, 1) }, { easing: 'quadInOut' })
+      .start();
   }
 
-  private updatePaperAim(event?: EventTouch | EventMouse): void {
-    const prev = this.aimLastPoint.clone();
-    if (event) {
-      const raw = this.pointFromPointer(event);
-      const vis = view.getVisibleSize();
-      const safe = sys.getSafeAreaRect(false);
-      const safeBottomY = safe.y - vis.height / 2;
-      let minX = -vis.width / 2 + UiTokens.aim.clampInset;
-      let maxX = vis.width / 2 - UiTokens.aim.clampInset;
-      let minY = safeBottomY + Math.max(UiTokens.aim.minFreeY, vis.height * UiTokens.aim.minFreeYRatio);
-      let maxY = safeBottomY + Math.max(UiTokens.aim.minMaxFreeY, vis.height * UiTokens.aim.maxFreeYRatio);
-      if (this.actionDockNode?.active) {
-        const dockUt = this.actionDockNode.getComponent(UITransform);
-        const dockW = dockUt?.contentSize.width ?? 0;
-        const dockH = dockUt?.contentSize.height ?? 0;
-        const dockX = this.actionDockNode.position.x;
-        const dockY = this.actionDockNode.position.y;
-        if (dockH > 0) {
-          minX = dockX - dockW / 2 + UiTokens.aim.dockClampInset;
-          maxX = dockX + dockW / 2 - UiTokens.aim.dockClampInset;
-          minY = dockY - dockH / 2 + UiTokens.aim.dockClampVerticalInset;
-          maxY = dockY + dockH / 2 - UiTokens.aim.dockClampVerticalInset;
+  /** 触摸回调只做坐标采样和裁切，避免一帧内被平台派发多次时重复重绘。 */
+  private queueAimPointer(event: EventTouch | EventMouse): void {
+    const raw = this.pointFromPointer(event);
+    const vis = view.getVisibleSize();
+    const safe = sys.getSafeAreaRect(false);
+    const safeBottomY = safe.y - vis.height / 2;
+    let minX = -vis.width / 2 + UiTokens.aim.clampInset;
+    let maxX = vis.width / 2 - UiTokens.aim.clampInset;
+    let minY = safeBottomY + Math.max(UiTokens.aim.minFreeY, vis.height * UiTokens.aim.minFreeYRatio);
+    let maxY = safeBottomY + Math.max(UiTokens.aim.minMaxFreeY, vis.height * UiTokens.aim.maxFreeYRatio);
+    if (this.actionDockNode?.active) {
+      const dockUt = this.actionDockNode.getComponent(UITransform);
+      const dockW = dockUt?.contentSize.width ?? 0;
+      const dockH = dockUt?.contentSize.height ?? 0;
+      const dockX = this.actionDockNode.position.x;
+      const dockY = this.actionDockNode.position.y;
+      if (dockH > 0) {
+        minX = dockX - dockW / 2 + UiTokens.aim.dockClampInset;
+        maxX = dockX + dockW / 2 - UiTokens.aim.dockClampInset;
+        minY = dockY - dockH / 2 + UiTokens.aim.dockClampVerticalInset;
+        maxY = dockY + dockH / 2 - UiTokens.aim.dockClampVerticalInset;
+      }
+    }
+    this.aimDesiredPoint.set(
+      Math.max(minX, Math.min(maxX, raw.x)),
+      Math.max(minY, Math.min(maxY, raw.y)),
+      0,
+    );
+  }
+
+  /** 每帧最多执行一次的拖动表现更新：跟手、速度形变、影子、吸附与轨迹。 */
+  private updateAimFrame(dt: number, force = false): void {
+    if (this.aimingProp === null) return;
+    const prevX = this.aimPoint.x;
+    const follow = force ? 1 : 1 - Math.exp(-UiTokens.aim.followHz * Math.max(0.001, Math.min(dt, 0.05)));
+    this.aimPoint.set(
+      this.aimPoint.x + (this.aimDesiredPoint.x - this.aimPoint.x) * follow,
+      this.aimPoint.y + (this.aimDesiredPoint.y - this.aimPoint.y) * follow,
+      0,
+    );
+    const instantVelocityX = (this.aimPoint.x - prevX) / Math.max(dt, 1 / 120);
+    this.aimVelocityX += (instantVelocityX - this.aimVelocityX) * (force ? 1 : UiTokens.aim.velocitySmoothing);
+    const nextSlot = this.slotFromAimPoint(this.aimPoint);
+    const slotChanged = nextSlot !== this.aimRenderedSlot;
+    const targetValid = this.isAimTargetValid(this.aimingProp, nextSlot);
+    const validityChanged = targetValid !== this.aimTargetValid;
+    this.aimingSlot = nextSlot;
+    this.aimTargetValid = targetValid;
+    if (slotChanged) {
+      const previousSlot = this.aimRenderedSlot;
+      this.aimRenderedSlot = nextSlot;
+      this.aimTargetKick = UiTokens.aim.targetKick;
+      const target = this.aimSlotTargets[nextSlot] ?? this.targetPointForSlot(nextSlot);
+      this.aimTargetNode?.setPosition(target);
+      this.drawAimGuide();
+      this.aimLockSec = 0;
+      if (this.aimPerfectReady) {
+        this.aimPerfectReady = false;
+      }
+      if (previousSlot >= 0) this.lightAimHaptic();
+    }
+    const alignment = this.aimAlignmentRatio(nextSlot);
+    if (targetValid && !slotChanged && alignment <= UiTokens.aim.perfectAlignmentRatio) {
+      this.aimLockSec = Math.min(UiTokens.aim.perfectLockSec * 2, this.aimLockSec + dt);
+    } else if (!targetValid || alignment > UiTokens.aim.perfectAlignmentRatio) {
+      this.aimLockSec = Math.max(0, this.aimLockSec - dt * 2.5);
+    }
+    const perfectReady = targetValid
+      && this.aimLockSec >= UiTokens.aim.perfectLockSec
+      && alignment <= UiTokens.aim.perfectAlignmentRatio;
+    if (perfectReady !== this.aimPerfectReady || validityChanged || slotChanged) {
+      this.aimPerfectReady = perfectReady;
+      this.paintAimTarget(this.aimingProp, perfectReady, targetValid);
+      if (perfectReady) {
+        this.lightAimHaptic();
+        if (!this.perfectTipShown) {
+          this.perfectTipShown = true;
+          sys.localStorage?.setItem(GameRunner.PERFECT_TIP_KEY, '1');
+          this.setEventText('金色准星 = PERFECT，松手获得随机奖励', 3.4, 8);
         }
       }
-      this.aimPoint = new Vec3(
-        Math.max(minX, Math.min(maxX, raw.x)),
-        Math.max(minY, Math.min(maxY, raw.y)),
-        0,
-      );
     }
-    this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
+
     if (this.paperAimNode?.isValid) {
       this.paperAimNode.setPosition(this.aimPoint.x, this.aimPoint.y, 0);
-      const dx = this.aimPoint.x - prev.x;
-      const dy = this.aimPoint.y - prev.y;
-      const speed = Math.hypot(dx, dy);
+      const speed = Math.min(UiTokens.aim.velocityCap, Math.abs(this.aimVelocityX));
       const stretch = Math.min(
         UiTokens.aim.dragStretchMax,
-        0.96 + Math.abs(this.aimPoint.y - this.aimStart.y) / 900 + speed * UiTokens.aim.dragSpeedStretch,
+        1 + Math.abs(this.aimPoint.y - this.aimStart.y) / 980 + speed * UiTokens.aim.dragSpeedStretch,
       );
       this.paperAimNode.setScale(stretch, 1 / stretch, 1);
-      const tilt = Math.max(-UiTokens.aim.dragTiltMaxDeg, Math.min(UiTokens.aim.dragTiltMaxDeg, dx * UiTokens.aim.dragTiltPerPixel));
+      const tilt = Math.max(
+        -UiTokens.aim.dragTiltMaxDeg,
+        Math.min(UiTokens.aim.dragTiltMaxDeg, this.aimVelocityX * UiTokens.aim.dragTiltPerVelocity),
+      );
       this.paperAimNode.angle = tilt;
     }
-    this.aimLastPoint = this.aimPoint.clone();
-    if (this.aimTargetNode?.isValid) {
-      const target = this.targetPointForSlot(this.aimingSlot);
-      this.aimTargetNode.setPosition(target);
-      const tg = this.aimTargetNode.getComponent(Graphics)!;
-      const idx = this.aimingProp ? GameRunner.PROP_TYPES.indexOf(this.aimingProp) : 0;
-      const base = GameRunner.PROP_COLORS[idx] ?? GameRunner.PROP_COLORS[0];
-      const pulse = 1 + Math.sin(this.scanPos * Math.PI * 6) * 0.07;
-      this.aimTargetNode.setScale(pulse, pulse, 1);
-      tg.clear();
-      tg.strokeColor = new Color(255, 252, 236, 235);
-      tg.lineWidth = 5;
-      tg.circle(0, 0, UiTokens.aim.targetInnerRadius);
-      tg.stroke();
-      tg.strokeColor = new Color(base.r, base.g, base.b, 235);
-      tg.lineWidth = 3;
-      tg.circle(0, 0, UiTokens.aim.targetOuterRadius);
-      tg.stroke();
-      // 四个短刻线强化“吸附目标”，不遮挡卡面。
-      for (let i = 0; i < 4; i++) {
-        const a = i * Math.PI / 2;
-        tg.moveTo(Math.cos(a) * (UiTokens.aim.targetInnerRadius + 2), Math.sin(a) * (UiTokens.aim.targetInnerRadius + 2));
-        tg.lineTo(Math.cos(a) * UiTokens.aim.targetTickOuter, Math.sin(a) * UiTokens.aim.targetTickOuter);
-        tg.stroke();
-      }
+    if (this.paperAimShadowNode?.isValid) {
+      const shadowPos = this.paperAimShadowNode.position;
+      const shadowFollow = force ? 1 : UiTokens.aim.shadowFollow;
+      this.paperAimShadowNode.setPosition(
+        shadowPos.x + (this.aimPoint.x + 5 - shadowPos.x) * shadowFollow,
+        shadowPos.y + (this.aimPoint.y - UiTokens.aim.shadowDrop - shadowPos.y) * shadowFollow,
+        0,
+      );
+      const shadowStretch = 1 + Math.min(0.34, Math.abs(this.aimVelocityX) / UiTokens.aim.velocityCap * 0.34);
+      this.paperAimShadowNode.setScale(shadowStretch, 1 / shadowStretch, 1);
     }
-    this.drawAimGuide();
+    this.aimVisualTime += dt;
+    if (this.aimTargetNode?.isValid) {
+      this.aimTargetKick = Math.max(0, this.aimTargetKick - dt);
+      const kick = this.aimTargetKick > 0 ? this.aimTargetKick / UiTokens.aim.targetKick : 0;
+      const pulse = 1 + Math.sin(this.aimVisualTime * UiTokens.aim.targetPulseHz * Math.PI * 2) * 0.035 + kick * 0.16;
+      this.aimTargetNode.setScale(pulse, pulse, 1);
+    }
+    const dockY = this.actionDockNode?.position.y ?? 0;
+    const strength = Math.min(1, Math.abs(this.aimPoint.x - this.aimStart.x) / Math.max(1, view.getVisibleSize().width * 0.32));
+    this.propDockView?.updateInteraction(
+      this.aimPoint.x,
+      this.aimPoint.y - dockY,
+      this.aimingSlot,
+      strength,
+      Math.min(1, Math.abs(this.aimVelocityX) / UiTokens.aim.velocityCap),
+      this.aimPerfectReady,
+      targetValid,
+    );
+  }
+
+  private aimAlignmentRatio(slot: number): number {
+    const target = this.aimSlotTargets[slot] ?? this.targetPointForSlot(slot);
+    const left = this.aimSlotTargets[Math.max(0, slot - 1)];
+    const right = this.aimSlotTargets[Math.min(this.aimSlotTargets.length - 1, slot + 1)];
+    const leftGap = left && left !== target ? Math.abs(target.x - left.x) : Number.POSITIVE_INFINITY;
+    const rightGap = right && right !== target ? Math.abs(right.x - target.x) : Number.POSITIVE_INFINITY;
+    const nearestGap = Math.min(leftGap, rightGap);
+    const halfSpan = Number.isFinite(nearestGap)
+      ? Math.max(18, nearestGap * 0.5)
+      : Math.max(36, view.getVisibleSize().width / Math.max(2, this.slotNodes.length) * 0.5);
+    return Math.abs(this.aimPoint.x - target.x) / halfSpan;
+  }
+
+  private currentDragHitQuality(): HitQuality {
+    return this.aimPerfectReady
+      && this.aimAlignmentRatio(this.aimingSlot) <= UiTokens.aim.perfectAlignmentRatio
+      ? HQ.Perfect
+      : HQ.Normal;
+  }
+
+  private isAimTargetValid(prop: PropType | null, slot: number): boolean {
+    if (!prop || prop === PT.AddDemand) return true;
+    if (prop === PT.ChangeDemand) return this.game.conveyor.slotAt(slot)?.state === CS.ActiveWhite;
+    if (prop === PT.ThrowPot) return this.game.conveyor.hasCardsInRange(slot, 1);
+    return true;
+  }
+
+  private paintAimTarget(prop: PropType | null, perfectReady: boolean, targetValid: boolean): void {
+    const g = this.aimTargetNode?.getComponent(Graphics);
+    if (!g) return;
+    const idx = prop ? GameRunner.PROP_TYPES.indexOf(prop) : -1;
+    const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
+    const focus = !targetValid ? UiTokens.color.muted : perfectReady ? UiTokens.color.gold : UiTokens.color.blue;
+    g.clear();
+    g.fillColor = new Color(focus.r, focus.g, focus.b, perfectReady ? 64 : 30);
+    g.circle(0, 0, UiTokens.aim.targetInnerRadius);
+    g.fill();
+    g.strokeColor = new Color(255, 252, 246, 246);
+    g.lineWidth = 5;
+    g.circle(0, 0, UiTokens.aim.targetInnerRadius);
+    g.stroke();
+    g.strokeColor = new Color(focus.r, focus.g, focus.b, 242);
+    g.lineWidth = perfectReady ? 4 : 3;
+    g.circle(0, 0, UiTokens.aim.targetOuterRadius);
+    g.stroke();
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2;
+      g.moveTo(Math.cos(a) * (UiTokens.aim.targetInnerRadius + 2), Math.sin(a) * (UiTokens.aim.targetInnerRadius + 2));
+      g.lineTo(Math.cos(a) * UiTokens.aim.targetTickOuter, Math.sin(a) * UiTokens.aim.targetTickOuter);
+    }
+    g.stroke();
+  }
+
+  private lightAimHaptic(): void {
+    const now = Date.now();
+    if (now - this.lastAimHapticAt < UiTokens.aim.hapticMinIntervalMs) return;
+    this.lastAimHapticAt = now;
+    const wxApi = (globalThis as any).wx;
+    if (wxApi?.vibrateShort) {
+      try { wxApi.vibrateShort({ type: 'light' }); } catch { /* 平台不支持时静默降级 */ }
+    }
+  }
+
+  private releaseAimHaptic(): void {
+    const wxApi = (globalThis as any).wx;
+    if (wxApi?.vibrateShort) {
+      try { wxApi.vibrateShort({ type: 'medium' }); } catch { /* 平台不支持时静默降级 */ }
+    }
   }
 
   private drawAimGuide(): void {
@@ -1518,21 +1861,15 @@ export class GameRunner extends Component {
     const prop = this.aimingProp;
     const tuning = this.paperTuning(prop ?? PT.AddDemand);
     const start = this.aimStart;
-    const end = this.targetPointForSlot(this.aimingSlot);
+    const end = this.aimSlotTargets[this.aimingSlot] ?? this.targetPointForSlot(this.aimingSlot);
     const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight * 0.82, 0);
     g.clear();
-    const idx = prop ? GameRunner.PROP_TYPES.indexOf(prop) : 0;
-    const base = GameRunner.PROP_COLORS[idx] ?? new Color(42, 38, 34);
-    g.fillColor = new Color(
-      Math.round(base.r * 0.25 + 42 * 0.75),
-      Math.round(base.g * 0.25 + 38 * 0.75),
-      Math.round(base.b * 0.25 + 34 * 0.75),
-      prop === PT.ThrowPot ? 210 : 170,
-    );
-    // 起点蓄力环：半径随 scanPos 增长，给长按过程一个明确节奏。
-    g.strokeColor = new Color(base.r, base.g, base.b, 180);
+    const focus = UiTokens.color.blue;
+    g.fillColor = new Color(focus.r, focus.g, focus.b, prop === PT.ThrowPot ? 220 : 185);
+    // 起点蓄力环只在目标切换时重画，呼吸感由拖动道具与目标圈承担，避免高频 Graphics.clear。
+    g.strokeColor = new Color(focus.r, focus.g, focus.b, 175);
     g.lineWidth = 3;
-    g.circle(start.x, start.y, UiTokens.aim.startChargeRadius + this.scanPos * UiTokens.aim.startChargePulse);
+    g.circle(start.x, start.y, UiTokens.aim.startChargeRadius + UiTokens.aim.startChargePulse * 0.55);
     g.stroke();
     for (let i = 1; i <= tuning.guideDots; i++) {
       const t = i / (tuning.guideDots + 1);
@@ -1551,17 +1888,27 @@ export class GameRunner extends Component {
     this.aimGuideNode = null;
     this.aimTargetNode?.destroy();
     this.aimTargetNode = null;
+    this.paperAimShadowNode?.destroy();
+    this.paperAimShadowNode = null;
     if (destroyPaper) {
       this.paperAimNode?.destroy();
     }
     this.paperAimNode = null;
+    this.aimSlotTargets = [];
+    this.aimRenderedSlot = -1;
+    this.aimVelocityX = 0;
+    this.aimTargetKick = 0;
+    this.aimLockSec = 0;
+    this.aimPerfectReady = false;
+    this.aimTargetValid = true;
+    if (this.propInteractionState !== 'launching') this.propInteractionState = 'idle';
     if (this.propButtons) {
       const vis = view.getVisibleSize();
       this.layoutPropButtons(vis.width, vis.height);
     }
   }
 
-  private animatePaperThrow(prop: PropType, slot: number, onArrive: () => void): void {
+  private animatePaperThrow(prop: PropType, slot: number, quality: HitQuality, onArrive: () => void): void {
     const paper = this.paperAimNode?.isValid ? this.paperAimNode : this.makePaperWadNode(prop, 'PaperWadThrow');
     const tuning = this.paperTuning(prop);
     const outcome = this.paperOutcome(prop, slot);
@@ -1573,6 +1920,8 @@ export class GameRunner extends Component {
     paper.setScale(tuning.startScale);
     const op = paper.getComponent(UIOpacity) ?? paper.addComponent(UIOpacity);
     op.opacity = 255;
+    this.emitLaunchBurst(start, prop);
+    this.releaseAimHaptic();
     const outDuration = tuning.duration * (prop === PT.ThrowPot ? 0.42 : 0.48);
     const inDuration = Math.max(0.08, tuning.duration - outDuration);
     const launchScale = new Vec3(tuning.startScale.x * 1.16, tuning.startScale.y * 0.76, 1);
@@ -1582,11 +1931,44 @@ export class GameRunner extends Component {
       .to(inDuration, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn' })
       .call(() => {
         onArrive();
+        this.propInteractionState = 'idle';
         this.paperImpact(end, prop, outcome);
-        this.paperOutcomeText(end, prop, outcome);
+        this.paperOutcomeText(end, prop, outcome, quality);
         this.settlePaperWad(paper, op, prop, outcome);
       })
       .start();
+  }
+
+  /** 松手瞬间的局部发射反馈：短环 + 速度线，只创建一次，不参与拖动帧更新。 */
+  private emitLaunchBurst(origin: Vec3, prop: PropType): void {
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
+    const node = new Node('PropLaunchBurst');
+    node.layer = 1 << 25;
+    node.addComponent(UITransform).setContentSize(116, 116);
+    node.setPosition(origin);
+    node.setScale(0.74, 0.74, 1);
+    this.node.addChild(node);
+    const g = node.addComponent(Graphics);
+    g.strokeColor = new Color(base.r, base.g, base.b, 220);
+    g.lineWidth = 4;
+    g.circle(0, 0, 31);
+    g.stroke();
+    g.strokeColor = new Color(255, 252, 241, 225);
+    g.lineWidth = 2.5;
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      g.moveTo(Math.cos(a) * 39, Math.sin(a) * 39);
+      g.lineTo(Math.cos(a) * 52, Math.sin(a) * 52);
+    }
+    g.stroke();
+    const op = node.addComponent(UIOpacity);
+    op.opacity = 220;
+    tween(node)
+      .to(0.16, { scale: new Vec3(1.24, 1.24, 1), angle: 12 }, { easing: 'quadOut' })
+      .call(() => { if (node.isValid) node.destroy(); })
+      .start();
+    tween(op).to(0.16, { opacity: 0 }, { easing: 'quadIn' }).start();
   }
 
   private animatePaperToRobot(prop: PropType): void {
@@ -1598,10 +1980,13 @@ export class GameRunner extends Component {
     this.node.addChild(paper);
     paper.setPosition(start);
     paper.setScale(tuning.startScale);
+    this.emitLaunchBurst(start, prop);
+    this.releaseAimHaptic();
     tween(paper)
       .to(tuning.duration * 0.55, { position: peak, angle: tuning.spin * 0.42, scale: tuning.midScale }, { easing: 'quadOut' })
       .to(tuning.duration * 0.45, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: 'backIn' })
       .call(() => {
+        this.propInteractionState = 'idle';
         this.paperImpact(end, prop, 'hit');
         this.paperOutcomeText(end, prop, 'hit');
         const op = paper.getComponent(UIOpacity) ?? paper.addComponent(UIOpacity);
@@ -1653,17 +2038,19 @@ export class GameRunner extends Component {
     tween(op).to(UiTokens.feedback.impactSec, { opacity: 0 }, { easing: 'quadOut' }).start();
   }
 
-  private paperOutcomeText(pos: Vec3, prop: PropType, outcome: PaperOutcome): void {
+  private paperOutcomeText(pos: Vec3, prop: PropType, outcome: PaperOutcome, quality: HitQuality = HQ.Normal): void {
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     const base = GameRunner.PROP_COLORS[idx] ?? new Color(255, 255, 255);
-    const text = this.paperOutcomeLabel(prop, outcome);
-    const color = outcome === 'hit' ? new Color(base.r, base.g, base.b, 255) : new Color(120, 115, 108, 255);
+    const text = quality === HQ.Perfect && outcome === 'hit' ? 'PERFECT!' : this.paperOutcomeLabel(prop, outcome);
+    const color = quality === HQ.Perfect
+      ? new Color(UiTokens.color.gold.r, UiTokens.color.gold.g, UiTokens.color.gold.b, 255)
+      : outcome === 'hit' ? new Color(base.r, base.g, base.b, 255) : new Color(120, 115, 108, 255);
     const node = new Node('PaperOutcomeText');
     node.layer = 1 << 25;
     node.addComponent(UITransform).setContentSize(96, 34);
     const label = node.addComponent(Label);
     label.string = text;
-    label.fontSize = outcome === 'hit' && prop === PT.ThrowPot ? 24 : 20;
+    label.fontSize = quality === HQ.Perfect ? 25 : outcome === 'hit' && prop === PT.ThrowPot ? 24 : 20;
     label.lineHeight = label.fontSize + 4;
     label.isBold = true;
     label.color = color;
@@ -1768,6 +2155,8 @@ export class GameRunner extends Component {
    */
   private renderPropHUD(): void {
     if (!this.propButtons) return;
+    // 投掷滑轨出现后四个按钮全部隐藏；此时继续每帧重画 4 套键帽只会制造拖动卡顿。
+    if (this.aimingProp !== null) return;
     this.propButtonNodes.forEach((btn: Node, i: number) => {
       const type = GameRunner.PROP_TYPES[i];
       const st = this.game.prop.getState(type);
@@ -1974,13 +2363,21 @@ export class GameRunner extends Component {
     const resultText: Record<string, string> = { 'win-survive': '通关', 'win-hunt': '猎杀', lose: '淘汰' };
     if (this.gameTimerNode) {
       const tl = this.gameTimerNode.getComponent(Label)!;
-      tl.string = this.game.over
+      const timerText = this.game.over
         ? `${Math.ceil(remain)}s ${resultText[this.game.result] ?? ''}`
         : `${Math.ceil(remain)}s`;
-      tl.fontSize = this.game.over ? 22 : 28;
-      tl.lineHeight = tl.fontSize + 4;
-      tl.color = urgent ? new Color(220, 72, 66, 255) : GameRunner.START_TEXT;
-      tl.isBold = true;
+      if (timerText !== this.lastTimerText) {
+        this.lastTimerText = timerText;
+        tl.string = timerText;
+      }
+      const timerSize = this.game.over ? 22 : 28;
+      if (tl.fontSize !== timerSize) {
+        tl.fontSize = timerSize;
+        tl.lineHeight = timerSize + 4;
+      }
+      const timerColor = urgent ? new Color(220, 72, 66, 255) : GameRunner.START_TEXT;
+      if (!tl.color.equals(timerColor)) tl.color = timerColor;
+      if (!tl.isBold) tl.isBold = true;
       const pulse = urgent ? 1 + Math.sin(snap.elapsed * 8) * 0.035 : 1;
       this.gameTimerNode.setScale(pulse, pulse, 1);
       this.timerPlateNode?.setScale(pulse, pulse, 1);
@@ -1992,36 +2389,40 @@ export class GameRunner extends Component {
       const g = this.timerPlateNode.getComponent(Graphics)!;
       const pct = snap.duration > 0 ? Math.max(0, Math.min(1, remain / snap.duration)) : 0;
       const accent = urgent ? new Color(220, 72, 66, 255) : GameRunner.START_BLUE;
-      g.clear();
-      g.fillColor = new Color(150, 132, 105, 42);
-      g.roundRect(-w / 2 + 3, -h / 2 - 5, w - 6, h, h / 2);
-      g.fill();
-      g.fillColor = GameRunner.START_CARD;
-      g.strokeColor = new Color(224, 214, 198, 230);
-      g.lineWidth = 1.4;
-      g.roundRect(-w / 2, -h / 2, w, h, h / 2);
-      g.fill(); g.stroke();
-      const iconX = -w / 2 + h * 0.48;
-      g.strokeColor = urgent ? accent : GameRunner.START_TEXT;
-      g.lineWidth = 3;
-      g.circle(iconX, h * 0.06, h * 0.16);
-      g.stroke();
-      g.moveTo(iconX, h * 0.06);
-      g.lineTo(iconX + h * 0.08, h * 0.15);
-      g.stroke();
-      g.moveTo(iconX - h * 0.07, h * 0.27);
-      g.lineTo(iconX + h * 0.07, h * 0.27);
-      g.stroke();
-      const barW = w * 0.42;
-      const barH = Math.max(5, h * 0.085);
-      const barX = w * 0.08;
-      const barY = -h * 0.24;
-      g.fillColor = new Color(218, 210, 195, 255);
-      g.roundRect(barX - barW / 2, barY - barH / 2, barW, barH, barH / 2);
-      g.fill();
-      g.fillColor = accent;
-      g.roundRect(barX - barW / 2, barY - barH / 2, barW * pct, barH, barH / 2);
-      g.fill();
+      const paintSignature = `${Math.floor(remain * 10)}|${urgent ? 1 : 0}|${Math.round(w)}|${Math.round(h)}`;
+      if (paintSignature !== this.lastTimerPaintSignature) {
+        this.lastTimerPaintSignature = paintSignature;
+        g.clear();
+        g.fillColor = new Color(150, 132, 105, 42);
+        g.roundRect(-w / 2 + 3, -h / 2 - 5, w - 6, h, h / 2);
+        g.fill();
+        g.fillColor = GameRunner.START_CARD;
+        g.strokeColor = new Color(224, 214, 198, 230);
+        g.lineWidth = 1.4;
+        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
+        g.fill(); g.stroke();
+        const iconX = -w / 2 + h * 0.48;
+        g.strokeColor = urgent ? accent : GameRunner.START_TEXT;
+        g.lineWidth = 3;
+        g.circle(iconX, h * 0.06, h * 0.16);
+        g.stroke();
+        g.moveTo(iconX, h * 0.06);
+        g.lineTo(iconX + h * 0.08, h * 0.15);
+        g.stroke();
+        g.moveTo(iconX - h * 0.07, h * 0.27);
+        g.lineTo(iconX + h * 0.07, h * 0.27);
+        g.stroke();
+        const barW = w * 0.42;
+        const barH = Math.max(5, h * 0.085);
+        const barX = w * 0.08;
+        const barY = -h * 0.24;
+        g.fillColor = new Color(218, 210, 195, 255);
+        g.roundRect(barX - barW / 2, barY - barH / 2, barW, barH, barH / 2);
+        g.fill();
+        g.fillColor = accent;
+        g.roundRect(barX - barW / 2, barY - barH / 2, barW * pct, barH, barH / 2);
+        g.fill();
+      }
     }
 
     this.updateLowerHud(Math.round(snap.approval), snap.zone);
@@ -2030,20 +2431,23 @@ export class GameRunner extends Component {
     this.ensureSlotBackgrounds();
     for (let i = 0; i < this.slotNodes.length; i++) {
       this.drawCardBackground(i, null);
-      this.renderSlot(this.slotNodes[i], null, i);
+      const slot = this.slotNodes[i];
+      if (!this.emptySlotRendered.has(slot.uuid)) {
+        this.renderSlot(slot, null, i);
+        this.emptySlotRendered.add(slot.uuid);
+      }
     }
     this.syncCardVisuals(cards);
 
     if (this.scanIndicator) {
-      const charging = this.game.prop.chargingProp !== null;
+      // 指针拖动时使用新的吸附目标圈；旧扫描指示器只保留给键盘蓄力兜底，避免双重光圈抢视觉。
+      const charging = this.game.prop.chargingProp !== null && this.aimingProp === null;
       this.scanIndicator.active = charging;
       if (charging) {
-        const idx = this.aimingProp !== null
-          ? this.aimingSlot
-          : Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
+        const idx = Math.min(this.slotNodes.length - 1, Math.floor(this.scanPos * this.slotNodes.length));
         const target = this.slotNodes[idx];
         if (target) this.scanIndicator.setPosition(target.position.x, target.position.y, 0);
-        const s = this.aimingProp !== null ? 1.18 : 0.6 + this.scanPos * 0.8;
+        const s = 0.6 + this.scanPos * 0.8;
         this.scanIndicator.setScale(s, s, 1);
       }
     }
@@ -2085,6 +2489,11 @@ export class GameRunner extends Component {
     const w = ut.width;
     const h = ut.height;
     if (w <= 0 || h <= 0) return;
+    const signature = card
+      ? `${Math.round(w)}x${Math.round(h)}|${card.category}|${card.state}|${card.weight}|${card.isThreat ? 1 : 0}`
+      : `${Math.round(w)}x${Math.round(h)}|empty`;
+    if (this.cardBackgroundSignatures.get(bg.uuid) === signature) return;
+    this.cardBackgroundSignatures.set(bg.uuid, signature);
     const baseSprite = this.spriteChild(bg, 'TaskCardBase', 0);
     const accentSprite = this.spriteChild(bg, 'TaskCardAccent', 1);
     if (!card) {
@@ -2366,6 +2775,9 @@ export class GameRunner extends Component {
   private destroyCardVisual(visual: CardVisual): void {
     if (!visual.node.isValid) return;
     Tween.stopAllByTarget(visual.node);
+    visual.node.children
+      .filter((child) => !!child.getComponent(Graphics))
+      .forEach((child) => this.cardBackgroundSignatures.delete(child.uuid));
     visual.node.destroy();
   }
 
@@ -3069,7 +3481,7 @@ export class GameRunner extends Component {
       parent: this.node,
       layer: 1 << 25,
       propButtons: this.propButtons,
-      buttonCount: this.propButtonNodes.length,
+      targetCount: this.slotNodes.length,
       viewWidth,
       viewHeight,
       horizontalPadding,

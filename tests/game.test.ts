@@ -3,7 +3,7 @@ import { Game } from '../assets/scripts/core/Game';
 import { LevelSystem } from '../assets/scripts/core/systems/LevelSystem';
 import { BalanceConfig, DefaultLevel } from '../assets/scripts/core/config';
 import { SeededRng } from '../assets/scripts/core/rng';
-import { PropType as PT } from '../assets/scripts/core/types';
+import { HitQuality as HQ, PropType as PT } from '../assets/scripts/core/types';
 import type { GameResult } from '../assets/scripts/core/types';
 
 /** 把一局跑到结束（或超时），返回关键结果。 */
@@ -56,6 +56,27 @@ describe('Game · 道具生效接线（CardHit → Conveyor 变更）', () => {
     g.release(PT.ChangeDemand);
 
     expect(g.conveyor.slotAt(0)!.state).toBe('rework'); // 经事件接线被污染
+  });
+
+  it('拖拽槽位释放可把 Perfect 质量传入规则层并记录战报', () => {
+    const g = new Game(DefaultLevel, new SeededRng(5));
+    g.beginCharge(PT.AddDemand);
+    expect(g.releaseAtSlot(PT.AddDemand, 2, HQ.Perfect)).toBe(true);
+    const report = g.buildReport(0);
+    expect(report.effectiveHits).toBe(1);
+    expect(report.perfectHits).toBe(1);
+    expect(report.missedThrows).toBe(0);
+  });
+});
+
+describe('Game · 节奏阶段事件', () => {
+  it('跨入中盘时只发一次 PhaseChanged', () => {
+    const g = new Game(DefaultLevel, new SeededRng(9));
+    const transitions: string[] = [];
+    g.bus.on('PhaseChanged', ({ from, to }) => transitions.push(`${from}->${to}`));
+    const midAt = BalanceConfig.phases.mid.fromSec;
+    while (g.elapsed < midAt + 0.05 && !g.over) g.tick(0.05);
+    expect(transitions.filter((x) => x === 'early->mid')).toHaveLength(1);
   });
 });
 

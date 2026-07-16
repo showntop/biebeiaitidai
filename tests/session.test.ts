@@ -18,6 +18,9 @@ function mkReport(result: RunReport['result'], stars: number, levelIndex: number
     durationSec: 60,
     bossInspectionsFired: 0,
     maxCombo: 0,
+    effectiveHits: 0,
+    perfectHits: 0,
+    missedThrows: 0,
     revived: false,
   };
 }

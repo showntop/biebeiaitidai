@@ -2,7 +2,7 @@ import type { EventBus } from '../EventBus';
 import type { BalanceConfigT } from '../config';
 import { PropsConfig } from '../config';
 import type { PropDef } from '../config';
-import type { BeltView, GamePhase, HitQuality, PropType } from '../types';
+import type { BeltView, GamePhase, HitQuality, PerfectRewardType, PropType } from '../types';
 import { PropType as PT, HitQuality as HQ } from '../types';
 import type { Rng } from '../rng';
 
@@ -195,7 +195,7 @@ export class PropSystem {
   private resolve(prop: PropType, slot: number, quality: HitQuality): void {
     if (!this.targetValid(prop, slot)) {
       const reason: 'empty' | 'invalid-target' = prop === PT.ChangeDemand ? 'invalid-target' : 'empty';
-      this.events.emit('PropUnavailable', { prop, reason });
+      this.events.emit('PropUnavailable', { prop, slot, reason });
       if (reason === 'empty') {
         // §4.4 落空 Miss 清零连击
         this.combo = 0;
@@ -215,7 +215,10 @@ export class PropSystem {
     }
 
     // Perfect 可变奖励
-    if (quality === HQ.Perfect) this.applyPerfectReward(prop);
+    if (quality === HQ.Perfect) {
+      const reward = this.applyPerfectReward(prop);
+      this.events.emit('PerfectRewardGranted', { prop, reward });
+    }
 
     this.events.emit('CardHit', { prop, slot, quality, card: this.belt.slotAt(slot) ?? undefined });
 
@@ -258,7 +261,7 @@ export class PropSystem {
     return Math.abs(this.scan - center) <= half;
   }
 
-  private applyPerfectReward(prop: PropType): void {
+  private applyPerfectReward(prop: PropType): PerfectRewardType {
     const table = PropsConfig.perfectRewards;
     const r = this.rng.next();
     let acc = 0;
@@ -278,14 +281,14 @@ export class PropSystem {
         } else {
           this.rt[prop].energy = Math.min(1, this.rt[prop].energy + 0.1);
         }
-        break;
+        return chosen.type;
       case 'extra-use':
         this.rt[prop].uses++; // 突破单局上限
-        break;
+        return chosen.type;
       case 'energy-full':
         if (def.acquisition === 'energy') this.rt[prop].energy = 1;
         else this.rt[prop].cdRemaining = 0;
-        break;
+        return chosen.type;
     }
   }
 

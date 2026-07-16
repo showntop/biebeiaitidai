@@ -30,6 +30,7 @@ export class ApprovalGaugeView {
   private deltaText = '';
   private deltaUntil = 0;
   private zoneFlashUntil = 0;
+  private lastDynamicSignature = '';
 
   constructor(private readonly root: Node) {
     this.frame = root.getComponent(Graphics) ?? root.addComponent(Graphics);
@@ -48,6 +49,7 @@ export class ApprovalGaugeView {
   private valueBaseX = 0;
 
   layout(width: number, height: number): void {
+    this.lastDynamicSignature = '';
     this.root.getComponent(UITransform)?.setContentSize(width, height);
     this.barW = width - 60;
     this.barH = Math.min(22, Math.max(16, height * 0.18));
@@ -106,9 +108,9 @@ export class ApprovalGaugeView {
   }
 
   update(approval: number, zone: string, hintText: string, elapsed: number): void {
-    const copy: Record<string, string> = { hunt: '优秀', good: '良好', ok: '一般', danger: '危险!' };
+    const copy: Record<string, string> = { hunt: '反杀!', good: '良好', ok: '一般', danger: '危险!' };
     const colors: Record<string, Readonly<Color>> = {
-      hunt: UiTokens.color.hunt,
+      hunt: UiTokens.color.gold,
       good: UiTokens.color.good,
       ok: UiTokens.color.gold,
       danger: UiTokens.color.danger,
@@ -140,6 +142,7 @@ export class ApprovalGaugeView {
     const danger = zone === 'danger';
     this.value.string = `认可度  ${shownApproval}`;
     this.zone.string = copy[zone] ?? zone;
+    this.zone.color = zoneColor;
     const hint = hintText.trim();
     this.hint.string = hint ? `战报 · ${hint}` : '';
     this.hint.node.active = !!hint;
@@ -147,6 +150,24 @@ export class ApprovalGaugeView {
 
     const shakeX = danger ? Math.sin(elapsed * 18) * 1.4 : 0;
     this.zone.node.setPosition(this.zoneBaseX + shakeX, this.zoneBaseY, 0);
+
+    const animating = this.displayedApproval !== this.targetApproval
+      || elapsed < this.deltaUntil
+      || elapsed < this.zoneFlashUntil
+      || danger
+      || !!hint;
+    const paintBucket = animating ? Math.floor(elapsed * 15) : 0;
+    const dynamicSignature = [
+      shownApproval,
+      zone,
+      hint,
+      this.delta.node.active ? this.deltaText : '',
+      paintBucket,
+      Math.round(this.barW),
+      Math.round(this.barH),
+    ].join('|');
+    if (dynamicSignature === this.lastDynamicSignature) return;
+    this.lastDynamicSignature = dynamicSignature;
 
     const g = this.dynamic;
     g.clear();
@@ -210,6 +231,15 @@ export class ApprovalGaugeView {
       g.roundRect(-hintW / 2, hintY - hintH / 2, hintW, hintH, hintH / 2);
       g.stroke();
     }
+  }
+
+  /** 结算瞬间同步到规则层最终值，避免插值动画停在 98/99 与战报 100 不一致。 */
+  snap(approval: number, zone: string, hintText: string, elapsed: number): void {
+    this.displayedApproval = approval;
+    this.targetApproval = approval;
+    this.lastElapsed = elapsed;
+    this.lastDynamicSignature = '';
+    this.update(approval, zone, hintText, elapsed);
   }
 
   private ensureGraphics(name: string): Graphics {

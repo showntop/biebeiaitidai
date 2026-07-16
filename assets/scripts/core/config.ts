@@ -29,7 +29,7 @@ import level17Json from '../../config/levels/level-17.json';
 import level18Json from '../../config/levels/level-18.json';
 import level19Json from '../../config/levels/level-19.json';
 import level20Json from '../../config/levels/level-20.json';
-import type { CardCategory, PropType, GamePhase, ApprovalZone } from './types';
+import type { CardCategory, PropType, GamePhase, ApprovalZone, PerfectRewardType } from './types';
 
 export interface CardDef {
   weight: number;
@@ -46,7 +46,7 @@ export interface PhaseCd {
 
 export interface PerfectReward {
   p: number;
-  type: 'cd-refill-10' | 'extra-use' | 'energy-full';
+  type: PerfectRewardType;
 }
 
 export interface PropDef {

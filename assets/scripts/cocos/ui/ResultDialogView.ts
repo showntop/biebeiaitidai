@@ -1,11 +1,13 @@
 import { Color, Graphics, Label, Node, tween, UITransform, UIOpacity, Vec3 } from 'cc';
 import { UiPainter } from './UiPainter';
 import { UiTokens } from './UiTokens';
+import type { GameResult } from '../../core/types';
 
 export interface ResultDialogButton {
   name: string;
   text: string;
   color: Readonly<Color>;
+  variant: 'primary' | 'secondary' | 'reward';
   tap: () => void;
 }
 
@@ -17,12 +19,17 @@ export interface ResultDialogModel {
   width: number;
   height: number;
   won: boolean;
+  result: GameResult;
   title: string;
   badgeText: string;
   stars: number;
   peakApproval: number;
+  finalApproval: number;
   timeUsedSec: number;
   maxCombo: number;
+  effectiveHits: number;
+  perfectHits: number;
+  missedThrows: number;
   rank: string;
   day: number;
   meme: string;
@@ -100,7 +107,7 @@ export class ResultDialogView {
     const pw = model.width;
     const ph = model.height;
     const cg = panel.getComponent(Graphics)!;
-    UiPainter.panel(cg, pw, ph, false);
+    this.paintResultCard(cg, pw, ph);
 
     // 顶部战报状态牌：纸质底 + 小状态章，避免纯红/绿系统条破坏当前暖纸质世界观。
     const statusW = pw * resultLayout.statusWidthRatio;
@@ -135,16 +142,16 @@ export class ResultDialogView {
     cg.lineWidth = 2;
     cg.roundRect(-starW / 2, starY - 20, starW, 40, 11);
     cg.fill(); cg.stroke();
-    const ratingBox = 28;
-    const ratingGap = 8;
-    const ratingStartX = 4;
+    const ratingBox = 26;
+    const ratingGap = 6;
+    const ratingStartX = 0;
     for (let i = 0; i < 3; i++) {
       const rx = ratingStartX + i * (ratingBox + ratingGap);
       const active = i < model.stars;
       cg.fillColor = active ? new Color(255, 228, 130, 255) : new Color(245, 238, 225, 255);
       cg.strokeColor = active ? new Color(202, 148, 56, 230) : new Color(202, 178, 145, 150);
       cg.lineWidth = active ? 2.5 : 2;
-      cg.roundRect(rx - ratingBox / 2, starY - ratingBox / 2, ratingBox, ratingBox, 7);
+      cg.circle(rx, starY, ratingBox / 2);
       cg.fill(); cg.stroke();
       if (active) {
         cg.strokeColor = new Color(126, 88, 31, 230);
@@ -187,14 +194,23 @@ export class ResultDialogView {
     cg.roundRect(-noteW / 2, noteY - noteH / 2, noteW, noteH, 13);
     cg.fill(); cg.stroke();
 
-    this.addLabel(panel, 'Title', -badgeW * 0.42, statusY, model.title, 28, pw * 0.85, 42, UiTokens.color.inkDeep, true);
-    this.addLabel(panel, 'ResultBadge', badgeX, statusY, model.badgeText, 18, badgeW - 10, 28, new Color(255, 252, 240, 255), true);
-    this.addLabel(panel, 'Stars', -starW * 0.28, starY, '评价', 22, 66, 32, new Color(166, 112, 0, 255), true);
-    this.addLabel(panel, 'StatsApproval', -(chipW + resultLayout.chipGap), chipY, `峰值\n${Math.round(model.peakApproval)}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addLabel(panel, 'StatsTime', 0, chipY, `耗时\n${model.timeUsedSec.toFixed(1)}s`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addLabel(panel, 'StatsCombo', chipW + resultLayout.chipGap, chipY, `连击\n${model.maxCombo}`, 16, chipW - 8, 42, new Color(70, 60, 50, 255), true);
-    this.addLabel(panel, 'Stats2', 0, chipY - resultLayout.chipHeight, `${model.rank}   ·   第${model.day}轮反击`, 15, pw * 0.85, 24, new Color(95, 84, 70, 255), false);
-    this.addLabel(panel, 'Meme', 0, noteY, model.meme, 15, noteW - 28, 62, new Color(100, 88, 72, 255), false);
+    const titleW = statusW - badgeW - 30;
+    const titleX = -statusW / 2 + 14 + titleW / 2;
+    this.addLabel(panel, 'Title', titleX, statusY, model.title, 40, titleW, 58, UiTokens.color.inkDeep, true);
+    this.addLabel(panel, 'ResultBadge', badgeX, statusY, model.badgeText, 22, badgeW - 12, 38, new Color(255, 252, 240, 255), true);
+    this.addLabel(panel, 'Stars', -starW * 0.29, starY, '评价', 28, 82, 42, new Color(166, 112, 0, 255), true);
+    const metrics = this.metricsFor(model);
+    this.addLabel(panel, 'StatsApproval', -(chipW + resultLayout.chipGap), chipY, `${metrics[0].label}\n${metrics[0].value}`, 21, chipW - 12, 62, new Color(70, 60, 50, 255), true);
+    this.addLabel(panel, 'StatsTime', 0, chipY, `${metrics[1].label}\n${metrics[1].value}`, 21, chipW - 12, 62, new Color(70, 60, 50, 255), true);
+    this.addLabel(panel, 'StatsCombo', chipW + resultLayout.chipGap, chipY, `${metrics[2].label}\n${metrics[2].value}`, 21, chipW - 12, 62, new Color(70, 60, 50, 255), true);
+    this.addLabel(panel, 'Stats2', 0, chipY - resultLayout.chipHeight, `${model.rank}   ·   第${model.day}轮反击`, 18, pw * 0.85, 32, new Color(95, 84, 70, 255), false);
+    this.addLabel(panel, 'Meme', 0, noteY, model.meme, 22, noteW - 36, 92, new Color(100, 88, 72, 255), false);
+    const memeLabel = panel.getChildByName('Meme')?.getComponent(Label);
+    if (memeLabel) {
+      memeLabel.enableWrapText = true;
+      memeLabel.overflow = Label.Overflow.CLAMP;
+      memeLabel.lineHeight = 30;
+    }
 
     const btnGap = Math.min(resultLayout.buttonGapMax, Math.max(resultLayout.buttonGapMin, pw * resultLayout.buttonGapRatio));
     const btnW = Math.min(
@@ -204,8 +220,30 @@ export class ResultDialogView {
     const btnY = -ph / 2 + resultLayout.buttonBottomInset;
     const btnSpan = (model.buttons.length - 1) * (btnW + btnGap);
     model.buttons.forEach((button, i) => {
-      this.makeButton(panel, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, resultLayout.buttonHeight, button.text, button.color, button.tap);
+      this.makeButton(panel, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, resultLayout.buttonHeight, button.text, button.color, button.variant, button.tap);
     });
+  }
+
+  private metricsFor(model: ResultDialogModel): Array<{ label: string; value: string }> {
+    if (model.result === 'win-hunt') {
+      return [
+        { label: '反杀用时', value: `${model.timeUsedSec.toFixed(1)}s` },
+        { label: '完美命中', value: `${model.perfectHits}` },
+        { label: '最高连击', value: `${model.maxCombo}` },
+      ];
+    }
+    if (model.result === 'win-survive') {
+      return [
+        { label: '风险峰值', value: `${Math.round(model.peakApproval)}` },
+        { label: '有效命中', value: `${model.effectiveHits}` },
+        { label: '最高连击', value: `${model.maxCombo}` },
+      ];
+    }
+    return [
+      { label: '最终风险', value: `${Math.round(model.finalApproval)}` },
+      { label: '有效命中', value: `${model.effectiveHits}` },
+      { label: '失误次数', value: `${model.missedThrows}` },
+    ];
   }
 
   private addLabel(parent: Node, name: string, x: number, y: number, text: string, size: number, w: number, h: number, color: Color, bold: boolean): void {
@@ -221,16 +259,17 @@ export class ResultDialogView {
     lbl.horizontalAlign = 1;
     lbl.verticalAlign = 1;
     lbl.overflow = Label.Overflow.SHRINK;
+    lbl.overflow = Label.Overflow.SHRINK;
   }
 
-  private makeButton(parent: Node, name: string, x: number, y: number, w: number, h: number, text: string, base: Readonly<Color>, onTap: () => void): void {
+  private makeButton(parent: Node, name: string, x: number, y: number, w: number, h: number, text: string, base: Readonly<Color>, variant: ResultDialogButton['variant'], onTap: () => void): void {
     const btn = new Node(name);
     btn.layer = parent.layer;
     btn.parent = parent;
     btn.addComponent(UITransform).setContentSize(w, h);
     btn.setPosition(x, y, 0);
     const g = btn.addComponent(Graphics);
-    const paint = (pressed: boolean) => this.paintKeycap(g, w, h, base, pressed);
+    const paint = (pressed: boolean) => this.paintKeycap(g, w, h, base, variant, pressed);
     paint(false);
 
     const labelNode = new Node(`${name}Label`);
@@ -240,7 +279,7 @@ export class ResultDialogView {
     labelNode.setPosition(0, 1, 0);
     const lbl = labelNode.addComponent(Label);
     lbl.string = text;
-    UiPainter.label(lbl, 19, UiTokens.color.inkDeep, true);
+    UiPainter.label(lbl, 24, UiTokens.color.inkDeep, true);
     lbl.horizontalAlign = 1;
     lbl.verticalAlign = 1;
 
@@ -253,7 +292,7 @@ export class ResultDialogView {
     btn.on(Node.EventType.TOUCH_CANCEL, () => setPressed(false));
   }
 
-  private paintKeycap(g: Graphics, w: number, h: number, accent: Readonly<Color>, pressed: boolean): void {
+  private paintKeycap(g: Graphics, w: number, h: number, accent: Readonly<Color>, variant: ResultDialogButton['variant'], pressed: boolean): void {
     g.clear();
     const faceShift = pressed ? -3 : 0;
     const lift = pressed ? 2 : 7;
@@ -265,8 +304,9 @@ export class ResultDialogView {
     g.roundRect(-w / 2 + 1, -h / 2 - lift, w - 2, h - 2, radius);
     g.fill();
     g.fillColor = UiTokens.environment.startCard;
-    g.strokeColor = new Color(146, 106, 76, pressed ? 205 : 236);
-    g.lineWidth = 3;
+    const outline = variant === 'primary' ? UiTokens.color.blue : variant === 'reward' ? UiTokens.color.amber : new Color(146, 106, 76, 255);
+    g.strokeColor = new Color(outline.r, outline.g, outline.b, pressed ? 205 : 236);
+    g.lineWidth = variant === 'primary' ? 4 : 3;
     g.roundRect(-w / 2 + 2, -h / 2 + 4 + faceShift, w - 4, h - lift - 5, radius);
     g.fill(); g.stroke();
     g.strokeColor = new Color(255, 255, 255, pressed ? 44 : 92);
@@ -274,9 +314,26 @@ export class ResultDialogView {
     g.moveTo(-w / 2 + radius + 5, h / 2 - lift - 10 + faceShift);
     g.lineTo(w / 2 - radius - 5, h / 2 - lift - 10 + faceShift);
     g.stroke();
-    g.fillColor = new Color(accent.r, accent.g, accent.b, pressed ? 108 : 158);
-    g.roundRect(-w / 2 + 16, -h / 2 + 11 + faceShift, w - 32, 5, 3);
+    g.fillColor = new Color(accent.r, accent.g, accent.b, pressed ? 132 : variant === 'primary' ? 220 : 168);
+    g.roundRect(-w / 2 + 14, -h / 2 + 10 + faceShift, w - 28, variant === 'primary' ? 7 : 5, 3);
     g.fill();
+  }
+
+  /** 与入口页同源的米白大卡：大圆角、柔和多层投影、极细暖灰描边。 */
+  private paintResultCard(g: Graphics, w: number, h: number): void {
+    const radius = Math.min(UiTokens.layout.result.cardRadius, w * 0.085);
+    g.clear();
+    for (let i = 0; i < 6; i++) {
+      g.fillColor = new Color(108, 88, 62, Math.max(4, 22 - i * 3));
+      g.roundRect(-w / 2 + 5 - i, -h / 2 - 12 - i * 3, w - 10 + i * 2, h + 2, radius + i * 2);
+      g.fill();
+    }
+    g.fillColor = UiTokens.environment.startCard;
+    g.strokeColor = new Color(214, 203, 188, 190);
+    g.lineWidth = 2;
+    g.roundRect(-w / 2, -h / 2, w, h, radius);
+    g.fill();
+    g.stroke();
   }
 
   private animateIn(panel: Node): void {

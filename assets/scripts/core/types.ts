@@ -84,6 +84,14 @@ export type GameResult = (typeof GameResult)[keyof typeof GameResult];
 export const HitQuality = { Miss: 'miss', Normal: 'normal', Perfect: 'perfect' } as const;
 export type HitQuality = (typeof HitQuality)[keyof typeof HitQuality];
 
+/** Perfect 命中后的随机奖励类型（策划文档§4.3）。 */
+export const PerfectRewardType = {
+  CooldownRefill: 'cd-refill-10',
+  ExtraUse: 'extra-use',
+  EnergyFull: 'energy-full',
+} as const;
+export type PerfectRewardType = (typeof PerfectRewardType)[keyof typeof PerfectRewardType];
+
 /** Boss分级预警挡位（§5.4①，进入最后4格分级增强） */
 export type BossTellTier = 4 | 3 | 2 | 1;
 
@@ -98,10 +106,12 @@ export interface GameEvents {
   SlotEmpty: { slot: number };
   /** 道具命中任务卡（加需求/改需求/丢锅），§4.3 */
   CardHit: { prop: PropType; slot: number; quality: HitQuality; card?: Card };
+  /** Perfect 命中后实际抽中的奖励，供表现层明确告诉玩家“赚到了什么”。 */
+  PerfectRewardGranted: { prop: PropType; reward: PerfectRewardType };
   /** 拍马屁命中AI本体（独立事件，不复用CardHit，开发计划§2） */
   AIHit: { quality: HitQuality };
   /** 无效目标/空挡Miss（不消耗次数，§4.3） */
-  PropUnavailable: { prop: PropType; reason: 'empty' | 'invalid-target' };
+  PropUnavailable: { prop: PropType; slot: number; reason: 'empty' | 'invalid-target' };
   /** 蓄力中取消（不消耗次数，§4.3-4） */
   PropCanceled: { prop: PropType };
   /** 认可度变化 */
@@ -116,6 +126,8 @@ export interface GameEvents {
   BossIncoming: { tier: BossTellTier; slot: number };
   /** 连击更新（纯演出层，§4.4） */
   ComboUpdated: { combo: number };
+  /** 单局阶段切换，用于提示中盘加速与最后冲刺。 */
+  PhaseChanged: { from: GamePhase; to: GamePhase };
   /** 一张普通卡抵达处理区（Conveyor→Approval，由 Approval 计算认可度变化） */
   CardEnteredProcessing: { card: Card };
   /** Boss卡生成进入队列（→PropSystem 触发§5.4②资源保底） */

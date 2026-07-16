@@ -86,11 +86,15 @@ describe('PropSystem · Perfect 可变奖励（§4.3）', () => {
   it('在挡位中心窗口松手＝Perfect 命中', () => {
     const { bus, prop } = setup([mk('urgent', 'active-white', 10)]);
     const q: HitQuality[] = [];
+    const rewards: string[] = [];
     bus.on('CardHit', ({ quality }) => q.push(quality));
+    bus.on('PerfectRewardGranted', ({ reward }) => rewards.push(reward));
     prop.beginCharge(PT.ChangeDemand);
     prop.tick(0.5 / SLOTS, 'mid'); // slot0 中心 scan
     prop.release(PT.ChangeDemand);
     expect(q).toEqual(['perfect']);
+    expect(rewards).toHaveLength(1);
+    expect(['cd-refill-10', 'extra-use', 'energy-full']).toContain(rewards[0]);
   });
 });
 
