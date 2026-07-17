@@ -6,6 +6,7 @@
 当前项目已经从早期 M0 规则地基，推进到可运行的 Cocos Demo 阶段。最新状态、技术债和后续路线见：
 
 - [docs/CURRENT_STATE_AND_ROADMAP.md](docs/CURRENT_STATE_AND_ROADMAP.md)
+- [docs/TELEMETRY.md](docs/TELEMETRY.md)（首局漏斗、失败归因与本地验收）
 
 ## 为什么是这一层先做（维护性命门）
 
@@ -43,7 +44,7 @@ tests/                    ← Vitest：断言文档里的每条规则
 
 ```bash
 npm install
-npm test            # 全部规则单测与验收测试（当前 94 项，排除 sim）
+npm test            # 全部规则单测与验收测试（当前 103 项，排除 sim）
 npm run test:watch  # 监听
 npm run typecheck   # 全量类型检查
 npm run sim         # 贪婪 bot 千局模拟，输出胜负/星级/峰值分布（平衡诊断）
@@ -51,7 +52,7 @@ npm run sim         # 贪婪 bot 千局模拟，输出胜负/星级/峰值分布
 
 ## 当前状态
 
-**核心规则层已全部实现，94 项单测 + 类型检查全绿：**
+**核心规则层已全部实现，103 项单测 + 类型检查全绿：**
 
 | 系统 | 职责（对应策划文档） |
 |---|---|

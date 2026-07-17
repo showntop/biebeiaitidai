@@ -6,8 +6,10 @@ import { InMemoryStorage, Session } from '../core/Session';
 import type { Storage } from '../core/Session';
 import { parseQaLaunchConfig } from '../core/QaLaunchConfig';
 import type { QaLaunchConfig } from '../core/QaLaunchConfig';
+import type { RunTelemetry } from '../core/Telemetry';
 import { buildReportText } from '../core/profile';
 import type { PlayerProfile } from '../core/profile';
+import type { RunReport } from '../core/RunReport';
 import { CardState as CS, HitQuality as HQ, PropType as PT } from '../core/types';
 import type { Card, HitQuality, PerfectRewardType, PropType } from '../core/types';
 import { FxLayer } from './FxLayer';
@@ -18,6 +20,7 @@ import { ResultDialogView, type ResultDialogButton } from './ui/ResultDialogView
 import { TaskCardView } from './ui/TaskCardView';
 import { UiPainter, type CardShellState, type KeycapState } from './ui/UiPainter';
 import { UiTokens } from './ui/UiTokens';
+import { createTelemetryBridge } from './TelemetryBridge';
 
 const { ccclass, property } = _decorator;
 
@@ -99,6 +102,7 @@ export class GameRunner extends Component {
 
   private session!: Session;
   private game!: Game;
+  private telemetry!: RunTelemetry;
   private readonly dt = 0.05; // 逻辑固定步进
   private accumulator = 0;
   private slotNodes: Node[] = [];
@@ -139,6 +143,8 @@ export class GameRunner extends Component {
   private aimGuideNode: Node | null = null;
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
+  /** 首次失败仍可复活时延迟 level_end，确保复活后的最终结果只结算一次。 */
+  private pendingTelemetryReport: { report: RunReport; failReason: 'unhandled-task' | 'boss-inspection' | 'unknown' } | null = null;
   private uiState: 'select' | 'playing' | 'result' = 'select';
   private levelSelectRoot: Node | null = null;
   private tutorialRoot: Node | null = null;
@@ -268,6 +274,7 @@ export class GameRunner extends Component {
     this.hideScenePlaceholderLabels();
     const locationSearch = (globalThis as { location?: { search?: string } }).location?.search;
     this.qaConfig = parseQaLaunchConfig(locationSearch);
+    this.telemetry = createTelemetryBridge(this.qaConfig !== null).telemetry;
     this.tutorialDone = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.TUTORIAL_DONE_KEY) === '1';
     this.perfectTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.PERFECT_TIP_KEY) === '1';
     this.session = new Session(this.qaConfig ? new InMemoryStorage() : new CocosStorage());
@@ -417,7 +424,9 @@ export class GameRunner extends Component {
     const idx = this.session.currentIndex;
     const seed = this.qaConfig?.seed
       ?? ((Date.now() % 100000) ^ ((idx + 1) * 2654435761)); // QA 固定；正式游玩每次尝试不同
-    this.game = new Game(getLevel(idx), new SeededRng(seed >>> 0), this.session.allowedPropsFor(idx));
+    const normalizedSeed = seed >>> 0;
+    this.game = new Game(getLevel(idx), new SeededRng(normalizedSeed), this.session.allowedPropsFor(idx));
+    this.telemetry.startLevel(idx, normalizedSeed);
     this.accumulator = 0;
     this.scanPos = 0;
     this.lastTimerText = '';
@@ -445,6 +454,7 @@ export class GameRunner extends Component {
       () => this.charNode,
     );
     this.bindEventFeed();
+    this.bindGameTelemetry();
     this.beginTutorialIfNeeded();
   }
 
@@ -608,6 +618,18 @@ export class GameRunner extends Component {
     );
   }
 
+  /** 规则事件统一映射为产品事件；平台 SDK 与落盘策略由 TelemetryBridge 隔离。 */
+  private bindGameTelemetry(): void {
+    this.eventUnsubs.push(
+      this.game.bus.on('CardHit', ({ prop, quality }) => this.telemetry.validHit(prop, quality)),
+      this.game.bus.on('PropUnavailable', ({ prop, reason }) => this.telemetry.invalidTarget(prop, reason)),
+      this.game.bus.on('PropCanceled', ({ prop }) => this.telemetry.gestureCanceled(prop)),
+      this.game.bus.on('ZoneChanged', ({ from, to }) => this.telemetry.approvalZoneChanged(from, to)),
+      this.game.bus.on('BossIncoming', ({ tier, slot }) => this.telemetry.bossWarning(tier, slot)),
+      this.game.bus.on('Revived', () => this.telemetry.reviveUsed()),
+    );
+  }
+
   private clearEventFeed(): void {
     this.eventUnsubs.forEach((off) => off());
     this.eventUnsubs = [];
@@ -639,6 +661,7 @@ export class GameRunner extends Component {
       this.hideTutorial();
       return;
     }
+    this.telemetry.tutorialShown(this.tutorialStep);
     this.showTutorial(UiTokens.tutorial.holdHint);
   }
 
@@ -763,18 +786,26 @@ export class GameRunner extends Component {
   }
 
   private onNext(): void {
+    this.finalizePendingTelemetry();
+    this.telemetry.navigation('next_level');
     if (this.session.startNext()) this.startGame();
   }
   private onRetry(): void {
+    this.finalizePendingTelemetry();
+    this.telemetry.navigation('retry');
     this.startGame();
   }
   private onBackToSelect(): void {
+    this.finalizePendingTelemetry();
+    this.telemetry.navigation('return_home');
     this.showLevelSelect();
   }
   /** §2.1 复活：仅 lose 且本关未用过复活时有效。成功后回到 playing 继续本关（core 已回滚认可度到69/+8s/清Boss）。 */
   private onRevive(): void {
     if (!this.game.over || this.game.result !== 'lose') return;
     if (!this.game.revive()) return; // 每关限1次，core 内部再兜一次
+    // 首次失败只是复活决策点，不作为最终 level_end；继续沿用原 run 聚合整局数据。
+    this.pendingTelemetryReport = null;
     this.reported = false;
     this.uiState = 'playing';
     this.hideReport();
@@ -1234,6 +1265,12 @@ export class GameRunner extends Component {
     this.clearPaperAim(true);
     const idx = this.session.currentIndex;
     const report = this.game.buildReport(idx);
+    const canRevive = report.result === 'lose' && !this.game.revived;
+    this.pendingTelemetryReport = {
+      report,
+      failReason: this.game.lastFailReason ?? 'unknown',
+    };
+    if (!canRevive) this.finalizePendingTelemetry();
     this.session.finishLevel(report);
     this.approvalGaugeView?.snap(report.finalApproval, this.game.approval.currentZone, '', report.timeUsedSec);
 
@@ -1245,7 +1282,6 @@ export class GameRunner extends Component {
     const meme = buildReportText(this.session.profile, report, idx);
     const rank = this.session.rankLabel;
     const day = this.session.daysEmployed;
-    const canRevive = report.result === 'lose' && !this.game.revived;
     const canNext = won && this.session.hasNext;
 
     if (this.reportLabel) this.reportLabel.node.active = false;
@@ -1302,6 +1338,13 @@ export class GameRunner extends Component {
     this.resultScrimNode = nodes.scrim;
   }
 
+  private finalizePendingTelemetry(): void {
+    const pending = this.pendingTelemetryReport;
+    if (!pending) return;
+    this.pendingTelemetryReport = null;
+    this.telemetry.endLevel(pending.report, pending.failReason);
+  }
+
   private resultPanelNode: Node | null = null;
   private resultDialogView: ResultDialogView | null = null;
 
@@ -1323,6 +1366,8 @@ export class GameRunner extends Component {
 
     // QA URL 是静态视觉基线：场景建立完成后冻结规则推进，保证等待多久截图都一致。
     if (this.qaConfig && this.qaApplied) return;
+
+    this.telemetry.sampleFrame(dt);
 
     if (this.game.over) {
       if (!this.reported) this.finishAndShowReport();
@@ -1404,11 +1449,13 @@ export class GameRunner extends Component {
 
   private onPropDown(prop: PropType, event?: EventTouch): void {
     if (this.propInteractionState !== 'idle') return;
+    this.telemetry.propHoldStarted(prop);
     if (prop === PT.KissUp) {
       const st = this.game.prop.getState(prop);
       const usable = this.game.prop.isUnlocked(prop) && st.uses > 0 && st.ready;
       if (usable) {
         this.propInteractionState = 'launching';
+        this.telemetry.released(prop);
         this.game.useKissUp();
         this.animatePaperToRobot(prop);
       } else {
@@ -1464,6 +1511,7 @@ export class GameRunner extends Component {
     this.updateAimFrame(1 / 60, true);
     const slot = this.aimingSlot;
     const quality = this.currentDragHitQuality();
+    this.telemetry.released(prop);
     this.propInteractionState = 'launching';
     this.animatePaperThrow(prop, slot, quality, () => this.game.releaseAtSlot(prop, slot, quality));
     this.clearPaperAim(false);
@@ -1473,6 +1521,7 @@ export class GameRunner extends Component {
   private onGlobalTouchMove(event: EventTouch): void {
     if (this.aimingProp === null) return;
     this.propInteractionState = 'dragging';
+    this.telemetry.dragStarted();
     this.suppressSyntheticPropCancelUntil = 0;
     this.queueAimPointer(event);
     this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
@@ -1501,6 +1550,7 @@ export class GameRunner extends Component {
   private onGlobalMouseMove(event: EventMouse): void {
     if (this.aimingProp === null) return;
     this.propInteractionState = 'dragging';
+    this.telemetry.dragStarted();
     this.suppressSyntheticPropCancelUntil = 0;
     this.queueAimPointer(event);
     this.advanceTutorial(2, UiTokens.tutorial.releaseHint);

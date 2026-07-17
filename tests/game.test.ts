@@ -80,6 +80,44 @@ describe('Game · 节奏阶段事件', () => {
   });
 });
 
+describe('Game · 失败原因归因', () => {
+  const raiseApprovalTo98 = (g: Game) => g.approval.resolveCard({
+    id: -1,
+    category: 'urgent',
+    state: 'active-white',
+    weight: 58,
+    isThreat: true,
+  });
+
+  it('普通任务进入处理区导致满值时记为未处理任务', () => {
+    const g = new Game(DefaultLevel, new SeededRng(5));
+    let guard = 0;
+    do {
+      g.conveyor.reset();
+      g.conveyor.generate('early');
+    } while (g.conveyor.slotAt(DefaultLevel.slots - 1)?.state !== 'active-white' && guard++ < 20);
+    for (let i = 0; i < DefaultLevel.slots - 1; i++) g.conveyor.step();
+    raiseApprovalTo98(g);
+    g.conveyor.step();
+    expect(g.result).toBe('lose');
+    expect(g.lastFailReason).toBe('unhandled-task');
+  });
+
+  it('Boss 临检结算导致满值时记为临检', () => {
+    const g = new Game(DefaultLevel, new SeededRng(5));
+    g.conveyor.generate('early', { forceBoss: true });
+    for (let i = 0; i < DefaultLevel.slots - 1; i++) {
+      g.conveyor.step();
+      g.conveyor.generate('early');
+    }
+    expect(g.conveyor.threatCards.length).toBeGreaterThan(0);
+    raiseApprovalTo98(g);
+    g.conveyor.step();
+    expect(g.result).toBe('lose');
+    expect(g.lastFailReason).toBe('boss-inspection');
+  });
+});
+
 describe('LevelSystem · 星级评价（§6.2）', () => {
   const lvl = new LevelSystem(BalanceConfig, DefaultLevel);
 

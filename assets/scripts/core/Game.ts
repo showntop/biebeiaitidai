@@ -44,6 +44,8 @@ export class Game {
   effectiveHits = 0;
   perfectHits = 0;
   missedThrows = 0;
+  /** 失败的直接来源，供结算归因与数据分析；通关时保持 null。 */
+  lastFailReason: 'unhandled-task' | 'boss-inspection' | null = null;
   /** §2.1 是否使用过复活（每关限1次，RunReport 采集）。 */
   revived = false;
   /** §2.1 复活后额外时长（秒）。 */
@@ -64,10 +66,14 @@ export class Game {
     this.peakApproval = level.approvalInit;
 
     // —— 事件接线 ——
-    this.bus.on('CardEnteredProcessing', ({ card }) => this.approval.resolveCard(card));
+    this.bus.on('CardEnteredProcessing', ({ card }) => {
+      this.approval.resolveCard(card);
+      if (this.result === 'lose') this.lastFailReason = 'unhandled-task';
+    });
     this.bus.on('BossInspection', ({ threatCards }) => {
       this.bossInspectionsFired++;
       this.approval.bossSettle(threatCards);
+      if (this.result === 'lose') this.lastFailReason = 'boss-inspection';
     });
     this.bus.on('BossSpawned', () => this.prop.onBossSpawned());
     this.bus.on('KissUpFreeze', ({ durationSec }) => this.applyFreeze(durationSec));
@@ -183,6 +189,7 @@ export class Game {
     if (this.revived) return false; // 每关限1次
     this.revived = true;
     this.result = 'ongoing';
+    this.lastFailReason = null;
     this.bonusDuration += 8;
     this.approval.revive(this.cfg.zones.danger.lo); // 危险区下限 69
     this.conveyor.clearBoss();
