@@ -4,6 +4,7 @@ import { createProfile, hydrateProfile } from '../assets/scripts/core/profile';
 import { PropType as PT } from '../assets/scripts/core/types';
 import type { RunReport } from '../assets/scripts/core/RunReport';
 import type { PlayerProfile } from '../assets/scripts/core/profile';
+import { createFriendChallenge } from '../assets/scripts/core/SocialChallenge';
 
 function mkReport(result: RunReport['result'], stars: number, levelIndex: number): RunReport {
   return {
@@ -142,5 +143,30 @@ describe('Session · 段位/战报文案', () => {
     expect(s.rankLabel).toBe('岗位保卫者');
     s.profile.huntWinCount = 20; // 20*3=60 → AI干扰专家
     expect(s.rankLabel).toBe('AI干扰专家');
+  });
+});
+
+describe('Session · 社交挑战隔离', () => {
+  it('可进入未解锁的好友挑战，但结算不污染主线解锁与段位', () => {
+    const storage = new InMemoryStorage();
+    const s = new Session(storage);
+    expect(s.startChallenge(createFriendChallenge(12, 42))).toBe(true);
+    expect(s.currentIndex).toBe(12);
+    expect(s.activeChallenge?.seed).toBe(42);
+    s.finishLevel(mkReport('win-hunt', 3, 12));
+    expect(s.profile.highestUnlockedLevel).toBe(0);
+    expect(s.profile.huntWinCount).toBe(0);
+    expect(s.hasNext).toBe(false);
+    expect(storage.loadProfile()).toBeNull();
+  });
+
+  it('离开挑战恢复主线最高解锁关', () => {
+    const s = new Session();
+    s.profile.highestUnlockedLevel = 3;
+    s.startChallenge(createFriendChallenge(10, 99));
+    s.leaveChallenge();
+    expect(s.activeChallenge).toBeNull();
+    expect(s.currentIndex).toBe(3);
+    expect(s.phase).toBe('ready');
   });
 });

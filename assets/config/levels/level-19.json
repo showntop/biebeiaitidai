@@ -12,5 +12,7 @@
   "idleCardRatio": 0.16,
   "boss": { "enabled": true, "minSpawnSec": 25 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "objective": { "kind": "no-miss", "label": "有 Boss 的甜点关保持零失误" },
+  "hook": "最后喘息：Boss 还在，但这一轮要求干净利落",
   "challengeHint": "甜点关：Boss仍会出但白卡密度放松"
 }

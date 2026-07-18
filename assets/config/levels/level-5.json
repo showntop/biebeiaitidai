@@ -12,5 +12,7 @@
   "idleCardRatio": 0.15,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot"],
+  "objective": { "kind": "use-prop", "prop": "throw-pot", "target": 1, "label": "用甩锅完成 1 次清场" },
+  "hook": "解锁甩锅，一次炸开堆积的任务",
   "challengeHint": "解锁丢锅！连炸3张白卡，应对堆积"
 }

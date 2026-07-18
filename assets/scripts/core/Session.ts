@@ -8,11 +8,12 @@
  * 持久化通过 Storage 接口注入（实现端用 wx.setStorageSync / LocalStorage），
  * core 不直接依赖平台 API，便于在 Node 下用 InMemoryStorage 单测。
  */
-import { LevelSequence, getLevel, unlockedPropsUpTo } from './config';
+import { LevelSequence, getLevel, allowedPropsForLevel } from './config';
 import type { PropType } from './types';
-import { createProfile, applyRunResult, rankOf, RankLabels, hydrateProfile } from './profile';
+import { createProfile, applyDailyChallengeResult, applyRunResult, rankOf, RankLabels, hydrateProfile } from './profile';
 import type { PlayerProfile } from './profile';
 import type { RunReport } from './RunReport';
+import type { ChallengeSpec } from './SocialChallenge';
 
 export type SessionPhase = 'ready' | 'playing' | 'finished';
 
@@ -50,6 +51,7 @@ export class Session {
   currentIndex: number;
   lastReport: RunReport | null = null;
   phase: SessionPhase = 'ready';
+  activeChallenge: ChallengeSpec | null = null;
 
   constructor(private storage: Storage = new NoopStorage(), startIndex?: number) {
     // 反序列化后重 hydrate，保证 daysEmployed 等 getter 不丢
@@ -78,7 +80,7 @@ export class Session {
 
   /** §1.2 第 idx 关本关允许的道具（错峰解锁累积集合）。 */
   allowedPropsFor(idx: number): PropType[] {
-    return unlockedPropsUpTo(idx);
+    return allowedPropsForLevel(idx);
   }
 
   /** 当前关叙事标题。 */
@@ -93,7 +95,24 @@ export class Session {
     this.currentIndex = clamp(idx, 0, LevelSequence.length - 1);
     this.phase = 'playing';
     this.lastReport = null;
+    this.activeChallenge = null;
     return true;
+  }
+
+  /** 社交挑战不受主线解锁限制，也不会反向污染主线解锁进度。 */
+  startChallenge(spec: ChallengeSpec): boolean {
+    if (spec.levelIndex < 0 || spec.levelIndex >= LevelSequence.length) return false;
+    this.currentIndex = spec.levelIndex;
+    this.activeChallenge = spec;
+    this.phase = 'playing';
+    this.lastReport = null;
+    return true;
+  }
+
+  leaveChallenge(): void {
+    this.activeChallenge = null;
+    this.currentIndex = this.profile.highestUnlockedLevel;
+    this.phase = 'ready';
   }
 
   /** 继续"最高解锁关"进度（最常用的进入方式）。 */
@@ -107,14 +126,19 @@ export class Session {
    */
   finishLevel(report: RunReport): void {
     this.lastReport = report;
-    applyRunResult(this.profile, this.currentIndex, report);
-    this.storage.saveProfile(this.profile);
+    if (!this.activeChallenge) {
+      applyRunResult(this.profile, this.currentIndex, report);
+      this.storage.saveProfile(this.profile);
+    } else if (this.activeChallenge.mode === 'daily') {
+      applyDailyChallengeResult(this.profile, this.activeChallenge.keyHash.toString(36), report);
+      this.storage.saveProfile(this.profile);
+    }
     this.phase = 'finished';
   }
 
   /** 下一关是否可进入（需通关解锁了下一关）。 */
   get hasNext(): boolean {
-    return this.currentIndex + 1 < LevelSequence.length && this.isLevelUnlocked(this.currentIndex + 1);
+    return !this.activeChallenge && this.currentIndex + 1 < LevelSequence.length && this.isLevelUnlocked(this.currentIndex + 1);
   }
   get isLastLevel(): boolean {
     return this.currentIndex >= LevelSequence.length - 1;

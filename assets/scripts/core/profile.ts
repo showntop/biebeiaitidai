@@ -35,6 +35,11 @@ export interface PlayerProfile {
   huntWinCount: number;
   /** §3.2 累计获得三星的关卡序号集合（去重源真值，可序列化；同一关多次三星只记一次）。 */
   star3Levels: number[];
+  /** 轻量成就与收藏均不改变战斗数值。 */
+  achievements: AchievementId[];
+  cosmetics: CosmeticId[];
+  /** 仅保留最近 14 个每日挑战最佳成绩，避免存档无限增长。 */
+  dailyRecords: DailyRecord[];
   /** 反替代进度编号 = 最高通关关卡序号 + 1。 */
   get daysEmployed(): number;
 }
@@ -56,6 +61,11 @@ export function hydrateProfile(raw: Partial<PlayerProfile> | null): PlayerProfil
   p.highestUnlockedLevel = typeof raw.highestUnlockedLevel === 'number' ? raw.highestUnlockedLevel : 0;
   p.huntWinCount = typeof raw.huntWinCount === 'number' ? raw.huntWinCount : 0;
   p.star3Levels = Array.isArray(raw.star3Levels) ? [...raw.star3Levels] : [];
+  p.achievements = Array.isArray(raw.achievements) ? raw.achievements.filter(isAchievementId) : [];
+  p.cosmetics = Array.isArray(raw.cosmetics) ? raw.cosmetics.filter(isCosmeticId) : ['desk-classic'];
+  p.dailyRecords = Array.isArray(raw.dailyRecords)
+    ? raw.dailyRecords.filter((record): record is DailyRecord => !!record && typeof record.key === 'string' && typeof record.score === 'number').slice(-14)
+    : [];
   return p;
 }
 
@@ -65,6 +75,9 @@ export function createProfile(): PlayerProfile {
     highestUnlockedLevel: 0,
     huntWinCount: 0,
     star3Levels: [],
+    achievements: [],
+    cosmetics: ['desk-classic'],
+    dailyRecords: [],
     get daysEmployed() {
       return this.highestUnlockedLevel + 1;
     },
@@ -98,6 +111,7 @@ export function rankOf(p: PlayerProfile): Rank {
  * @returns 更新后的档案（同引用）
  */
 export function applyRunResult(profile: PlayerProfile, levelIndex: number, report: RunReport): PlayerProfile {
+  awardRunAchievements(profile, report);
   if (report.result === 'lose' || report.stars === 0) return profile;
 
   // 解锁下一关
@@ -111,6 +125,80 @@ export function applyRunResult(profile: PlayerProfile, levelIndex: number, repor
     profile.star3Levels.push(levelIndex);
   }
   return profile;
+}
+
+export type AchievementId =
+  | 'first-hunt'
+  | 'perfect-chain'
+  | 'boss-clutch'
+  | 'flawless-survive'
+  | 'combo-5'
+  | 'daily-first';
+
+export type CosmeticId = 'desk-classic' | 'paper-blue' | 'ai-crash-face' | 'report-gold';
+
+export interface DailyRecord {
+  key: string;
+  score: number;
+  result: GameResult;
+  highlightTitle?: string;
+}
+
+export const AchievementLabels: Record<AchievementId, string> = {
+  'first-hunt': '第一次反向优化',
+  'perfect-chain': '三连 Perfect',
+  'boss-clutch': '老板门口截胡',
+  'flawless-survive': '无失误生存',
+  'combo-5': '五连流程粉碎',
+  'daily-first': '今日也没被替代',
+};
+
+/** 每日挑战只比较正分；相同 key 只保留更高成绩。 */
+export function applyDailyChallengeResult(profile: PlayerProfile, key: string, report: RunReport): number {
+  const score = challengeScore(report);
+  const old = profile.dailyRecords.find((record) => record.key === key);
+  if (!old || score > old.score) {
+    const next: DailyRecord = { key, score, result: report.result, highlightTitle: report.highlightTitle };
+    profile.dailyRecords = profile.dailyRecords.filter((record) => record.key !== key);
+    profile.dailyRecords.push(next);
+    if (profile.dailyRecords.length > 14) profile.dailyRecords.splice(0, profile.dailyRecords.length - 14);
+  }
+  unlock(profile, 'daily-first', 'paper-blue');
+  awardRunAchievements(profile, report);
+  return score;
+}
+
+export function challengeScore(report: RunReport): number {
+  const resultBase = report.result === 'win-hunt' ? 1400 : report.result === 'win-survive' ? 1000 : 250;
+  return Math.round(
+    resultBase
+    + report.timeUsedSec * 2
+    + report.maxCombo * 60
+    + report.perfectHits * 100
+    + report.effectiveHits * 15
+    + Math.max(0, 100 - report.finalApproval) * 3,
+  );
+}
+
+function awardRunAchievements(profile: PlayerProfile, report: RunReport): void {
+  if (report.result === 'win-hunt') unlock(profile, 'first-hunt', 'report-gold');
+  if (report.highlights?.includes('perfect-chain')) unlock(profile, 'perfect-chain', 'paper-blue');
+  if (report.highlights?.includes('boss-clutch')) unlock(profile, 'boss-clutch', 'report-gold');
+  if (report.result === 'win-survive' && report.missedThrows === 0) unlock(profile, 'flawless-survive', 'paper-blue');
+  if (report.maxCombo >= 5) unlock(profile, 'combo-5', 'ai-crash-face');
+}
+
+function unlock(profile: PlayerProfile, achievement: AchievementId, cosmetic: CosmeticId): void {
+  if (!profile.achievements.includes(achievement)) profile.achievements.push(achievement);
+  if (!profile.cosmetics.includes(cosmetic)) profile.cosmetics.push(cosmetic);
+}
+
+function isAchievementId(value: unknown): value is AchievementId {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(AchievementLabels, value);
+}
+
+function isCosmeticId(value: unknown): value is CosmeticId {
+  return value === 'desk-classic' || value === 'paper-blue' || value === 'ai-crash-face' || value === 'report-gold';
 }
 
 /** 段位中文名（用于 UI）。 */
@@ -134,13 +222,14 @@ export function rankFromScore(score: number): Rank {
 export function buildReportText(p: PlayerProfile, report: RunReport, levelIndex: number): string {
   const day = levelIndex + 1;
   const rank = RankLabels[rankOf(p)];
+  const highlight = report.highlightTitle ? `「${report.highlightTitle}」` : '';
   if (report.result === 'win-hunt') {
-    return `第${day}轮反击，我把AI逼到当场崩溃被劝退，段位：${rank}`;
+    return `第${day}轮反击${highlight}，我把AI逼到当场崩溃被劝退，段位：${rank}`;
   }
   if (report.result === 'win-survive') {
-    return `第${day}轮反击，死死扛住了AI的KPI攻势，段位：${rank}`;
+    return `第${day}轮反击${highlight}，死死扛住了AI的KPI攻势，段位：${rank}`;
   }
-  return `第${day}轮反击失败，AI已经准备接管你的工作，段位：${rank}`;
+  return `第${day}轮反击${highlight}，AI已经准备接管你的工作，下次把工位抢回来，段位：${rank}`;
 }
 
 /** 显式标注 GameResult 类型用于类型守卫（防止 typo）。 */

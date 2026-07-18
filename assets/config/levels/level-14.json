@@ -12,5 +12,7 @@
   "idleCardRatio": 0.18,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "objective": { "kind": "no-miss", "label": "甜点关全程零失误" },
+  "hook": "喘息窗口：把上一关练出的路线无伤打完",
   "challengeHint": "甜点关：起手低、时长短，轻松刷正反馈"
 }

@@ -7,6 +7,7 @@
  *  - M4 模拟验收统计源
  */
 import type { GameResult } from './types';
+import type { HighlightId } from './types';
 
 /** 一局结束后的统计快照（不可变，作为战报数据源）。 */
 export interface RunReport {
@@ -40,6 +41,13 @@ export interface RunReport {
   missedThrows: number;
   /** 是否使用了复活（§2.1）。 */
   revived: boolean;
+  /** 本关专属内容目标，旧存档/旧报告可缺省。 */
+  objectiveLabel?: string;
+  objectiveMet?: boolean;
+  /** 本局按发生顺序记录的高光，用于埋点和分享卡。 */
+  highlights?: HighlightId[];
+  /** 优先级最高的高光称号，结算页直接展示。 */
+  highlightTitle?: string;
 }
 
 /** 从 Game 实例收集结算报告（Game 结束后调用）。 */

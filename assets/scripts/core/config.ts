@@ -104,6 +104,25 @@ export interface WhiteDist {
   urgent: number;
 }
 
+export type LevelObjectiveKind =
+  | 'effective-hits'
+  | 'perfect'
+  | 'combo'
+  | 'hunt'
+  | 'boss-safe'
+  | 'no-miss'
+  | 'use-prop';
+
+export interface LevelObjective {
+  kind: LevelObjectiveKind;
+  /** 次数型目标使用；布尔型目标可省略。 */
+  target?: number;
+  /** use-prop 目标指定道具。 */
+  prop?: PropType;
+  /** 玩家可直接读懂的短句，不在 UI 层重新拼规则文案。 */
+  label: string;
+}
+
 export interface LevelDef {
   id: string;
   /** §1.3 主题叙事标题（如"第1轮反击"）。 */
@@ -118,6 +137,14 @@ export interface LevelDef {
   unlockedProps?: PropType[];
   /** §6.2 三星挑战提示文案（关卡可覆写）。 */
   challengeHint?: string;
+  /** 本关可验证的专属目标；达成后获得第三颗星。 */
+  objective?: LevelObjective;
+  /** 重试保持同一任务序列的挑战关 seed。 */
+  fixedSeed?: number;
+  /** 仅本关限制可用道具；仍不能越过累计解锁集合。 */
+  propLimit?: PropType[];
+  /** 上一关结算页展示的下一关内容钩子。 */
+  hook?: string;
 }
 
 /** 卡片定义表（按类别查权重/颜色/是否威胁）。 */
@@ -169,6 +196,13 @@ export function unlockedPropsUpTo(levelIndex: number): PropType[] {
     if (def.unlockedProps) for (const p of def.unlockedProps) acc.add(p);
   }
   return Array.from(acc);
+}
+
+/** 累计解锁与本关限用的交集，避免表现层各自实现内容规则。 */
+export function allowedPropsForLevel(levelIndex: number): PropType[] {
+  const unlocked = unlockedPropsUpTo(levelIndex);
+  const limit = getLevel(levelIndex).propLimit;
+  return limit?.length ? unlocked.filter((prop) => limit.includes(prop)) : unlocked;
 }
 
 /** 按关卡序号取 LevelDef（越界返回最后一关，便于"无限模式"兜底）。 */

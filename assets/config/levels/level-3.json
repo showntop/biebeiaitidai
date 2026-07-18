@@ -12,5 +12,7 @@
   "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand"],
+  "objective": { "kind": "hunt", "label": "把认可度压进猎杀线" },
+  "hook": "第一次主动反杀，不只是在倒计时里求生",
   "challengeHint": "小高峰关：白卡生成更快，建议尝试猎杀式通关"
 }

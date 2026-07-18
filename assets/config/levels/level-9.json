@@ -11,5 +11,7 @@
   },
   "idleCardRatio": 0.09,
   "boss": { "enabled": false, "minSpawnSec": 999 },
+  "objective": { "kind": "hunt", "label": "在高压任务流中完成反杀" },
+  "hook": "第二个高峰：高压任务流里再做一次反杀",
   "challengeHint": "第二个小高峰：认可度起手高、危机密，建议尝试猎杀式通关"
 }

@@ -57,8 +57,8 @@
             "_value": false
           },
           "physics": {
-            "_value": false,
-            "_option": "physics-ammo"
+            "_value": true,
+            "_option": "physics-builtin"
           },
           "physics-ammo": {
             "_value": false,
@@ -76,7 +76,7 @@
             }
           },
           "physics-builtin": {
-            "_value": false
+            "_value": true
           },
           "physics-2d": {
             "_value": false,
@@ -204,6 +204,7 @@
           "graphics",
           "intersection-2d",
           "mask",
+          "physics-builtin",
           "primitive",
           "tween",
           "ui"

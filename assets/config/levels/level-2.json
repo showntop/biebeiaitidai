@@ -12,5 +12,7 @@
   "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand"],
+  "objective": { "kind": "perfect", "target": 1, "label": "打出 1 次 Perfect" },
+  "hook": "学会金色锁定，第一次打出 Perfect",
   "challengeHint": "白卡权重更高，注意危区白卡生成加速"
 }

@@ -11,5 +11,7 @@
   },
   "idleCardRatio": 0.10,
   "boss": { "enabled": false, "minSpawnSec": 999 },
+  "objective": { "kind": "perfect", "target": 2, "label": "累计 2 次 Perfect" },
+  "hook": "四道具齐全，用两次 Perfect 掌控节奏",
   "challengeHint": "四道具齐全：攻防节奏自由切换"
 }

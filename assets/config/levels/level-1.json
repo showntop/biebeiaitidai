@@ -12,5 +12,7 @@
   "idleCardRatio": 0.15,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand"],
+  "objective": { "kind": "effective-hits", "target": 1, "label": "命中 1 张任务卡" },
+  "hook": "先学会把第一张麻烦稳稳扔回去",
   "challengeHint": "用改需求把白卡变红卡，原样抵达会加分"
 }

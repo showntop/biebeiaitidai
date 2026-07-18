@@ -12,5 +12,9 @@
   "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "fixedSeed": 110011,
+  "propLimit": ["add-demand", "change-demand", "throw-pot"],
+  "objective": { "kind": "combo", "target": 4, "label": "限三种道具打出 4 连击" },
+  "hook": "固定任务流挑战：少一个救场键也要四连击",
   "challengeHint": "四道具齐全：攻防节奏自由切换"
 }

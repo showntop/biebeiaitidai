@@ -12,5 +12,7 @@
   "idleCardRatio": 0.20,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand"],
+  "objective": { "kind": "no-miss", "label": "全程零失误" },
+  "hook": "甜点关：用零失误收一轮轻松正反馈",
   "challengeHint": "甜点关：认可度起手低、时长短，轻松通关刷正反馈"
 }

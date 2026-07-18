@@ -11,5 +11,7 @@
   },
   "idleCardRatio": 0.12,
   "boss": { "enabled": true, "minSpawnSec": 20 },
+  "objective": { "kind": "boss-safe", "label": "不让 Boss 临检生效" },
+  "hook": "第一场 Boss 临检，读懂预警并极限拦截",
   "challengeHint": "Boss临检！及时用丢锅炸/拍马屁冻 Boss 卡，别让它走到处理区"
 }

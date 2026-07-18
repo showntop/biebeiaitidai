@@ -12,5 +12,8 @@
   "idleCardRatio": 0.10,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "propLimit": ["add-demand", "change-demand", "throw-pot"],
+  "objective": { "kind": "perfect", "target": 3, "label": "不用冻结打出 3 次 Perfect" },
+  "hook": "暂时收起冻结，用准度和甩锅完成三次 Perfect",
   "challengeHint": "白卡权重堆高，注意拍马屁冻结时机"
 }

@@ -30,7 +30,10 @@
 ## 局末聚合
 
 `level_end` 同时提供：首击耗时、有效命中率、Perfect 率、取消率、无效目标次数、四种道具使用分布、
-FPS P50/P10、认可度峰值/终值、最终结果和星级。内部首轮目标值见
+FPS P50/P10、认可度峰值/终值、最终结果和星级。P3 起额外记录 `objectiveMet / objectiveLabel`，
+P4 起记录即时 `highlight` 以及局末 `highlightCount / highlightIds / highlightTitle`，
+P5 起记录 `share_open / share_result / challenge_start`，用于判断战报是否真的带来同局挑战，
+用来区分基础通关与专属挑战达成，避免只看三星率猜测玩家卡点。内部首轮目标值见
 [`CURRENT_STATE_AND_ROADMAP.md`](./CURRENT_STATE_AND_ROADMAP.md)。
 
 ## 本地验收

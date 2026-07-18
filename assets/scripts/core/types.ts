@@ -95,6 +95,30 @@ export type PerfectRewardType = (typeof PerfectRewardType)[keyof typeof PerfectR
 /** Boss分级预警挡位（§5.4①，进入最后4格分级增强） */
 export type BossTellTier = 4 | 3 | 2 | 1;
 
+/** 一局内可被结算、战报与分享共同复用的高光类型。 */
+export type HighlightId =
+  | 'clean-hit'
+  | 'combo-3'
+  | 'combo-5'
+  | 'perfect-chain'
+  | 'boss-clutch'
+  | 'danger-comeback'
+  | 'hunt-finish'
+  | 'revive-comeback'
+  | 'hold-the-line'
+  | 'last-stand';
+
+export type HighlightTier = 1 | 2 | 3;
+
+export interface HighlightMoment {
+  id: HighlightId;
+  label: string;
+  /** 1=轻高光，2=强高光，3=本局封面级高光。 */
+  tier: HighlightTier;
+  /** 发生于本局第几秒，供回放/埋点使用。 */
+  atSec: number;
+}
+
 /* ---------------- 事件契约（开发计划§2，discriminated union） ---------------- */
 
 export interface GameEvents {
@@ -140,6 +164,8 @@ export interface GameEvents {
   KissUpFreeze: { durationSec: number };
   /** AI表情请求（AIActorSystem→表现层，纯演出） */
   AIExpression: { expression: ExpressionId; durationSec: number; priority: number };
+  /** 可截图、可结算、可分享的本局高光。 */
+  Highlight: HighlightMoment;
   /** 局结束 */
   GameOver: { result: GameResult };
   /** §2.1 复活生效（认可度回滚+加时+清Boss临检）。供 UI 弹窗/演出层订阅。 */
@@ -159,6 +185,8 @@ export type ExpressionId =
   | 'shy' // 拍马屁命中
   | 'idle-look' // 空闲张望
   | 'tense' // 持续危险区紧张
+  | 'facepalm' // 连续 Perfect / 极限拦截后捂脸
+  | 'crashed' // 高连击后短暂死机
   | 'called-in'; // 猎杀式通关 被叫去谈话
 
 /** 传送带只读视图（PropSystem 仅需读取挡位以判定目标有效性，不持有 ConveyorSystem 引用） */

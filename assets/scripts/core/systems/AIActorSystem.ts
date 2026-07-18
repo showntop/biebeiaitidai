@@ -36,6 +36,14 @@ export class AIActorSystem {
       this.timeSinceEvent = 0;
       this.request('busy-pretend', 8, 6); // 装忙直到 Boss 被处理（近似时长）
     });
+    bus.on('Highlight', ({ id }) => {
+      this.timeSinceEvent = 0;
+      if (id === 'perfect-chain' || id === 'boss-clutch') this.request('facepalm', 10, 1.2);
+      else if (id === 'combo-5') this.request('crashed', 9, 1.0);
+      else if (id === 'hunt-finish') this.request('called-in', 12, 2.0);
+      else if (id === 'danger-comeback') this.request('surprised', 8, 0.9);
+      else if (id === 'revive-comeback') this.request('panic', 10, 1.1);
+    });
   }
 
   /** 当前应播放的表情（null=回落到默认专注姿态）。 */

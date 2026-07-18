@@ -7,7 +7,10 @@ import type { Storage } from '../core/Session';
 import { parseQaLaunchConfig } from '../core/QaLaunchConfig';
 import type { QaLaunchConfig } from '../core/QaLaunchConfig';
 import type { RunTelemetry } from '../core/Telemetry';
-import { buildReportText } from '../core/profile';
+import { AchievementLabels, buildReportText } from '../core/profile';
+import { highlightQuip } from '../core/systems/HighlightSystem';
+import { buildSharePayload, createDailyChallenge, encodeChallenge, localDateKey, parseChallengeQuery } from '../core/SocialChallenge';
+import type { ChallengeSpec } from '../core/SocialChallenge';
 import type { PlayerProfile } from '../core/profile';
 import type { RunReport } from '../core/RunReport';
 import { CardState as CS, HitQuality as HQ, PropType as PT } from '../core/types';
@@ -21,6 +24,10 @@ import { TaskCardView } from './ui/TaskCardView';
 import { UiPainter, type CardShellState, type KeycapState } from './ui/UiPainter';
 import { UiTokens } from './ui/UiTokens';
 import { createTelemetryBridge } from './TelemetryBridge';
+import { SensoryFeedback } from './SensoryFeedback';
+import { ShareBridge } from './ShareBridge';
+import { RewardedAdBridge } from './RewardedAdBridge';
+import { RuntimeMonitor } from './RuntimeMonitor';
 
 const { ccclass, property } = _decorator;
 
@@ -41,6 +48,12 @@ interface PaperTuning {
   endScale: Vec3;
   guideDots: number;
   guideDotRadius: number;
+  /** 越高越跟手；重道具刻意保留一点惯性。 */
+  followHz: number;
+  /** 起手弹起尺度，让四种道具在第一触感上可区分。 */
+  liftScale: number;
+  /** 横向拖动时的速度形变量。 */
+  dragStretchFactor: number;
 }
 
 type PaperOutcome = 'hit' | 'miss' | 'invalid';
@@ -103,6 +116,12 @@ export class GameRunner extends Component {
   private session!: Session;
   private game!: Game;
   private telemetry!: RunTelemetry;
+  private readonly shareBridge = new ShareBridge();
+  private readonly rewardedAds = new RewardedAdBridge();
+  private runtimeMonitor: RuntimeMonitor | null = null;
+  private reviveAdPending = false;
+  private incomingChallenge: ChallengeSpec | null = null;
+  private currentSeed = 0;
   private readonly dt = 0.05; // 逻辑固定步进
   private accumulator = 0;
   private slotNodes: Node[] = [];
@@ -137,7 +156,7 @@ export class GameRunner extends Component {
   private aimLockSec = 0;
   private aimPerfectReady = false;
   private aimTargetValid = true;
-  private lastAimHapticAt = 0;
+  private readonly sensory = new SensoryFeedback();
   private paperAimNode: Node | null = null;
   private paperAimShadowNode: Node | null = null;
   private aimGuideNode: Node | null = null;
@@ -182,6 +201,9 @@ export class GameRunner extends Component {
       endScale: new Vec3(0.72, 0.72, 1),
       guideDots: 8,
       guideDotRadius: 3.2,
+      followHz: 38,
+      liftScale: 1.04,
+      dragStretchFactor: 0.88,
     },
     [PT.ChangeDemand]: {
       arcHeight: 175,
@@ -192,6 +214,9 @@ export class GameRunner extends Component {
       endScale: new Vec3(0.66, 0.66, 1),
       guideDots: 9,
       guideDotRadius: 3,
+      followHz: 30,
+      liftScale: 1.07,
+      dragStretchFactor: 1.02,
     },
     [PT.ThrowPot]: {
       arcHeight: 72,
@@ -202,6 +227,9 @@ export class GameRunner extends Component {
       endScale: new Vec3(0.82, 0.82, 1),
       guideDots: 7,
       guideDotRadius: 3.8,
+      followHz: 22,
+      liftScale: 1.11,
+      dragStretchFactor: 1.18,
     },
     [PT.KissUp]: {
       arcHeight: 96,
@@ -212,6 +240,9 @@ export class GameRunner extends Component {
       endScale: new Vec3(0.42, 0.42, 1),
       guideDots: 8,
       guideDotRadius: 3.1,
+      followHz: 33,
+      liftScale: 1.02,
+      dragStretchFactor: 0.94,
     },
   };
   /** 任务队列使用专用图标卡，不再回退成英文类别文字。 */
@@ -274,7 +305,10 @@ export class GameRunner extends Component {
     this.hideScenePlaceholderLabels();
     const locationSearch = (globalThis as { location?: { search?: string } }).location?.search;
     this.qaConfig = parseQaLaunchConfig(locationSearch);
+    this.incomingChallenge = this.qaConfig ? null : parseChallengeQuery(locationSearch);
     this.telemetry = createTelemetryBridge(this.qaConfig !== null).telemetry;
+    this.runtimeMonitor = new RuntimeMonitor(this.telemetry);
+    this.runtimeMonitor.start();
     this.tutorialDone = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.TUTORIAL_DONE_KEY) === '1';
     this.perfectTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.PERFECT_TIP_KEY) === '1';
     this.session = new Session(this.qaConfig ? new InMemoryStorage() : new CocosStorage());
@@ -330,6 +364,7 @@ export class GameRunner extends Component {
         if (err || !tex) {
           // eslint-disable-next-line no-console
           console.warn(`[GameRunner] 加载失败: ${info.path}`, err?.message);
+          this.runtimeMonitor?.assetLoadFailure(info.path);
         } else {
           const sf = new SpriteFrame();
           sf.texture = tex;
@@ -376,6 +411,9 @@ export class GameRunner extends Component {
     this.clearPaperAim(true);
     this.clearEventFeed();
     this.hideTutorial();
+    this.sensory.dispose();
+    this.runtimeMonitor?.dispose();
+    this.runtimeMonitor = null;
   }
 
   /** 键盘操控：1/2/3 蓄力(松手释放)、4 拍马屁、R 重试、N 下一关、B/Escape 返回选关。 */
@@ -422,9 +460,13 @@ export class GameRunner extends Component {
     this.resetCardVisuals();
     this.clearPaperAim(true);
     const idx = this.session.currentIndex;
+    const levelDef = getLevel(idx);
     const seed = this.qaConfig?.seed
+      ?? this.session.activeChallenge?.seed
+      ?? levelDef.fixedSeed
       ?? ((Date.now() % 100000) ^ ((idx + 1) * 2654435761)); // QA 固定；正式游玩每次尝试不同
     const normalizedSeed = seed >>> 0;
+    this.currentSeed = normalizedSeed;
     this.game = new Game(getLevel(idx), new SeededRng(normalizedSeed), this.session.allowedPropsFor(idx));
     this.telemetry.startLevel(idx, normalizedSeed);
     this.accumulator = 0;
@@ -435,7 +477,10 @@ export class GameRunner extends Component {
     this.uiState = 'playing';
     this.eventTextPriority = 0;
     this.eventTextUntilSec = 0;
-    if (this.tutorialDone) this.setEventText('任务队列启动，先处理高风险卡片', 2.8, 1);
+    if (this.tutorialDone) {
+      const objective = levelDef.objective?.label ?? levelDef.challengeHint ?? '先处理高风险卡片';
+      this.setEventText(`本关目标 · ${objective}`, 4.2, 2);
+    }
     this.hideReport();
     this.hideLevelSelect();
     this.setGameUIVisible(true);
@@ -455,6 +500,7 @@ export class GameRunner extends Component {
     );
     this.bindEventFeed();
     this.bindGameTelemetry();
+    this.bindSensoryFeedback();
     this.beginTutorialIfNeeded();
   }
 
@@ -615,6 +661,9 @@ export class GameRunner extends Component {
           : '最后冲刺：守住岗位别让队列爆掉';
         this.setEventText(phaseText, 3.0, 6);
       }),
+      this.game.bus.on('Highlight', ({ id, tier }) => {
+        this.setEventText(highlightQuip(id), tier >= 3 ? 3.8 : 2.8, 7 + tier);
+      }),
     );
   }
 
@@ -627,6 +676,44 @@ export class GameRunner extends Component {
       this.game.bus.on('ZoneChanged', ({ from, to }) => this.telemetry.approvalZoneChanged(from, to)),
       this.game.bus.on('BossIncoming', ({ tier, slot }) => this.telemetry.bossWarning(tier, slot)),
       this.game.bus.on('Revived', () => this.telemetry.reviveUsed()),
+      this.game.bus.on('Highlight', ({ id, tier }) => this.telemetry.highlight(id, tier)),
+    );
+  }
+
+  /** 音效和震动只订阅规则事件，不参与判定；任何设备能力失败都不会阻断一局。 */
+  private bindSensoryFeedback(): void {
+    this.eventUnsubs.push(
+      this.game.bus.on('CardHit', ({ prop, quality }) => {
+        if (quality === HQ.Perfect) this.sensory.play('perfect');
+        else this.sensory.play(prop === PT.ThrowPot ? 'heavy-hit' : 'hit');
+        this.sensory.haptic(prop === PT.ThrowPot || quality === HQ.Perfect ? 'heavy' : 'medium', 72);
+      }),
+      this.game.bus.on('AIHit', ({ quality }) => {
+        this.sensory.play(quality === HQ.Perfect ? 'perfect' : 'hit');
+        this.sensory.haptic(quality === HQ.Perfect ? 'heavy' : 'medium', 72);
+      }),
+      this.game.bus.on('PropUnavailable', () => {
+        this.sensory.play('miss');
+        this.sensory.haptic('light', 110);
+      }),
+      this.game.bus.on('ZoneChanged', ({ to }) => {
+        if (to === 'danger') {
+          this.sensory.play('danger');
+          this.sensory.haptic('medium', 220);
+        }
+      }),
+      this.game.bus.on('BossIncoming', ({ tier }) => {
+        if (tier === 4 || tier === 1) this.sensory.play('boss');
+        if (tier === 1) this.sensory.haptic('heavy', 260);
+      }),
+      this.game.bus.on('Revived', () => {
+        this.sensory.play('revive');
+        this.sensory.haptic('heavy', 180);
+      }),
+      this.game.bus.on('GameOver', ({ result }) => {
+        this.sensory.play(result === 'lose' ? 'lose' : 'win');
+        this.sensory.haptic('heavy', 220);
+      }),
     );
   }
 
@@ -798,11 +885,21 @@ export class GameRunner extends Component {
   private onBackToSelect(): void {
     this.finalizePendingTelemetry();
     this.telemetry.navigation('return_home');
+    if (this.session.activeChallenge) {
+      this.session.leaveChallenge();
+      this.incomingChallenge = null;
+    }
     this.showLevelSelect();
   }
   /** §2.1 复活：仅 lose 且本关未用过复活时有效。成功后回到 playing 继续本关（core 已回滚认可度到69/+8s/清Boss）。 */
-  private onRevive(): void {
+  private async onRevive(): Promise<void> {
     if (!this.game.over || this.game.result !== 'lose') return;
+    if (this.reviveAdPending) return;
+    this.reviveAdPending = true;
+    const adOutcome = await this.rewardedAds.show('revive');
+    this.reviveAdPending = false;
+    this.telemetry.rewardedAdResult('revive', adOutcome);
+    if (adOutcome !== 'bypassed' && adOutcome !== 'completed') return;
     if (!this.game.revive()) return; // 每关限1次，core 内部再兜一次
     // 首次失败只是复活决策点，不作为最终 level_end；继续沿用原 run 聚合整局数据。
     this.pendingTelemetryReport = null;
@@ -867,6 +964,7 @@ export class GameRunner extends Component {
     const cardCY = metrics.cy;
 
     this.paintStartAlertBar(root, cardW, cardH, cardCY);
+    this.makeFeedbackToggles(root, cardW, cardH, cardCY);
 
     const titleNode = new Node('StartTitle');
     titleNode.layer = 33554432;
@@ -891,7 +989,16 @@ export class GameRunner extends Component {
     this.makeStartDoodles(root, vis, cardW, cardH, cardCY);
 
     this.makeStartButton(root, 0, cardCY - cardH * 0.328, cardW * 0.875, cardH * 0.124,
-      `继续第${this.session.profile.highestUnlockedLevel + 1}关`, () => this.onLevelSelected(this.session.profile.highestUnlockedLevel));
+      this.primaryStartText(), () => this.onPrimaryStart());
+    this.makeStartSecondaryButton(
+      root,
+      0,
+      cardCY - cardH * 0.58,
+      Math.min(cardW * 0.52, 240),
+      Math.min(62, cardH * 0.105),
+      '今日同局挑战',
+      () => this.onDailyChallenge(),
+    );
 
     const rankIcon = new Node('RankIcon');
     rankIcon.layer = 33554432;
@@ -922,11 +1029,37 @@ export class GameRunner extends Component {
       const label = rankInfo.getComponent(Label);
       if (label) {
         const day = this.session.daysEmployed;
-        label.string = `已到第${this.session.profile.highestUnlockedLevel + 1}关 · 坚守第${day}天`;
+        label.string = `已到第${this.session.profile.highestUnlockedLevel + 1}关 · 坚守${day}天 · 成就${this.session.profile.achievements.length}/6`;
         label.color = GameRunner.UI_MUTED;
         label.isBold = false;
       }
     }
+    const startLabel = this.levelSelectRoot.getChildByName('StartButton')?.getChildByName('StartButtonLabel')?.getComponent(Label);
+    if (startLabel) startLabel.string = this.primaryStartText();
+  }
+
+  private primaryStartText(): string {
+    if (this.incomingChallenge) return this.incomingChallenge.mode === 'daily' ? '开始今日挑战' : '接受好友挑战';
+    return `继续第${this.session.profile.highestUnlockedLevel + 1}关`;
+  }
+
+  private onPrimaryStart(): void {
+    const challenge = this.incomingChallenge;
+    if (challenge) {
+      if (!this.session.startChallenge(challenge)) return;
+      this.telemetry.challengeStarted(challenge.mode, encodeChallenge(challenge));
+      this.startGame();
+      return;
+    }
+    this.onLevelSelected(this.session.profile.highestUnlockedLevel);
+  }
+
+  private onDailyChallenge(): void {
+    const challenge = createDailyChallenge(localDateKey());
+    if (!this.session.startChallenge(challenge)) return;
+    this.incomingChallenge = challenge;
+    this.telemetry.challengeStarted('daily', encodeChallenge(challenge));
+    this.startGame();
   }
 
   /** 选关回调。 */
@@ -1058,6 +1191,74 @@ export class GameRunner extends Component {
     }
   }
 
+  /** 开始页的轻量反馈开关。默认开启、设置持久化，不把系统能力藏在调试 API 里。 */
+  private makeFeedbackToggles(parent: Node, cardW: number, cardH: number, cardCY: number): void {
+    const w = Math.min(112, cardW * 0.135);
+    const h = Math.min(56, cardH * 0.062);
+    const y = cardCY + cardH * 0.385;
+    const inset = Math.min(34, cardW * 0.04);
+    const specs: Array<{
+      name: string;
+      text: string;
+      x: number;
+      enabled: () => boolean;
+      toggle: () => void;
+    }> = [
+      {
+        name: 'SoundToggle',
+        text: '音效',
+        x: -cardW / 2 + inset + w / 2,
+        enabled: () => this.sensory.settings.soundEnabled,
+        toggle: () => {
+          const next = !this.sensory.settings.soundEnabled;
+          this.sensory.setSoundEnabled(next);
+          if (next) { this.sensory.unlock(); this.sensory.play('pickup'); }
+        },
+      },
+      {
+        name: 'HapticsToggle',
+        text: '震动',
+        x: cardW / 2 - inset - w / 2,
+        enabled: () => this.sensory.settings.hapticsEnabled,
+        toggle: () => {
+          const next = !this.sensory.settings.hapticsEnabled;
+          this.sensory.setHapticsEnabled(next);
+          if (next) this.sensory.haptic('medium', 0);
+        },
+      },
+    ];
+    specs.forEach((spec) => {
+      const node = new Node(spec.name);
+      node.layer = 33554432;
+      node.parent = parent;
+      node.addComponent(UITransform).setContentSize(w, h);
+      node.setPosition(spec.x, y, 0);
+      const g = node.addComponent(Graphics);
+      const labelNode = this.mkLabel(node, `${spec.name}Label`, 7, 0, spec.text, Math.min(24, Math.max(19, w * 0.22)), w - 28, h - 4);
+      const label = labelNode.getComponent(Label)!;
+      label.isBold = true;
+      const paint = (pressed = false) => {
+        const enabled = spec.enabled();
+        const accent = enabled ? GameRunner.START_BLUE : GameRunner.START_MUTED;
+        g.clear();
+        g.fillColor = pressed ? new Color(226, 218, 205, 255) : GameRunner.START_SOFT;
+        g.strokeColor = new Color(accent.r, accent.g, accent.b, enabled ? 190 : 92);
+        g.lineWidth = enabled ? 2 : 1;
+        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
+        g.fill(); g.stroke();
+        g.fillColor = new Color(accent.r, accent.g, accent.b, enabled ? 255 : 112);
+        g.circle(-w / 2 + 18, 0, enabled ? 5 : 4);
+        g.fill();
+        label.color = enabled ? GameRunner.START_TEXT : GameRunner.START_MUTED;
+        node.setScale(pressed ? 0.96 : 1, pressed ? 0.96 : 1, 1);
+      };
+      paint();
+      node.on(Node.EventType.TOUCH_START, () => paint(true));
+      node.on(Node.EventType.TOUCH_CANCEL, () => paint(false));
+      node.on(Node.EventType.TOUCH_END, () => { spec.toggle(); paint(false); });
+    });
+  }
+
   private makeStartButton(parent: Node, x: number, y: number, w: number, h: number, text: string, onTap: () => void): Node {
     const btn = new Node('StartButton');
     btn.layer = 33554432;
@@ -1116,6 +1317,37 @@ export class GameRunner extends Component {
       setPressed(false);
       onTap();
     });
+    return btn;
+  }
+
+  /** 每日挑战是次级、自愿入口：沿用纸质按键语言，但不与主线蓝色主按钮争抢权重。 */
+  private makeStartSecondaryButton(parent: Node, x: number, y: number, w: number, h: number, text: string, onTap: () => void): Node {
+    const btn = new Node('DailyChallengeButton');
+    btn.layer = 33554432;
+    btn.parent = parent;
+    btn.addComponent(UITransform).setContentSize(w, h + 8);
+    btn.setPosition(x, y, 0);
+    const g = btn.addComponent(Graphics);
+    const labelNode = this.mkLabel(btn, 'DailyChallengeLabel', 0, 2, text, Math.min(27, Math.max(22, h * 0.42)), w - 28, h - 8);
+    const label = labelNode.getComponent(Label)!;
+    label.isBold = true;
+    label.color = GameRunner.START_TEXT;
+    const paint = (pressed: boolean) => {
+      g.clear();
+      g.fillColor = new Color(91, 70, 49, pressed ? 25 : 38);
+      g.roundRect(-w / 2 + 4, -h / 2 - (pressed ? 1 : 6), w - 8, h, Math.min(16, h * 0.30));
+      g.fill();
+      g.fillColor = GameRunner.START_CARD;
+      g.strokeColor = new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, pressed ? 170 : 220);
+      g.lineWidth = 2.5;
+      g.roundRect(-w / 2, -h / 2 + (pressed ? -2 : 1), w, h - 5, Math.min(16, h * 0.30));
+      g.fill(); g.stroke();
+      labelNode.setPosition(0, pressed ? -2 : 2, 0);
+    };
+    paint(false);
+    btn.on(Node.EventType.TOUCH_START, () => paint(true));
+    btn.on(Node.EventType.TOUCH_CANCEL, () => paint(false));
+    btn.on(Node.EventType.TOUCH_END, () => { paint(false); onTap(); });
     return btn;
   }
 
@@ -1271,7 +1503,11 @@ export class GameRunner extends Component {
       failReason: this.game.lastFailReason ?? 'unknown',
     };
     if (!canRevive) this.finalizePendingTelemetry();
+    const achievementsBefore = new Set(this.session.profile.achievements);
     this.session.finishLevel(report);
+    const newAchievementLabels = this.session.profile.achievements
+      .filter((id) => !achievementsBefore.has(id))
+      .map((id) => AchievementLabels[id]);
     this.approvalGaugeView?.snap(report.finalApproval, this.game.approval.currentZone, '', report.timeUsedSec);
 
     const vis = view.getVisibleSize();
@@ -1279,10 +1515,25 @@ export class GameRunner extends Component {
     const pw = Math.min(vis.width * resultLayout.widthRatio, resultLayout.maxWidth);
     const ph = Math.min(vis.height * resultLayout.heightRatio, resultLayout.maxHeight);
     const won = report.result !== 'lose';
-    const meme = buildReportText(this.session.profile, report, idx);
+    const reportMeme = buildReportText(this.session.profile, report, idx);
+    const objectiveLine = report.objectiveLabel
+      ? `${report.objectiveMet ? '目标达成 ✓' : '目标未达'} · ${report.objectiveLabel}`
+      : '';
+    const highlightLine = report.highlightTitle ? `本局高光 · ${report.highlightTitle}` : '';
+    const achievementLine = newAchievementLabels.length > 0 ? `新成就 · ${newAchievementLabels.join(' / ')}` : '';
+    const accoladeLine = [highlightLine, achievementLine].filter(Boolean).join(' · ');
+    const meme = [accoladeLine, objectiveLine, reportMeme].filter(Boolean).join('\n');
     const rank = this.session.rankLabel;
     const day = this.session.daysEmployed;
     const canNext = won && this.session.hasNext;
+    const nextLevel = canNext ? getLevel(idx + 1) : null;
+    const nextHook = canNext
+      ? `下一关 · ${nextLevel?.hook ?? nextLevel?.objective?.label ?? nextLevel?.challengeHint ?? '新的任务正在排队'}`
+      : this.session.activeChallenge
+        ? '同一套任务流 · 晒出战报让好友接招'
+      : won
+        ? '全部轮次完成 · 回到选关复盘高光'
+        : `再试一次 · ${report.objectiveLabel ?? getLevel(idx).challengeHint ?? '稳住认可度'}`;
 
     if (this.reportLabel) this.reportLabel.node.active = false;
     if (this.retryBtn) this.retryBtn.active = false;
@@ -1293,6 +1544,7 @@ export class GameRunner extends Component {
     const buttons: ResultDialogButton[] = won
       ? [
         { name: 'BtnRetry', text: '再玩一次', color: UiTokens.color.walnut, variant: 'secondary', tap: () => this.onRetry() },
+        { name: 'BtnShare', text: '晒战报', color: UiTokens.color.blue, variant: 'secondary', tap: () => { void this.onShareReport(report, rank, day); } },
         {
           name: 'BtnNext',
           text: canNext ? '下一关' : '回到选关',
@@ -1304,7 +1556,10 @@ export class GameRunner extends Component {
       : [
         { name: 'BtnRetry', text: '立即重试', color: UiTokens.color.blue, variant: 'primary', tap: () => this.onRetry() },
         ...(canRevive
-          ? [{ name: 'BtnRevive', text: '复活 +8s', color: UiTokens.color.amber, variant: 'reward' as const, tap: () => this.onRevive() }]
+          ? [{ name: 'BtnRevive', text: this.rewardedAds.config.enabled ? '看广告复活' : '复活 +8s', color: UiTokens.color.amber, variant: 'reward' as const, tap: () => { void this.onRevive(); } }]
+          : []),
+        ...(!canRevive
+          ? [{ name: 'BtnShare', text: '晒战报', color: UiTokens.color.blue, variant: 'secondary' as const, tap: () => { void this.onShareReport(report, rank, day); } }]
           : []),
         { name: 'BtnBack', text: '回到选关', color: UiTokens.color.walnut, variant: 'secondary', tap: () => this.onBackToSelect() },
       ];
@@ -1320,7 +1575,7 @@ export class GameRunner extends Component {
       won,
       result: report.result,
       title: report.result === 'win-hunt' ? '反杀成功!' : report.result === 'win-survive' ? '岗位守住!' : '被 AI 优化了…',
-      badgeText: report.result === 'win-hunt' ? '猎杀通关' : report.result === 'win-survive' ? '生存通关' : '淘汰',
+      badgeText: report.highlightTitle ?? (report.result === 'win-hunt' ? '猎杀通关' : report.result === 'win-survive' ? '生存通关' : '淘汰'),
       stars: report.stars,
       peakApproval: report.peakApproval,
       finalApproval: report.finalApproval,
@@ -1332,10 +1587,23 @@ export class GameRunner extends Component {
       rank,
       day,
       meme,
+      nextHook,
       buttons,
     });
     this.resultPanelNode = nodes.panel;
     this.resultScrimNode = nodes.scrim;
+  }
+
+  private async onShareReport(report: RunReport, rank: string, day: number): Promise<void> {
+    const payload = buildSharePayload(report, rank, day, this.currentSeed);
+    this.telemetry.shareOpened(payload.card.variant);
+    const outcome = await this.shareBridge.share(payload);
+    this.telemetry.shareResult(outcome);
+    // Web 预览无系统分享面板时复制挑战链接；结果页不额外弹阻断式弹窗。
+    if (outcome === 'copied') {
+      // eslint-disable-next-line no-console
+      console.info('[Share] 挑战链接已复制');
+    }
   }
 
   private finalizePendingTelemetry(): void {
@@ -1361,6 +1629,7 @@ export class GameRunner extends Component {
   /* ---------- 主循环 ---------- */
 
   update(dt: number): void {
+    this.runtimeMonitor?.observeFrame(dt);
     // 选关页：不驱动游戏逻辑
     if (this.uiState === 'select') return;
 
@@ -1449,11 +1718,15 @@ export class GameRunner extends Component {
 
   private onPropDown(prop: PropType, event?: EventTouch): void {
     if (this.propInteractionState !== 'idle') return;
+    this.sensory.unlock();
+    this.sensory.play('press');
+    this.sensory.haptic('light', 80);
     this.telemetry.propHoldStarted(prop);
     if (prop === PT.KissUp) {
       const st = this.game.prop.getState(prop);
       const usable = this.game.prop.isUnlocked(prop) && st.uses > 0 && st.ready;
       if (usable) {
+        this.sensory.play('pickup');
         this.propInteractionState = 'launching';
         this.telemetry.released(prop);
         this.game.useKissUp();
@@ -1466,6 +1739,7 @@ export class GameRunner extends Component {
       return;
     }
     if (this.game.beginCharge(prop)) {
+      this.sensory.play('pickup');
       this.aimStart = this.propSourcePoint(prop);
       this.aimPoint = event ? this.pointFromPointer(event) : this.aimStart.clone();
       this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
@@ -1700,9 +1974,10 @@ export class GameRunner extends Component {
 
     this.node.addChild(propNode);
     this.paperAimNode = propNode;
+    const tuning = this.paperTuning(prop);
     visualNode.setScale(0.72, 0.72, 1);
     tween(visualNode)
-      .to(UiTokens.aim.liftSec, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'backOut' })
+      .to(UiTokens.aim.liftSec, { scale: new Vec3(tuning.liftScale, tuning.liftScale, 1) }, { easing: 'backOut' })
       .to(0.06, { scale: new Vec3(1, 1, 1) }, { easing: 'quadInOut' })
       .start();
   }
@@ -1740,8 +2015,9 @@ export class GameRunner extends Component {
   /** 每帧最多执行一次的拖动表现更新：跟手、速度形变、影子、吸附与轨迹。 */
   private updateAimFrame(dt: number, force = false): void {
     if (this.aimingProp === null) return;
+    const tuning = this.paperTuning(this.aimingProp);
     const prevX = this.aimPoint.x;
-    const follow = force ? 1 : 1 - Math.exp(-UiTokens.aim.followHz * Math.max(0.001, Math.min(dt, 0.05)));
+    const follow = force ? 1 : 1 - Math.exp(-tuning.followHz * Math.max(0.001, Math.min(dt, 0.05)));
     this.aimPoint.set(
       this.aimPoint.x + (this.aimDesiredPoint.x - this.aimPoint.x) * follow,
       this.aimPoint.y + (this.aimDesiredPoint.y - this.aimPoint.y) * follow,
@@ -1766,7 +2042,7 @@ export class GameRunner extends Component {
       if (this.aimPerfectReady) {
         this.aimPerfectReady = false;
       }
-      if (previousSlot >= 0) this.lightAimHaptic();
+      if (previousSlot >= 0) this.lightAimFeedback('tick');
     }
     const alignment = this.aimAlignmentRatio(nextSlot);
     if (targetValid && !slotChanged && alignment <= UiTokens.aim.perfectAlignmentRatio) {
@@ -1781,7 +2057,7 @@ export class GameRunner extends Component {
       this.aimPerfectReady = perfectReady;
       this.paintAimTarget(this.aimingProp, perfectReady, targetValid);
       if (perfectReady) {
-        this.lightAimHaptic();
+        this.lightAimFeedback('lock');
         if (!this.perfectTipShown) {
           this.perfectTipShown = true;
           sys.localStorage?.setItem(GameRunner.PERFECT_TIP_KEY, '1');
@@ -1795,7 +2071,7 @@ export class GameRunner extends Component {
       const speed = Math.min(UiTokens.aim.velocityCap, Math.abs(this.aimVelocityX));
       const stretch = Math.min(
         UiTokens.aim.dragStretchMax,
-        1 + Math.abs(this.aimPoint.y - this.aimStart.y) / 980 + speed * UiTokens.aim.dragSpeedStretch,
+        1 + (Math.abs(this.aimPoint.y - this.aimStart.y) / 980 + speed * UiTokens.aim.dragSpeedStretch) * tuning.dragStretchFactor,
       );
       this.paperAimNode.setScale(stretch, 1 / stretch, 1);
       const tilt = Math.max(
@@ -1888,21 +2164,14 @@ export class GameRunner extends Component {
     g.stroke();
   }
 
-  private lightAimHaptic(): void {
-    const now = Date.now();
-    if (now - this.lastAimHapticAt < UiTokens.aim.hapticMinIntervalMs) return;
-    this.lastAimHapticAt = now;
-    const wxApi = (globalThis as any).wx;
-    if (wxApi?.vibrateShort) {
-      try { wxApi.vibrateShort({ type: 'light' }); } catch { /* 平台不支持时静默降级 */ }
-    }
+  private lightAimFeedback(kind: 'tick' | 'lock'): void {
+    this.sensory.play(kind === 'lock' ? 'target-lock' : 'target-tick');
+    this.sensory.haptic(kind === 'lock' ? 'medium' : 'light', UiTokens.aim.hapticMinIntervalMs);
   }
 
-  private releaseAimHaptic(): void {
-    const wxApi = (globalThis as any).wx;
-    if (wxApi?.vibrateShort) {
-      try { wxApi.vibrateShort({ type: 'medium' }); } catch { /* 平台不支持时静默降级 */ }
-    }
+  private releaseAimFeedback(prop: PropType): void {
+    this.sensory.playRelease(prop);
+    this.sensory.haptic(prop === PT.ThrowPot ? 'heavy' : 'medium', 72);
   }
 
   private drawAimGuide(): void {
@@ -1971,7 +2240,7 @@ export class GameRunner extends Component {
     const op = paper.getComponent(UIOpacity) ?? paper.addComponent(UIOpacity);
     op.opacity = 255;
     this.emitLaunchBurst(start, prop);
-    this.releaseAimHaptic();
+    this.releaseAimFeedback(prop);
     const outDuration = tuning.duration * (prop === PT.ThrowPot ? 0.42 : 0.48);
     const inDuration = Math.max(0.08, tuning.duration - outDuration);
     const launchScale = new Vec3(tuning.startScale.x * 1.16, tuning.startScale.y * 0.76, 1);
@@ -2031,7 +2300,7 @@ export class GameRunner extends Component {
     paper.setPosition(start);
     paper.setScale(tuning.startScale);
     this.emitLaunchBurst(start, prop);
-    this.releaseAimHaptic();
+    this.releaseAimFeedback(prop);
     tween(paper)
       .to(tuning.duration * 0.55, { position: peak, angle: tuning.spin * 0.42, scale: tuning.midScale }, { easing: 'quadOut' })
       .to(tuning.duration * 0.45, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: 'backIn' })
@@ -3619,7 +3888,7 @@ export class GameRunner extends Component {
 
 /**
  * 平台存档适配：微信小游戏 wx 优先，浏览器 localStorage 兜底，都没有则不持久化。
- * 只存 3 个数据字段（daysEmployed 是 getter，由 core/Session.hydrateProfile 在读档时重建）。
+ * 只存纯数据字段（daysEmployed 是 getter，由 core/Session.hydrateProfile 在读档时重建）。
  */
 class CocosStorage implements Storage {
   private readonly KEY = 'braatn_profile_v1';
@@ -3639,6 +3908,9 @@ class CocosStorage implements Storage {
       highestUnlockedLevel: p.highestUnlockedLevel,
       huntWinCount: p.huntWinCount,
       star3Levels: p.star3Levels,
+      achievements: p.achievements,
+      cosmetics: p.cosmetics,
+      dailyRecords: p.dailyRecords,
     });
     this.write(data);
   }

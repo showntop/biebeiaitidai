@@ -12,5 +12,7 @@
   "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["kiss-up"],
+  "objective": { "kind": "use-prop", "prop": "kiss-up", "target": 1, "label": "用拍马屁冻结 1 次队列" },
+  "hook": "解锁拍马屁，在危机中按下暂停键",
   "challengeHint": "解锁拍马屁！冻结传送带，危急时刻一键救场"
 }

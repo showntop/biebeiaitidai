@@ -33,6 +33,8 @@ export interface ResultDialogModel {
   rank: string;
   day: number;
   meme: string;
+  /** 按钮上方的一句话内容预告，给“下一关”一个明确动机。 */
+  nextHook?: string;
   buttons: ResultDialogButton[];
 }
 
@@ -222,6 +224,20 @@ export class ResultDialogView {
     model.buttons.forEach((button, i) => {
       this.makeButton(panel, button.name, -btnSpan / 2 + i * (btnW + btnGap), btnY, btnW, resultLayout.buttonHeight, button.text, button.color, button.variant, button.tap);
     });
+    if (model.nextHook) {
+      this.addLabel(
+        panel,
+        'NextHook',
+        0,
+        btnY + resultLayout.buttonHeight * 0.82,
+        model.nextHook,
+        18,
+        pw * 0.78,
+        34,
+        UiTokens.color.muted,
+        false,
+      );
+    }
   }
 
   private metricsFor(model: ResultDialogModel): Array<{ label: string; value: string }> {

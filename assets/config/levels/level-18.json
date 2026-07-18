@@ -12,5 +12,8 @@
   "idleCardRatio": 0.12,
   "boss": { "enabled": true, "minSpawnSec": 18 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "fixedSeed": 180018,
+  "objective": { "kind": "perfect", "target": 4, "label": "雪崩压力下完成 4 次 Perfect" },
+  "hook": "最高压固定局：全道具对抗雪崩，冲四次 Perfect",
   "challengeHint": "第四个小高峰：Boss + 最高白卡密度"
 }

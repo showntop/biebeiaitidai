@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Game } from '../assets/scripts/core/Game';
-import { LevelSequence, unlockedPropsUpTo } from '../assets/scripts/core/config';
+import { LevelSequence, allowedPropsForLevel } from '../assets/scripts/core/config';
 import { SeededRng } from '../assets/scripts/core/rng';
 import { DefensiveBot, OffensiveBot } from './bots';
 import type { Bot } from './bots';
@@ -23,7 +23,7 @@ function runSim(botFactory: () => Bot, label: string, N = 300): LevelStat[] {
     let peakSum = 0;
     let bossFired = 0;
     for (let s = 1; s <= N; s++) {
-      const g = new Game(level, new SeededRng(s + idx * 9973), unlockedPropsUpTo(idx));
+      const g = new Game(level, new SeededRng(s + idx * 9973), allowedPropsForLevel(idx));
       g.bus.on('BossInspection', () => bossFired++);
       const bot = botFactory();
       for (let t = 0; t < 120 && !g.over; t += dt) {

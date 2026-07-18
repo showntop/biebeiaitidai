@@ -4,6 +4,7 @@ import { PropSystem } from './systems/PropSystem';
 import { ApprovalSystem } from './systems/ApprovalSystem';
 import { AIActorSystem } from './systems/AIActorSystem';
 import { LevelSystem } from './systems/LevelSystem';
+import { HighlightSystem } from './systems/HighlightSystem';
 import type { RunStats } from './systems/LevelSystem';
 import { BalanceConfig, PropsConfig, DefaultLevel } from './config';
 import { phaseFor } from './config';
@@ -32,6 +33,7 @@ export class Game {
   readonly approval: ApprovalSystem;
   readonly prop: PropSystem;
   readonly ai: AIActorSystem;
+  readonly highlights: HighlightSystem;
   readonly level: LevelSystem;
   private readonly cfg = BalanceConfig;
 
@@ -44,6 +46,7 @@ export class Game {
   effectiveHits = 0;
   perfectHits = 0;
   missedThrows = 0;
+  readonly propHits: Partial<Record<PropType, number>> = {};
   /** 失败的直接来源，供结算归因与数据分析；通关时保持 null。 */
   lastFailReason: 'unhandled-task' | 'boss-inspection' | null = null;
   /** §2.1 是否使用过复活（每关限1次，RunReport 采集）。 */
@@ -62,6 +65,7 @@ export class Game {
     this.approval = new ApprovalSystem(BalanceConfig, this.bus, level.approvalInit);
     this.prop = new PropSystem(BalanceConfig, this.bus, rng, this.conveyor, level.slots, allowedProps);
     this.ai = new AIActorSystem(this.bus, BalanceConfig);
+    this.highlights = new HighlightSystem(this.bus);
     this.level = new LevelSystem(BalanceConfig, level);
     this.peakApproval = level.approvalInit;
 
@@ -81,7 +85,11 @@ export class Game {
     this.bus.on('CardHit', ({ prop, slot, quality }) => {
       this.applyPropEffect(prop, slot);
       this.effectiveHits++;
+      this.propHits[prop] = (this.propHits[prop] ?? 0) + 1;
       if (quality === 'perfect') this.perfectHits++;
+    });
+    this.bus.on('AIHit', () => {
+      this.propHits[PT.KissUp] = (this.propHits[PT.KissUp] ?? 0) + 1;
     });
     this.bus.on('PropUnavailable', () => {
       this.missedThrows++;
@@ -112,6 +120,7 @@ export class Game {
     if (this.over) return;
     this.prop.tick(dt, this.phase);
     this.ai.tick(dt);
+    this.highlights.tick(dt);
 
     if (this.freezeRemaining > 0) {
       this.freezeRemaining -= dt;
@@ -245,6 +254,11 @@ export class Game {
       peakApproval: this.peakApproval,
       timeUsedSec: this.elapsed,
       bossInspectionsFired: this.bossInspectionsFired,
+      maxCombo: this.maxCombo,
+      effectiveHits: this.effectiveHits,
+      perfectHits: this.perfectHits,
+      missedThrows: this.missedThrows,
+      propHits: this.propHits,
     };
     this.stars = this.level.starRating(this.result, stats);
   }
@@ -268,6 +282,19 @@ export class Game {
       perfectHits: this.perfectHits,
       missedThrows: this.missedThrows,
       revived: this.revived,
+      objectiveLabel: def.objective?.label,
+      objectiveMet: this.level.objectiveMet(this.result, {
+        peakApproval: this.peakApproval,
+        timeUsedSec: this.elapsed,
+        bossInspectionsFired: this.bossInspectionsFired,
+        maxCombo: this.maxCombo,
+        effectiveHits: this.effectiveHits,
+        perfectHits: this.perfectHits,
+        missedThrows: this.missedThrows,
+        propHits: this.propHits,
+      }),
+      highlights: this.highlights.earned.map((moment) => moment.id),
+      highlightTitle: this.highlights.best?.label,
     };
   }
 }

@@ -19,6 +19,8 @@ function report(result: RunReport['result'] = 'win-survive'): RunReport {
     perfectHits: 1,
     missedThrows: 1,
     revived: false,
+    objectiveLabel: '命中 1 张任务卡',
+    objectiveMet: result !== 'lose',
   };
 }
 
@@ -78,6 +80,10 @@ describe('RunTelemetry', () => {
       throwPotUses: 1,
       fpsP50: 30,
       fpsP10: 30,
+      objectiveMet: false,
+      objectiveLabel: '命中 1 张任务卡',
+      highlightCount: 0,
+      highlightIds: '',
     });
     expect(sink.events.find((e) => e.name === 'fail_reason')?.payload.reason).toBe('boss-inspection');
     expect(sink.events.find((e) => e.name === 'retry')).toMatchObject({ runId: 's2-1', levelIndex: 2 });
@@ -94,5 +100,36 @@ describe('RunTelemetry', () => {
     telemetry.startLevel(1, 2);
     telemetry.dragStarted();
     expect(sink.events.filter((e) => e.name === 'first_drag')).toHaveLength(2);
+  });
+
+  it('高光事件与局末高光摘要使用同一口径', () => {
+    const sink = new MemoryTelemetrySink();
+    const telemetry = new RunTelemetry(sink, {
+      sessionId: 's4', platform: 'test', deviceTier: 'mid', appVersion: '0.1.0',
+    }, () => 100);
+    telemetry.startLevel(0, 11);
+    telemetry.highlight('boss-clutch', 3);
+    const runReport = report();
+    runReport.highlights = ['clean-hit', 'boss-clutch'];
+    runReport.highlightTitle = '门口截胡';
+    telemetry.endLevel(runReport);
+
+    expect(sink.events.find((e) => e.name === 'highlight')?.payload).toEqual({ id: 'boss-clutch', tier: 3 });
+    expect(sink.events.find((e) => e.name === 'level_end')?.payload).toMatchObject({
+      highlightCount: 2,
+      highlightIds: 'clean-hit,boss-clutch',
+      highlightTitle: '门口截胡',
+    });
+  });
+
+  it('商业化与运行监控事件不依赖活跃对局也能落盘', () => {
+    const sink = new MemoryTelemetrySink();
+    const telemetry = new RunTelemetry(sink, {
+      sessionId: 's5', platform: 'test', deviceTier: 'low', appVersion: '0.1.0',
+    }, () => 10);
+    telemetry.rewardedAdResult('revive', 'unavailable');
+    telemetry.runtimeSignal('asset-load-failure', 'art/cards/card-key');
+    expect(sink.events.find((event) => event.name === 'rewarded_ad_result')?.payload).toEqual({ placement: 'revive', outcome: 'unavailable' });
+    expect(sink.events.find((event) => event.name === 'runtime_signal')?.payload).toEqual({ kind: 'asset-load-failure', detail: 'art/cards/card-key' });
   });
 });

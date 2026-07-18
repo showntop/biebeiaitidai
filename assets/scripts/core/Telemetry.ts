@@ -1,5 +1,5 @@
 import type { RunReport } from './RunReport';
-import type { HitQuality, PropType } from './types';
+import type { HighlightId, HighlightTier, HitQuality, PropType } from './types';
 
 export type TelemetryEventName =
   | 'session_start'
@@ -15,12 +15,18 @@ export type TelemetryEventName =
   | 'gesture_cancel'
   | 'approval_zone_changed'
   | 'boss_warning'
+  | 'highlight'
   | 'revive_used'
   | 'result_type'
   | 'fail_reason'
   | 'retry'
   | 'next_level'
-  | 'return_home';
+  | 'return_home'
+  | 'share_open'
+  | 'share_result'
+  | 'challenge_start'
+  | 'rewarded_ad_result'
+  | 'runtime_signal';
 
 export type TelemetryValue = string | number | boolean | null;
 export type TelemetryPayload = Record<string, TelemetryValue>;
@@ -177,6 +183,33 @@ export class RunTelemetry {
     this.emit('revive_used', {});
   }
 
+  highlight(id: HighlightId, tier: HighlightTier): void {
+    this.emit('highlight', { id, tier });
+  }
+
+  challengeStarted(mode: string, code: string): void {
+    this.emit('challenge_start', { mode, code });
+  }
+
+  shareOpened(variant: string): void {
+    this.emit('share_open', { variant });
+  }
+
+  shareResult(outcome: string): void {
+    this.emit('share_result', { outcome });
+    this.sink.flush?.();
+  }
+
+  rewardedAdResult(placement: string, outcome: string): void {
+    this.emit('rewarded_ad_result', { placement, outcome });
+    this.sink.flush?.();
+  }
+
+  runtimeSignal(kind: string, detail: string | null = null): void {
+    this.emit('runtime_signal', { kind, detail });
+    this.sink.flush?.();
+  }
+
   navigation(name: 'retry' | 'next_level' | 'return_home'): void {
     this.emit(name, {});
     this.sink.flush?.();
@@ -211,6 +244,11 @@ export class RunTelemetry {
       fpsP10: percentile(run.frameFps, 0.10),
       peakApproval: report.peakApproval,
       finalApproval: report.finalApproval,
+      objectiveMet: report.objectiveMet ?? null,
+      objectiveLabel: report.objectiveLabel ?? null,
+      highlightCount: report.highlights?.length ?? 0,
+      highlightIds: report.highlights?.join(',') ?? '',
+      highlightTitle: report.highlightTitle ?? null,
       addDemandUses: run.propUses['add-demand'],
       changeDemandUses: run.propUses['change-demand'],
       throwPotUses: run.propUses['throw-pot'],

@@ -12,5 +12,8 @@
   "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "fixedSeed": 150015,
+  "objective": { "kind": "combo", "target": 5, "label": "固定任务流打出 5 连击" },
+  "hook": "检查点：同一任务流比拼五连击稳定性",
   "challengeHint": "检查点：综合难度中等，四道具配合流畅"
 }

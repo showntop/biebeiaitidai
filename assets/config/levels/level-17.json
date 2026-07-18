@@ -12,5 +12,7 @@
   "idleCardRatio": 0.09,
   "boss": { "enabled": true, "minSpawnSec": 20 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "objective": { "kind": "combo", "target": 5, "label": "Boss 压力下保持 5 连击" },
+  "hook": "Boss 与高权重白卡同场，连击不能断",
   "challengeHint": "Boss + 高权重白卡双重压力"
 }

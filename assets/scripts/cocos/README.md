@@ -21,6 +21,8 @@ Web 构建启动后，可用查询参数直接进入关键画面。所有 QA 场
 
 浏览器自动化可等待 `globalThis.__BRAATN_QA__.ready === true`，并读取其中的卡片签名验证同种子复现。
 
+操作音效、震动、四种道具重量与性能基线见 [`docs/SENSORY_FEEDBACK.md`](../../../docs/SENSORY_FEEDBACK.md)。
+
 ## 场景搭建步骤
 
 1. **新建/打开场景** `assets/scenes/Game.scene`
@@ -62,7 +64,7 @@ Canvas
 
 ## 注意事项（cc 层，需在编辑器实测）
 
-- GameRunner 的关卡流逻辑全部来自 `core/Session`（已在 Node 下 12 项单测覆盖）；此处只做节点接线与渲染。
+- GameRunner 的关卡流逻辑全部来自 `core/Session`（当前规则层共 132 项单测覆盖）；此处只做节点接线与渲染。
 - 关卡/解锁/段位/战报数值若不一致，优先查 `assets/config/levels/*.json` 与 `core/profile.ts`，不在 cc 层调。
 - 占位渲染（文字+色块），美术资源接入后替换 `renderSlot`/`reportLabel` 的渲染即可，core 无需改动。
 
@@ -79,7 +81,7 @@ Canvas
 
 ## 排查：打不了 / 画面不动 / 按钮没反应
 
-几乎都是**编辑器侧节点问题**（core 逻辑在 89 个单测里正常），按顺序查：
+几乎都是**编辑器侧节点问题**（core 逻辑在 132 个单测里正常），按顺序查：
 
 1. **看 Console（浏览器预览按 F12，编辑器 Preview 看 Console）**
    - 有红色报错 → 把报错贴出来，多半是某节点没接（null）。
@@ -92,3 +94,12 @@ Canvas
    - 数字不动、`over=false` → 真卡住了，看 Console 红错。
 
 3. **按钮命中区**（最高频原因）：Cocos 3.x 触摸命中走 UITransform 包围盒。纯 Node 或只有 Label 的按钮命中区≈0，表现为"按钮没反应"。每个道具/流程按钮节点务必：`UITransform`(160×80) + `Sprite`(背景) + `Button`(可选，带按压反馈)。
+
+## 排查：`Can not find class 'cc.PhysicMaterial'`
+
+Cocos Creator 3.8.8 的内置默认物理材质仍使用旧类名 `cc.PhysicMaterial`，运行时依靠物理框架注册兼容别名；即使项目没有主动使用刚体，构建仍会序列化这份默认材质。
+
+- `settings/v2/packages/engine.json` 必须保持 `physics = physics-builtin`，不能只为了缩包关闭整个物理框架。
+- 本项目是纯 2D：`3d` 保持关闭，场景中不要保留 `DirectionalLight`，天空盒必须禁用并清空立方体贴图。
+- 修改引擎裁剪配置后，先停止旧 Preview，再完全退出并重启 Creator 3.8.8；旧预览页缓存着上一版引擎脚本，单纯刷新有时不会重建别名注册链。
+- 发布前同时检查构建产物中 `cc.PhysicMaterial` 与 `cc.PhysicsMaterial` 均存在，并执行 `tests/cocos-scene-integrity.test.ts`。

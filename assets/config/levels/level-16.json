@@ -12,5 +12,7 @@
   "idleCardRatio": 0.10,
   "boss": { "enabled": true, "minSpawnSec": 22 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
+  "objective": { "kind": "use-prop", "prop": "kiss-up", "target": 2, "label": "用拍马屁冻结 2 次 Boss 压力" },
+  "hook": "临检常态化：两次精准冻结化解 Boss 压力",
   "challengeHint": "Boss临检常态化！及时用丢锅炸/拍马屁冻 Boss 卡"
 }

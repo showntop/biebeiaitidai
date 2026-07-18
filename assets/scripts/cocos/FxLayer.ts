@@ -89,6 +89,7 @@ export class FxLayer {
     this.on('PropCanceled', () => this.fxCancel());
     this.on('AIHit', ({ quality }) => this.fxAIHit(quality));
     this.on('AIExpression', ({ expression, durationSec }) => this.fxAIExpression(expression, durationSec));
+    this.on('Highlight', ({ label, tier }) => this.fxHighlight(label, tier));
   }
 
   private on<K extends keyof GameEvents>(name: K, fn: (p: GameEvents[K]) => void): void {
@@ -374,6 +375,20 @@ export class FxLayer {
     this.shake(4, 0.2);
   }
 
+  /* ---------- 本局高光：局部纸质横幅，不用红/黄整屏闪烁 ---------- */
+
+  private fxHighlight(label: string, tier: number): void {
+    const color = tier >= 3
+      ? new Color(225, 151, 38, 255)
+      : tier === 2
+        ? new Color(54, 143, 221, 255)
+        : new Color(83, 160, 119, 255);
+    const title = tier >= 3 ? `本局高光 · ${label}` : `漂亮 · ${label}`;
+    this.statusBanner(title, color, tier >= 3 ? 1.25 : 0.82, 142);
+    if (tier >= 2) this.rewardBurst(new Vec3(0, 118, 0), color, tier >= 3 ? 0.72 : 0.5, tier >= 3);
+    if (tier >= 3) this.shake(3.2, 0.16);
+  }
+
   /* ---------- 猎杀线 ---------- */
 
   private fxHuntCharge(): void {
@@ -453,6 +468,8 @@ export class FxLayer {
       shy: '被夸了',
       'idle-look': '摸鱼?',
       tense: '紧张',
+      facepalm: '捂脸了',
+      crashed: '死机中',
       'called-in': '约谈',
     };
     const color = this.expressionColor(expression);
@@ -464,11 +481,12 @@ export class FxLayer {
     const ai = this.getCharacterNode();
     if (!ai?.isValid) return;
     Tween.stopAllByTarget(ai);
-    const stress = expression === 'panic' || expression === 'tense' || expression === 'busy-pretend';
+    const stress = expression === 'panic' || expression === 'tense' || expression === 'busy-pretend' || expression === 'facepalm';
     const happy = expression === 'confident' || expression === 'shy' || expression === 'combo-face';
-    const sx = stress ? 0.97 : happy ? 1.04 : 1.02;
-    const sy = stress ? 1.05 : happy ? 0.97 : 1.02;
-    const angle = stress ? 3 : happy ? -2 : 0;
+    const crashed = expression === 'crashed';
+    const sx = crashed ? 1.06 : stress ? 0.97 : happy ? 1.04 : 1.02;
+    const sy = crashed ? 0.92 : stress ? 1.05 : happy ? 0.97 : 1.02;
+    const angle = crashed ? -5 : stress ? 3 : happy ? -2 : 0;
     tween(ai)
       .to(0.08, { scale: new Vec3(sx, sy, 1), angle }, { easing: 'quadOut' })
       .delay(Math.min(0.28, Math.max(0.08, durationSec * 0.35)))
@@ -517,8 +535,8 @@ export class FxLayer {
   }
 
   private expressionColor(expression: ExpressionId): Color {
-    if (expression === 'panic' || expression === 'tense' || expression === 'busy-pretend') return new Color(226, 64, 54, 255);
-    if (expression === 'surprised' || expression === 'bewildered' || expression === 'combo-face') return new Color(244, 172, 32, 255);
+    if (expression === 'panic' || expression === 'tense' || expression === 'busy-pretend' || expression === 'facepalm') return new Color(226, 64, 54, 255);
+    if (expression === 'surprised' || expression === 'bewildered' || expression === 'combo-face' || expression === 'crashed') return new Color(244, 172, 32, 255);
     if (expression === 'confident' || expression === 'shy' || expression === 'called-in') return new Color(78, 170, 74, 255);
     return new Color(106, 140, 168, 255);
   }
