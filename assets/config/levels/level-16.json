@@ -10,9 +10,21 @@
     "crisis": { "routine": 0.17, "report": 0.19, "key": 0.23, "proposal": 0.28, "urgent": 0.13 }
   },
   "idleCardRatio": 0.10,
-  "boss": { "enabled": true, "minSpawnSec": 22 },
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.08, "crisis": 0.15 },
+    "linkRatio": { "early": 0.04, "mid": 0.10, "crisis": 0.15 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
+  },
+  "boss": {
+    "enabled": true,
+    "minSpawnSec": 22,
+    "scheduleSec": [24, 45],
+    "patternLabel": "加码最高风险 · 抽查2张 · 24/45秒",
+    "inspectionLimit": 2,
+    "arrivalEffect": "escalate-highest"
+  },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "objective": { "kind": "use-prop", "prop": "kiss-up", "target": 2, "label": "用拍马屁冻结 2 次 Boss 压力" },
-  "hook": "临检常态化：两次精准冻结化解 Boss 压力",
-  "challengeHint": "Boss临检常态化！及时用丢锅炸/拍马屁冻 Boss 卡"
+  "hook": "Boss 入场会加码最高风险任务，两次精准冻结化解压力",
+  "challengeHint": "Boss 入场让最高风险 +2；预警期先处理高危卡"
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import sceneSource from '../assets/scenes/Game.scene?raw';
 import engineSettings from '../settings/v2/packages/engine.json';
+import gameRunnerSource from '../assets/scripts/cocos/GameRunner.ts?raw';
 
 describe('Cocos 纯 2D 场景完整性', () => {
   it('主场景不再序列化 3D 灯光或启用天空盒', () => {
@@ -31,5 +32,12 @@ describe('Cocos 纯 2D 场景完整性', () => {
     expect(config.cache['physics-builtin']._value).toBe(true);
     expect(config.includeModules).not.toContain('3d');
     expect(config.includeModules).toContain('physics-builtin');
+  });
+
+  it('道具按钮在节点内闭环接收松手，微信端不依赖全局 TOUCH_END 才能投出', () => {
+    expect(gameRunnerSource).toContain('btn.on(Node.EventType.TOUCH_START');
+    expect(gameRunnerSource).toContain('btn.on(Node.EventType.TOUCH_END');
+    expect(gameRunnerSource).toContain('btn.on(Node.EventType.TOUCH_CANCEL');
+    expect(gameRunnerSource).not.toContain('btn.on(Node.EventType.TOUCH_MOVE');
   });
 });

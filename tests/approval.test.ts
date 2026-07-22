@@ -127,6 +127,18 @@ describe('ApprovalSystem · 双路径胜负（§6.2）', () => {
     expect(sys.currentResult).toBe('win-hunt');
   });
 
+  it('猎杀蓄力进度可供 HUD 读取，离开猎杀线后归零', () => {
+    sys.resolveCard(mkCard('urgent', 'rework', 10));
+    sys.resolveCard(mkCard('urgent', 'rework', 10));
+    sys.resolveCard(mkCard('urgent', 'rework', 5)); // 15 → hunt
+    expect(sys.huntProgress).toBe(0);
+    sys.tick(0.75);
+    expect(sys.huntProgress).toBeCloseTo(0.375);
+    sys.resolveCard(mkCard('urgent', 'active-white', 10)); // 25 → good
+    sys.tick(0.01);
+    expect(sys.huntProgress).toBe(0);
+  });
+
   it('倒计时归零未触发其它判定 → 生存式通关 win-survive（§6.2②）', () => {
     const results: GameResult[] = [];
     bus.on('GameOver', ({ result }) => results.push(result));

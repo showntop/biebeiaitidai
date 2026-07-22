@@ -10,11 +10,16 @@
     "crisis": { "routine": 0.18, "report": 0.19, "key": 0.23, "proposal": 0.28, "urgent": 0.12 }
   },
   "idleCardRatio": 0.12,
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.05, "crisis": 0.10 },
+    "linkRatio": { "early": 0.04, "mid": 0.08, "crisis": 0.12 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 1
+  },
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "fixedSeed": 110011,
   "propLimit": ["add-demand", "change-demand", "throw-pot"],
   "objective": { "kind": "combo", "target": 4, "label": "限三种道具打出 4 连击" },
-  "hook": "固定任务流挑战：少一个救场键也要四连击",
-  "challengeHint": "四道具齐全：攻防节奏自由切换"
+  "hook": "精英任务首次出现：先破盾，再返工",
+  "challengeHint": "精英任务有一层护盾；改需求需要连续处理两次"
 }

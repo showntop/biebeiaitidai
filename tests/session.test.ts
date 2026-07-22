@@ -82,6 +82,31 @@ describe('Session · 结算与解锁', () => {
     s.finishLevel(mkReport('win-hunt', 3, 0));
     expect(s.profile.huntWinCount).toBe(1);
     expect(s.profile.star3Levels).toEqual([0]);
+    expect(s.lastProgression).toMatchObject({
+      mode: 'main',
+      rankScoreBefore: 0,
+      rankScoreAfter: 4.5,
+      totalStarsBefore: 0,
+      totalStarsAfter: 3,
+      bestStarsBefore: 0,
+      bestStarsAfter: 3,
+      unlockedNextLevel: true,
+    });
+  });
+
+  it('结算摘要只报告本局首次解锁的成就和外观', () => {
+    const s = new Session();
+    s.startLevel(0);
+    const first = mkReport('win-hunt', 3, 0);
+    first.maxCombo = 5;
+    s.finishLevel(first);
+    expect(s.lastProgression?.newAchievements).toEqual(expect.arrayContaining(['first-hunt', 'combo-5']));
+    expect(s.lastProgression?.newCosmetics).toEqual(expect.arrayContaining(['report-gold', 'ai-crash-face']));
+
+    s.startLevel(0);
+    s.finishLevel(first);
+    expect(s.lastProgression?.newAchievements).toEqual([]);
+    expect(s.lastProgression?.newCosmetics).toEqual([]);
   });
 
   it('末关通关：isLastLevel=true，hasNext=false（不会越界）', () => {
@@ -158,6 +183,7 @@ describe('Session · 社交挑战隔离', () => {
     expect(s.profile.huntWinCount).toBe(0);
     expect(s.hasNext).toBe(false);
     expect(storage.loadProfile()).toBeNull();
+    expect(s.lastProgression).toMatchObject({ mode: 'friend', rankScoreBefore: 0, rankScoreAfter: 0 });
   });
 
   it('离开挑战恢复主线最高解锁关', () => {

@@ -80,6 +80,19 @@ describe('PropSystem · 加需求（插队键，随手可用）', () => {
     expect(hits).toEqual([PT.AddDemand]);
     expect(prop.getState(PT.ThrowPot).energy).toBeCloseTo(0.25, 5);
   });
+
+  it('系统暂停可静默终止蓄力，不消耗道具也不记玩家取消', () => {
+    const { bus, prop } = setup();
+    let canceled = 0;
+    bus.on('PropCanceled', () => canceled++);
+    const usesBefore = prop.getState(PT.AddDemand).uses;
+    expect(prop.beginCharge(PT.AddDemand)).toBe(true);
+    prop.tick(0.22, 'early');
+    prop.suspendCharge();
+    expect(prop.chargingProp).toBeNull();
+    expect(prop.getState(PT.AddDemand).uses).toBe(usesBefore);
+    expect(canceled).toBe(0);
+  });
 });
 
 describe('PropSystem · Perfect 可变奖励（§4.3）', () => {
@@ -98,7 +111,7 @@ describe('PropSystem · Perfect 可变奖励（§4.3）', () => {
   });
 });
 
-describe('PropSystem · 连击（§4.4，纯演出不计数值）', () => {
+describe('PropSystem · 连击阶段奖励（§4.4）', () => {
   it('窗口内连续有效命中 → 连击递增；超窗 → 重新计 1', () => {
     const { belt, prop } = setup([mk('urgent', 'active-white', 10)]);
     // 1: 加需求（首用无CD）
@@ -118,6 +131,46 @@ describe('PropSystem · 连击（§4.4，纯演出不计数值）', () => {
     prop.tick(0.3, 'early');
     prop.release(PT.AddDemand);
     expect(prop.currentCombo).toBe(1);
+  });
+
+  it('3 连击返还当前纸团冷却并只触发一次阶段奖励', () => {
+    const { bus, prop } = setup([mk('urgent', 'active-white', 10)]);
+    const rewards: Array<{ combo: number; reduced: number }> = [];
+    bus.on('ComboRewardGranted', ({ combo, cooldownReducedSec }) => rewards.push({ combo, reduced: cooldownReducedSec }));
+
+    prop.beginCharge(PT.AddDemand);
+    prop.tick(0.2, 'early');
+    prop.release(PT.AddDemand);
+    prop.beginCharge(PT.ChangeDemand);
+    prop.tick(0.05, 'early');
+    prop.release(PT.ChangeDemand);
+    prop.tick(2.95, 'early');
+    prop.beginCharge(PT.AddDemand);
+    prop.tick(0.01, 'early');
+    prop.release(PT.AddDemand);
+
+    expect(prop.currentCombo).toBe(3);
+    expect(rewards).toHaveLength(1);
+    expect(rewards[0].combo).toBe(3);
+    expect(rewards[0].reduced).toBeCloseTo(0.6, 5);
+    expect(prop.getState(PT.AddDemand).cdRemaining).toBeCloseTo(2.4, 5);
+  });
+
+  it('连续 Perfect 上报层数，普通命中会中断连段', () => {
+    const { bus, prop } = setup();
+    const chains: number[] = [];
+    bus.on('PerfectChainUpdated', ({ chain }) => chains.push(chain));
+
+    expect(prop.beginCharge(PT.AddDemand)).toBe(true);
+    expect(prop.releaseAtSlot(PT.AddDemand, 1, 'perfect')).toBe(true);
+    prop.tick(3.1, 'early');
+    expect(prop.beginCharge(PT.AddDemand)).toBe(true);
+    expect(prop.releaseAtSlot(PT.AddDemand, 1, 'perfect')).toBe(true);
+    prop.tick(3.1, 'early');
+    expect(prop.beginCharge(PT.AddDemand)).toBe(true);
+    expect(prop.releaseAtSlot(PT.AddDemand, 1, 'normal')).toBe(true);
+
+    expect(chains).toEqual([1, 2, 0]);
   });
 });
 

@@ -10,6 +10,11 @@
     "crisis": { "routine": 0.25, "report": 0.20, "key": 0.20, "proposal": 0.22, "urgent": 0.13 }
   },
   "idleCardRatio": 0.18,
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.08, "crisis": 0.16 },
+    "linkRatio": { "early": 0.04, "mid": 0.08, "crisis": 0.14 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
+  },
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "objective": { "kind": "no-miss", "label": "甜点关全程零失误" },

@@ -92,7 +92,11 @@ export interface BalanceConfigT {
   };
   /** §6.2 星级评价阈值。 */
   stars: { huntFastWinSec: number };
-  combo: { windowSec: number; tierExpressions: number };
+  combo: {
+    windowSec: number;
+    tierExpressions: number;
+    rewards: Array<{ combo: number; cooldownReducedSec: number; label: string }>;
+  };
   control: { scanSec: number; perfectWindowRatio: number };
 }
 
@@ -132,7 +136,27 @@ export interface LevelDef {
   approvalInit: number;
   whiteDistribution: { early: WhiteDist; mid: WhiteDist; crisis: WhiteDist };
   idleCardRatio: number;
-  boss: { enabled: boolean; minSpawnSec: number };
+  /** 中后期任务变体；缺省时保持前期纯基础任务。 */
+  taskModifiers?: {
+    eliteRatio: Record<GamePhase, number>;
+    linkRatio: Record<GamePhase, number>;
+    eliteMinWeight?: number;
+    eliteGuardReduction?: number;
+    linkBonus?: number;
+    maxElite?: number;
+  };
+  boss: {
+    enabled: boolean;
+    minSpawnSec: number;
+    /** 设计好的临检节拍。存在时替代随机生成，时间按本局有效游玩秒数计算。 */
+    scheduleSec?: number[];
+    /** 给 HUD/战报直接展示的短规则名。 */
+    patternLabel?: string;
+    /** 临检最多抽查的高风险白卡数；省略表示全量扫描。 */
+    inspectionLimit?: number;
+    /** Boss 入场时的专属队列机制。 */
+    arrivalEffect?: 'escalate-highest' | 'fortify-highest' | 'fortify-all';
+  };
   /** §1.2 本关解锁的道具类型（首次出现的道具）。 */
   unlockedProps?: PropType[];
   /** §6.2 三星挑战提示文案（关卡可覆写）。 */

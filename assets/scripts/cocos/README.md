@@ -13,10 +13,14 @@ Web 构建启动后，可用查询参数直接进入关键画面。所有 QA 场
 ?qa=playing&seed=424242&level=1
 ?qa=drag&seed=424242&level=1
 ?qa=perfect&seed=424242&level=1
+?qa=onboarding-perfect&seed=424242&level=2
+?qa=onboarding-hunt&seed=424242&level=3
 ?qa=crisis&seed=424242&level=1
 ?qa=result-lose&seed=424242&level=1
 ?qa=result-survive&seed=424242&level=1
 ?qa=result-hunt&seed=424242&level=1
+?qa=result-daily&seed=424242&level=6
+?qa=result-rankup&seed=424242&level=1
 ```
 
 浏览器自动化可等待 `globalThis.__BRAATN_QA__.ready === true`，并读取其中的卡片签名验证同种子复现。

@@ -98,7 +98,9 @@ export class UiPainter {
     const ink = new Color(31, 42, 54, 255);
     const face = disabled
       ? mixColor(UiTokens.color.ivory, UiTokens.color.disabled, 0.24)
-      : new Color(255, 252, 246, 255);
+      : state === 'rework'
+        ? mixColor(new Color(255, 252, 246, 255), UiTokens.color.rework, 0.18)
+        : new Color(255, 252, 246, 255);
     const radius = Math.min(22, Math.max(14, w * 0.22));
     const tabW = Math.max(24, w * 0.28);
     const tabH = Math.max(18, h * 0.20);
@@ -124,7 +126,11 @@ export class UiPainter {
     g.stroke();
 
     // Paper text-line texture so empty cards still read as "documents in an inbox".
-    const lineColor = disabled ? alphaColor(UiTokens.color.muted, 54) : new Color(213, 203, 187, 255);
+    const lineColor = disabled
+      ? alphaColor(UiTokens.color.muted, 54)
+      : state === 'rework'
+        ? alphaColor(UiTokens.color.rework, 112)
+        : new Color(213, 203, 187, 255);
     const left = -w * 0.27;
     const top = h * 0.22;
     [0, 1, 2].forEach((i) => {
@@ -137,6 +143,21 @@ export class UiPainter {
     g.fillColor = alphaColor(Color.WHITE, disabled ? 28 : 96);
     g.roundRect(-w / 2 + radius * 0.75, h / 2 - inset - 12, w * 0.34, 4, 3);
     g.fill();
+
+    if (state === 'rework') {
+      // 返工态必须在卡片移动过程中也一眼可辨：红色底轨 + 两道批改斜线，
+      // 不能只依赖左上角的小负号或一次性命中特效。
+      g.fillColor = alphaColor(UiTokens.color.rework, 225);
+      g.roundRect(-w / 2 + 12, -h / 2 + 10, w - 24, Math.max(6, h * 0.075), 4);
+      g.fill();
+      g.strokeColor = alphaColor(UiTokens.color.rework, 185);
+      g.lineWidth = Math.max(3, w * 0.035);
+      g.moveTo(-w * 0.28, h * 0.13);
+      g.lineTo(w * 0.20, -h * 0.20);
+      g.moveTo(-w * 0.15, h * 0.22);
+      g.lineTo(w * 0.30, -h * 0.10);
+      g.stroke();
+    }
   }
 
   static panel(g: Graphics, w: number, h: number, dark = false): void {

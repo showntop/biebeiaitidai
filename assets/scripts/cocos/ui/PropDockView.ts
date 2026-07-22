@@ -39,26 +39,26 @@ export class PropDockView {
   private root: Node | null = null;
   private hintLabel: Label | null = null;
   private ticksG: Graphics | null = null;
-  private ribbonNode: Node | null = null;
   private haloNode: Node | null = null;
   private haloG: Graphics | null = null;
   private rootOpacity: UIOpacity | null = null;
   private active = false;
   private dockW = 0;
   private dockH = 0;
-  private originX = 0;
   private targetCount = 1;
   private selectedSlot = -1;
   private perfectReady = false;
   private targetValid = true;
+  private cancelArmed = false;
 
   layout(input: PropDockLayoutInput): PropDockLayoutResult {
     const root = this.ensure(input.parent, input.layer);
     const dockLayout = UiTokens.layout.actionDock;
     const dockW = Math.min(input.usedW + dockLayout.sidePadding, input.viewWidth - input.horizontalPadding * 2 + dockLayout.extraWidth);
     const lowerHudGap = Math.max(dockLayout.minHudGap, input.viewHeight * dockLayout.hudGapRatio);
-    const dockBottom = input.buttonY - input.btnH / 2 - Math.max(dockLayout.minBottomGap, input.btnH * dockLayout.bottomGapRatio);
-    const dockTopLimit = input.buttonY + input.btnH / 2 + lowerHudGap - Math.max(dockLayout.minTopInset, input.viewHeight * dockLayout.topInsetRatio);
+    // 操作轨放到常驻按钮上方：玩家始终知道自己从哪个道具进入，也能随时看到其余库存/CD。
+    const dockBottom = input.buttonY + input.btnH / 2 + Math.max(8, input.btnH * dockLayout.bottomGapRatio);
+    const dockTopLimit = dockBottom + lowerHudGap + dockLayout.maxHeight;
     const dockAvailableH = Math.max(dockLayout.minAvailableHeight, dockTopLimit - dockBottom);
     const dockH = input.choosing
       ? Math.max(dockLayout.minHeight, Math.min(dockLayout.maxHeight, dockAvailableH))
@@ -68,13 +68,11 @@ export class PropDockView {
 
     this.dockW = dockW;
     this.dockH = dockH;
-    this.originX = input.aimingIndex >= 0
-      ? input.startX + input.aimingIndex * (input.btnW + input.gap)
-      : 0;
     this.targetCount = Math.max(1, input.targetCount);
     this.selectedSlot = -1;
     this.perfectReady = false;
     this.targetValid = true;
+    this.cancelArmed = false;
 
     root.getComponent(UITransform)!.setContentSize(dockW, dockH);
     root.setPosition(0, dockY, 0);
@@ -87,28 +85,35 @@ export class PropDockView {
     return { node: root, active, dockW, dockH, dockY };
   }
 
-  updateInteraction(localX: number, localY: number, slot: number, strength: number, velocity: number, perfectReady: boolean, targetValid: boolean): void {
+  updateInteraction(slot: number, strength: number, velocity: number, perfectReady: boolean, targetValid: boolean, cancelArmed = false): void {
     if (!this.active || !this.root?.isValid) return;
     const dockLayout = UiTokens.layout.actionDock;
     const trackY = -this.dockH * dockLayout.trackYRatio;
-    const xLimit = this.dockW / 2 - dockLayout.trackSideInset;
-    const markerX = Math.max(-xLimit, Math.min(xLimit, localX));
-    const markerY = Math.max(trackY - dockLayout.markerYRange, Math.min(trackY + dockLayout.markerYRange, localY));
+    const left = -this.dockW / 2 + dockLayout.tickInset;
+    const right = this.dockW / 2 - dockLayout.tickInset;
+    const markerX = this.targetCount === 1
+      ? 0
+      : left + Math.max(0, Math.min(this.targetCount - 1, slot)) * (right - left) / (this.targetCount - 1);
 
-    if (slot !== this.selectedSlot || perfectReady !== this.perfectReady || targetValid !== this.targetValid) {
+    if (slot !== this.selectedSlot || perfectReady !== this.perfectReady || targetValid !== this.targetValid || cancelArmed !== this.cancelArmed) {
       const slotChanged = slot !== this.selectedSlot;
       this.selectedSlot = slot;
       this.perfectReady = perfectReady;
       this.targetValid = targetValid;
+      this.cancelArmed = cancelArmed;
       this.paintTicks(slot);
-      this.paintHalo(perfectReady, targetValid);
+      this.paintHalo(perfectReady, targetValid, cancelArmed);
       if (this.hintLabel) {
-        this.hintLabel.string = !targetValid
+        this.hintLabel.string = cancelArmed
+          ? '已收回 · 松手取消（不消耗）'
+          : !targetValid
           ? `任务 ${slot + 1} 不适用 · 换个目标`
           : perfectReady
           ? `精准锁定任务 ${slot + 1} · 松手 PERFECT`
           : `已锁定任务 ${slot + 1} · 稳住准星`;
-        this.hintLabel.color = !targetValid
+        this.hintLabel.color = cancelArmed
+          ? UiTokens.color.danger
+          : !targetValid
           ? UiTokens.color.muted
           : perfectReady ? UiTokens.color.gold : new Color(82, 70, 58, 235);
       }
@@ -123,20 +128,9 @@ export class PropDockView {
     }
 
     if (this.haloNode?.isValid) {
-      this.haloNode.setPosition(markerX, markerY, 0);
+      this.haloNode.setPosition(markerX, trackY, 0);
       const opacity = this.haloNode.getComponent(UIOpacity);
-      if (opacity) opacity.opacity = Math.round(145 + strength * 54 + velocity * 34);
-    }
-
-    if (this.ribbonNode?.isValid) {
-      const dx = markerX - this.originX;
-      const dy = markerY - trackY;
-      const length = Math.max(8, Math.hypot(dx, dy));
-      this.ribbonNode.setPosition(this.originX + dx / 2, trackY + dy / 2, 0);
-      this.ribbonNode.angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      this.ribbonNode.setScale(length / dockLayout.ribbonBaseWidth, 0.72 + strength * 0.28 + velocity * 0.18, 1);
-      const opacity = this.ribbonNode.getComponent(UIOpacity);
-      if (opacity) opacity.opacity = Math.round(105 + strength * 80);
+      if (opacity) opacity.opacity = Math.round(150 + strength * 38 + velocity * 22);
     }
   }
 
@@ -155,27 +149,10 @@ export class PropDockView {
     ticks.addComponent(UITransform);
     this.ticksG = ticks.addComponent(Graphics);
 
-    const ribbon = new Node('ActionDockRibbon');
-    ribbon.layer = layer;
-    ribbon.parent = this.root;
-    ribbon.addComponent(UITransform).setContentSize(UiTokens.layout.actionDock.ribbonBaseWidth, 10);
-    const ribbonG = ribbon.addComponent(Graphics);
-    ribbonG.fillColor = new Color(UiTokens.color.blue.r, UiTokens.color.blue.g, UiTokens.color.blue.b, 180);
-    ribbonG.roundRect(
-      -UiTokens.layout.actionDock.ribbonBaseWidth / 2,
-      -4,
-      UiTokens.layout.actionDock.ribbonBaseWidth,
-      8,
-      4,
-    );
-    ribbonG.fill();
-    ribbon.addComponent(UIOpacity).opacity = 130;
-    this.ribbonNode = ribbon;
-
     const halo = new Node('ActionDockHalo');
     halo.layer = layer;
     halo.parent = this.root;
-    halo.addComponent(UITransform).setContentSize(102, 102);
+    halo.addComponent(UITransform).setContentSize(66, 66);
     this.haloG = halo.addComponent(Graphics);
     this.paintHalo(false, true);
     halo.addComponent(UIOpacity).opacity = 170;
@@ -218,7 +195,7 @@ export class PropDockView {
     if (!this.hintLabel) return;
     const dockLayout = UiTokens.layout.actionDock;
     this.hintLabel.node.active = active;
-    this.hintLabel.string = '左右滑动选择任务 · 松手投出';
+    this.hintLabel.string = '左右选任务 · 松手投出 · 上甩更爽';
     UiPainter.label(this.hintLabel, UiTokens.type.dockHint, new Color(82, 70, 58, 235), true);
     this.hintLabel.node.getComponent(UITransform)?.setContentSize(dockW - 52, dockLayout.hintHeight);
     this.hintLabel.node.setPosition(0, dockH / 2 - dockLayout.hintTopOffset, 0);
@@ -287,20 +264,20 @@ export class PropDockView {
     }
   }
 
-  private paintHalo(perfectReady: boolean, targetValid: boolean): void {
+  private paintHalo(perfectReady: boolean, targetValid: boolean, cancelArmed = false): void {
     if (!this.haloG) return;
-    const focus = !targetValid ? UiTokens.color.muted : perfectReady ? UiTokens.color.gold : UiTokens.color.blue;
+    const focus = cancelArmed ? UiTokens.color.danger : !targetValid ? UiTokens.color.muted : perfectReady ? UiTokens.color.gold : UiTokens.color.blue;
     this.haloG.clear();
     this.haloG.fillColor = new Color(focus.r, focus.g, focus.b, perfectReady ? 62 : 30);
-    this.haloG.circle(0, 0, 46);
+    this.haloG.circle(0, 0, 30);
     this.haloG.fill();
     this.haloG.strokeColor = new Color(255, 252, 246, 220);
     this.haloG.lineWidth = 5;
-    this.haloG.circle(0, 0, 39);
+    this.haloG.circle(0, 0, 24);
     this.haloG.stroke();
     this.haloG.strokeColor = new Color(focus.r, focus.g, focus.b, perfectReady ? 238 : 188);
     this.haloG.lineWidth = perfectReady ? 4 : 3;
-    this.haloG.circle(0, 0, 46);
+    this.haloG.circle(0, 0, 30);
     this.haloG.stroke();
   }
 }

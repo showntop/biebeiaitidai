@@ -10,10 +10,22 @@
     "crisis": { "routine": 0.15, "report": 0.18, "key": 0.25, "proposal": 0.30, "urgent": 0.12 }
   },
   "idleCardRatio": 0.12,
-  "boss": { "enabled": true, "minSpawnSec": 18 },
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.09, "crisis": 0.17 },
+    "linkRatio": { "early": 0.04, "mid": 0.12, "crisis": 0.18 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
+  },
+  "boss": {
+    "enabled": true,
+    "minSpawnSec": 18,
+    "scheduleSec": [18, 36, 53],
+    "patternLabel": "全场加盾 · 三连深查3张 · 18/36/53秒",
+    "inspectionLimit": 3,
+    "arrivalEffect": "fortify-all"
+  },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "fixedSeed": 180018,
   "objective": { "kind": "perfect", "target": 4, "label": "雪崩压力下完成 4 次 Perfect" },
-  "hook": "最高压固定局：全道具对抗雪崩，冲四次 Perfect",
-  "challengeHint": "第四个小高峰：Boss + 最高白卡密度"
+  "hook": "最高压固定局：Boss 全场加盾，用全道具对抗雪崩",
+  "challengeHint": "全场加盾后用甩锅开口，再连续 Perfect 收尾"
 }

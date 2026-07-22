@@ -10,6 +10,11 @@
     "crisis": { "routine": 0.18, "report": 0.19, "key": 0.23, "proposal": 0.27, "urgent": 0.13 }
   },
   "idleCardRatio": 0.12,
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.08, "crisis": 0.18 },
+    "linkRatio": { "early": 0.04, "mid": 0.12, "crisis": 0.18 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
+  },
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "fixedSeed": 150015,

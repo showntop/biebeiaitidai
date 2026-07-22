@@ -10,10 +10,15 @@
     "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.13 }
   },
   "idleCardRatio": 0.10,
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.06, "crisis": 0.12 },
+    "linkRatio": { "early": 0.04, "mid": 0.10, "crisis": 0.14 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 1
+  },
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "propLimit": ["add-demand", "change-demand", "throw-pot"],
   "objective": { "kind": "perfect", "target": 3, "label": "不用冻结打出 3 次 Perfect" },
-  "hook": "暂时收起冻结，用准度和甩锅完成三次 Perfect",
-  "challengeHint": "白卡权重堆高，注意拍马屁冻结时机"
+  "hook": "不用冻结处理精英任务，用准度和甩锅完成三次 Perfect",
+  "challengeHint": "精英与普通任务混排，甩锅可直接越过护盾"
 }

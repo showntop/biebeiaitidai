@@ -1,5 +1,5 @@
 import { sys } from 'cc';
-import { RunTelemetry } from '../core/Telemetry';
+import { CompositeTelemetrySink, RunTelemetry } from '../core/Telemetry';
 import type { TelemetryEvent, TelemetrySink } from '../core/Telemetry';
 
 const STORAGE_KEY = 'braatn_telemetry_v1';
@@ -9,6 +9,70 @@ interface WxSystemInfo {
   benchmarkLevel?: number;
   platform?: string;
   system?: string;
+}
+
+type DeliveryValue = string | number;
+type DeliveryPayload = Record<string, DeliveryValue>;
+
+interface HostAnalytics {
+  track(eventName: string, payload: DeliveryPayload): void;
+  flush?(): void;
+}
+
+interface WxAnalyticsApi {
+  reportEvent?: (eventId: string, data: DeliveryPayload) => void;
+  reportAnalytics?: (eventName: string, data: DeliveryPayload) => void;
+}
+
+/**
+ * 正式分析出口：宿主注入的 SDK 优先，其次使用微信原生自定义事件。
+ *
+ * 第三方 SDK 只需在启动阶段注入：
+ * globalThis.__BRAATN_ANALYTICS__ = { track(name, payload), flush?() }
+ * 玩法层和 RunTelemetry 无需感知最终选择的是神策、GrowingIO 还是自建服务。
+ */
+export class PlatformTelemetrySink implements TelemetrySink {
+  private delivered = 0;
+  private failed = 0;
+
+  emit(event: TelemetryEvent): void {
+    const host = (globalThis as unknown as { __BRAATN_ANALYTICS__?: HostAnalytics }).__BRAATN_ANALYTICS__;
+    const payload = deliveryPayload(event);
+    try {
+      if (host?.track) {
+        host.track(event.name, payload);
+        this.delivered++;
+        return;
+      }
+      const wxApi = (globalThis as unknown as { wx?: WxAnalyticsApi }).wx;
+      if (wxApi?.reportEvent) {
+        wxApi.reportEvent(event.name, payload);
+        this.delivered++;
+        return;
+      }
+      if (wxApi?.reportAnalytics) {
+        wxApi.reportAnalytics(event.name, payload);
+        this.delivered++;
+      }
+    } catch {
+      this.failed++;
+    }
+  }
+
+  flush(): void {
+    const host = (globalThis as unknown as { __BRAATN_ANALYTICS__?: HostAnalytics }).__BRAATN_ANALYTICS__;
+    try { host?.flush?.(); } catch { this.failed++; }
+  }
+
+  get status(): { delivered: number; failed: number; channel: 'host-sdk' | 'wechat-native' | 'local-only' } {
+    const host = (globalThis as unknown as { __BRAATN_ANALYTICS__?: HostAnalytics }).__BRAATN_ANALYTICS__;
+    const wxApi = (globalThis as unknown as { wx?: WxAnalyticsApi }).wx;
+    return {
+      delivered: this.delivered,
+      failed: this.failed,
+      channel: host?.track ? 'host-sdk' : wxApi?.reportEvent || wxApi?.reportAnalytics ? 'wechat-native' : 'local-only',
+    };
+  }
 }
 
 /** 本地环形日志先保证事件可验收；接正式数据 SDK 时只需替换 TelemetrySink。 */
@@ -64,17 +128,41 @@ export class LocalTelemetrySink implements TelemetrySink {
   }
 }
 
-export function createTelemetryBridge(qaMode: boolean): { telemetry: RunTelemetry; sink: LocalTelemetrySink } {
+export function createTelemetryBridge(qaMode: boolean): { telemetry: RunTelemetry; sink: LocalTelemetrySink; platformSink: PlatformTelemetrySink } {
   const platform = platformInfo();
   const sink = new LocalTelemetrySink(!qaMode);
+  const platformSink = new PlatformTelemetrySink();
+  const deliverySink = qaMode ? sink : new CompositeTelemetrySink([sink, platformSink]);
   const sessionId = `${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffff).toString(36)}`;
-  const telemetry = new RunTelemetry(sink, {
+  const telemetry = new RunTelemetry(deliverySink, {
     sessionId,
     platform: platform.name,
     deviceTier: platform.tier,
     appVersion: '0.1.0',
   });
-  return { telemetry, sink };
+  publishDeliveryStatus(platformSink);
+  return { telemetry, sink, platformSink };
+}
+
+function deliveryPayload(event: TelemetryEvent): DeliveryPayload {
+  const payload: DeliveryPayload = {
+    timestamp_ms: event.timestampMs,
+    sequence: event.sequence,
+    session_id: event.sessionId,
+    run_id: event.runId ?? '',
+    level_index: event.levelIndex ?? -1,
+    platform: event.platform,
+    device_tier: event.deviceTier,
+  };
+  for (const [key, value] of Object.entries(event.payload)) {
+    payload[key] = value === null ? '' : typeof value === 'boolean' ? (value ? 1 : 0) : value;
+  }
+  return payload;
+}
+
+function publishDeliveryStatus(platformSink: PlatformTelemetrySink): void {
+  const api = { status: () => platformSink.status };
+  (globalThis as unknown as { __BRAATN_TELEMETRY_DELIVERY__: typeof api }).__BRAATN_TELEMETRY_DELIVERY__ = api;
 }
 
 function platformInfo(): { name: string; tier: string } {

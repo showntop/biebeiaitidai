@@ -7,13 +7,29 @@
  */
 export const QaScenarios = [
   'entry',
+  'career-route',
+  'career-achievements',
   'playing',
   'drag',
+  'blast',
   'perfect',
+  'perfect-chain',
+  'combo-reward',
+  'elite-link',
+  'shield-break',
+  'rework-hit',
+  'last-chance',
+  'onboarding-perfect',
+  'onboarding-hunt',
   'crisis',
+  'boss-warning',
+  'boss-critical',
+  'pause',
   'result-lose',
   'result-survive',
   'result-hunt',
+  'result-daily',
+  'result-rankup',
 ] as const;
 
 export type QaScenario = (typeof QaScenarios)[number];

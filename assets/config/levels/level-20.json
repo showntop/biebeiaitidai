@@ -10,10 +10,21 @@
     "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.14 }
   },
   "idleCardRatio": 0.10,
-  "boss": { "enabled": true, "minSpawnSec": 16 },
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.02, "mid": 0.12, "crisis": 0.22 },
+    "linkRatio": { "early": 0.08, "mid": 0.18, "crisis": 0.25 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
+  },
+  "boss": {
+    "enabled": true,
+    "minSpawnSec": 16,
+    "scheduleSec": [17, 34, 50],
+    "patternLabel": "全场加盾 · 终局全量扫描 · 17/34/50秒",
+    "arrivalEffect": "fortify-all"
+  },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "fixedSeed": 200020,
   "objective": { "kind": "hunt", "label": "最终接管危机中完成猎杀通关" },
   "hook": "最终轮：全机制叠加，用猎杀通关彻底劝退 AI",
-  "challengeHint": "验证批次最终关：Boss最早16秒出，全机制叠加"
+  "challengeHint": "精英、抱团、全场加盾与全量扫描叠加；危险区不再追加新变体"
 }

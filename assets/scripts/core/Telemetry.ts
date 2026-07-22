@@ -81,6 +81,26 @@ export class MemoryTelemetrySink implements TelemetrySink {
 }
 
 /**
+ * 将同一事件安全地扇出到本地缓冲、平台分析和第三方 SDK。
+ * 任一出口失败都不会阻断游戏，也不会影响其他出口收到事件。
+ */
+export class CompositeTelemetrySink implements TelemetrySink {
+  constructor(private readonly sinks: readonly TelemetrySink[]) {}
+
+  emit(event: TelemetryEvent): void {
+    for (const sink of this.sinks) {
+      try { sink.emit(event); } catch { /* 埋点出口必须彼此隔离 */ }
+    }
+  }
+
+  flush(): void {
+    for (const sink of this.sinks) {
+      try { sink.flush?.(); } catch { /* 上报失败不阻断结算和导航 */ }
+    }
+  }
+}
+
+/**
  * 平台无关的最小埋点状态机。它负责首个事件去重和局末指标聚合，平台层只负责落盘/上报。
  */
 export class RunTelemetry {

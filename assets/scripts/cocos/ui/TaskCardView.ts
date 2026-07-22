@@ -26,11 +26,11 @@ export class TaskCardView {
     title.enabled = false;
 
     const value = TaskCardView.valueLabelFor(node);
-    UiPainter.label(value, Math.min(13, Math.max(10, width * 0.13)), Color.WHITE, true);
+    UiPainter.label(value, Math.min(15, Math.max(11, width * 0.15)), Color.WHITE, true);
     value.verticalAlign = 1;
     value.horizontalAlign = 1;
     value.node.getComponent(UITransform)?.setContentSize(Math.max(24, width * 0.34), Math.max(16, height * 0.14));
-    value.node.setPosition(width * 0.26, height * 0.30, 0);
+    value.node.setPosition(-width * 0.27, height * 0.30, 0);
     value.enabled = false;
   }
 

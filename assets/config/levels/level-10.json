@@ -10,7 +10,13 @@
     "crisis": { "routine": 0.18, "report": 0.20, "key": 0.22, "proposal": 0.27, "urgent": 0.16 }
   },
   "idleCardRatio": 0.12,
-  "boss": { "enabled": true, "minSpawnSec": 20 },
+  "boss": {
+    "enabled": true,
+    "minSpawnSec": 20,
+    "scheduleSec": [24],
+    "patternLabel": "重点抽查 · 最多2张 · 24秒",
+    "inspectionLimit": 2
+  },
   "objective": { "kind": "boss-safe", "label": "不让 Boss 临检生效" },
   "hook": "第一场 Boss 临检，读懂预警并极限拦截",
   "challengeHint": "Boss临检！及时用丢锅炸/拍马屁冻 Boss 卡，别让它走到处理区"

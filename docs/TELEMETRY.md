@@ -1,7 +1,30 @@
 # 数据事件与首局漏斗
 
-当前实现先使用本地环形日志验证事件质量，后续接微信/第三方数据平台时只替换 `TelemetrySink`，
-不改规则层与交互层。日志最多保留 400 条，不记录昵称、openid、输入文本等个人信息。
+当前实现会把事件先写入本地环形日志，同时安全扇出到正式分析出口：宿主注入 SDK 时优先调用
+`track`，否则在微信环境调用 `wx.reportEvent`（兼容旧版 `wx.reportAnalytics`）。任一出口失败都不会
+阻断游戏或影响其他出口。日志最多保留 400 条，不记录昵称、openid、输入文本等个人信息。
+
+## 正式平台接入
+
+如使用神策、GrowingIO 或自建 SDK，在游戏启动前注入统一适配器：
+
+```js
+globalThis.__BRAATN_ANALYTICS__ = {
+  track(eventName, payload) {
+    analyticsSdk.track(eventName, payload);
+  },
+  flush() {
+    analyticsSdk.flush?.();
+  },
+};
+```
+
+没有注入适配器时，微信小游戏会使用原生自定义事件接口；需要在微信数据后台建立与下表同名的
+事件及字段。浏览器本地预览则自动退化为 `local-only`。当前出口状态可执行：
+
+```js
+globalThis.__BRAATN_TELEMETRY_DELIVERY__.status()
+```
 
 ## 首批事件
 

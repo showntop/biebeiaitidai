@@ -6,6 +6,9 @@ import {
   rankOf,
   rankFromScore,
   star3Count,
+  bestStarsFor,
+  totalStars,
+  rankProgress,
   RankLabels,
   buildReportText,
 } from '../assets/scripts/core/profile';
@@ -39,6 +42,7 @@ describe('PlayerProfile 段位与累加', () => {
     expect(p.highestUnlockedLevel).toBe(0);
     expect(p.huntWinCount).toBe(0);
     expect(star3Count(p)).toBe(0);
+    expect(totalStars(p)).toBe(0);
     expect(p.daysEmployed).toBe(1);
     expect(rankScore(p)).toBe(0);
     expect(rankOf(p)).toBe('intern');
@@ -99,6 +103,16 @@ describe('PlayerProfile 段位与累加', () => {
     expect(p.star3Levels).toEqual([0, 2]);
   });
 
+  it('每关最佳星级只升不降，并累计总星', () => {
+    const p = createProfile();
+    applyRunResult(p, 0, mkReport('win-survive', 2, 0));
+    applyRunResult(p, 0, mkReport('win-survive', 1, 0));
+    applyRunResult(p, 1, mkReport('win-survive', 3, 1));
+    expect(bestStarsFor(p, 0)).toBe(2);
+    expect(bestStarsFor(p, 1)).toBe(3);
+    expect(totalStars(p)).toBe(5);
+  });
+
   it('三星分数不会因跳关虚高：只三星末关 → star3Count=1', () => {
     const p = createProfile();
     const last = LevelSequence.length - 1; // 末关 index
@@ -119,6 +133,19 @@ describe('PlayerProfile 段位与累加', () => {
   it('段位中文名', () => {
     expect(RankLabels.intern).toBe('岗位保卫者');
     expect(RankLabels['ai-buster']).toBe('AI克星');
+  });
+
+  it('段位成长进度：返回下一档距离，满级封顶', () => {
+    const p = createProfile();
+    p.huntWinCount = 5; // 15 分
+    const progress = rankProgress(p);
+    expect(progress.score).toBe(15);
+    expect(progress.next).toBe('worker');
+    expect(progress.remaining).toBe(6);
+    expect(progress.ratio).toBeCloseTo(15 / 21);
+
+    p.huntWinCount = 100;
+    expect(rankProgress(p)).toMatchObject({ current: 'ai-buster', next: null, remaining: 0, ratio: 1 });
   });
 
   it('战报文案：猎杀/生存/失败', () => {

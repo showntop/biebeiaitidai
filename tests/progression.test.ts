@@ -4,6 +4,7 @@ import {
   applyRunResult,
   challengeScore,
   createProfile,
+  CosmeticLabels,
   hydrateProfile,
 } from '../assets/scripts/core/profile';
 import { createDailyChallenge } from '../assets/scripts/core/SocialChallenge';
@@ -34,6 +35,9 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
 }
 
 describe('轻量成长与每日挑战', () => {
+  it('收藏奖励都有可直接用于结算页的中文名称', () => {
+    expect(Object.keys(CosmeticLabels)).toEqual(['desk-classic', 'paper-blue', 'ai-crash-face', 'report-gold']);
+  });
   it('高光解锁成就和外观，但不重复累计', () => {
     const profile = createProfile();
     applyRunResult(profile, 0, report());
@@ -68,6 +72,12 @@ describe('轻量成长与每日挑战', () => {
     expect(session.profile.highestUnlockedLevel).toBe(0);
     expect(session.profile.dailyRecords).toHaveLength(1);
     expect(storage.loadProfile()?.achievements).toContain('daily-first');
+    expect(session.lastProgression?.daily).toMatchObject({
+      previousBest: null,
+      firstAttempt: true,
+      newRecord: true,
+    });
+    expect(session.lastProgression?.newAchievements).toContain('daily-first');
   });
 
   it('旧存档 hydrate 后自动补齐成长字段', () => {
@@ -75,5 +85,7 @@ describe('轻量成长与每日挑战', () => {
     expect(hydrated.achievements).toEqual([]);
     expect(hydrated.cosmetics).toEqual(['desk-classic']);
     expect(hydrated.dailyRecords).toEqual([]);
+    expect(hydrated.bestStars).toHaveLength(20);
+    expect(hydrated.bestStars[0]).toBe(3);
   });
 });

@@ -41,6 +41,14 @@ export interface Card {
   weight: number;
   /** 是否仍为"活跃白卡威胁"（影响 Boss 结算、改需求目标判定）。 */
   isThreat: boolean;
+  /** 中后期精英任务：护盾归零后才能被“改需求”转成返工卡。 */
+  elite?: boolean;
+  guard?: number;
+  /** 不含抱团加成的基础风险，用于拆链时精确还原。 */
+  baseWeight?: number;
+  /** 两张任务的抱团编号与当前加成。 */
+  linkId?: number;
+  linkBonus?: number;
 }
 
 /* ---------------- 道具（策划文档§4） ---------------- */
@@ -130,8 +138,14 @@ export interface GameEvents {
   SlotEmpty: { slot: number };
   /** 道具命中任务卡（加需求/改需求/丢锅），§4.3 */
   CardHit: { prop: PropType; slot: number; quality: HitQuality; card?: Card };
+  /** 道具实际改变队列后的收益摘要，供飘字/UI准确表达而不是自行猜规则。 */
+  PropEffectResolved: { prop: PropType; slot: number; affected: number; riskPrevented: number; bufferedSlots: number };
   /** Perfect 命中后实际抽中的奖励，供表现层明确告诉玩家“赚到了什么”。 */
   PerfectRewardGranted: { prop: PropType; reward: PerfectRewardType };
+  /** 连击跨过阶段阈值时返还的真实冷却收益。 */
+  ComboRewardGranted: { combo: number; tier: 1 | 2 | 3; label: string; cooldownReducedSec: number };
+  /** 连续 Perfect 层数变化；0 表示连段中断。 */
+  PerfectChainUpdated: { chain: number };
   /** 拍马屁命中AI本体（独立事件，不复用CardHit，开发计划§2） */
   AIHit: { quality: HitQuality };
   /** 无效目标/空挡Miss（不消耗次数，§4.3） */
@@ -148,24 +162,53 @@ export interface GameEvents {
   HuntChargeBreak: { approval: number };
   /** Boss卡分级预警（进入最后4格递进，§5.4①） */
   BossIncoming: { tier: BossTellTier; slot: number };
+  /** 固定临检节拍的入场前预告。 */
+  BossBeatWarning: { seconds: 6 | 3 };
+  /** 下一次传送带结算将达到失败阈值；每次危险区停留最多提示一次。 */
+  LastChanceWarning: {
+    projectedApproval: number;
+    impact: number;
+    seconds: number;
+    boss: boolean;
+    cardIds: number[];
+  };
   /** 连击更新（纯演出层，§4.4） */
   ComboUpdated: { combo: number };
   /** 单局阶段切换，用于提示中盘加速与最后冲刺。 */
   PhaseChanged: { from: GamePhase; to: GamePhase };
+  /** 精英任务进入队列。 */
+  EliteTaskSpawned: { card: Card };
+  /** “改需求”第一次命中精英任务时破盾，但尚未转返工。 */
+  EliteGuardBroken: { card: Card; reduction: number };
+  /** 两张任务形成抱团，风险暂时上升。 */
+  TaskLinkFormed: { cards: [Card, Card]; bonus: number };
+  /** 抱团被拆除，剩余任务恢复基础风险。 */
+  TaskLinkBroken: { remaining?: Card; bonusRemoved: number };
   /** 一张普通卡抵达处理区（Conveyor→Approval，由 Approval 计算认可度变化） */
   CardEnteredProcessing: { card: Card };
   /** Boss卡生成进入队列（→PropSystem 触发§5.4②资源保底） */
-  BossSpawned: { card: Card };
+  BossSpawned: { card: Card; patternLabel?: string; inspectionLimit?: number };
+  /** Boss 入场专属机制已经作用于任务队列。 */
+  BossArrivalEffect: {
+    effect: 'escalate-highest' | 'fortify-highest' | 'fortify-all';
+    affected: number;
+    label: string;
+    cardIds: number[];
+  };
   /** Boss资源保底已生效（PropSystem在onBossSpawned中把丢锅能量从<阈值拉到保证值时发出，供UI/M4验收监听） */
   BossGuaranteeTriggered: { filledTo: number };
   /** Boss卡抵达处理区，强制结算当前所有活跃白卡（→ApprovalSystem.bossSettle） */
-  BossInspection: { threatCards: Card[] };
+  BossInspection: { threatCards: Card[]; totalThreats?: number; patternLabel?: string };
+  /** 临检完成后的准确结果，用于解释本轮 Boss 到底查了什么。 */
+  BossInspectionResolved: { checked: number; remaining: number; riskAdded: number; patternLabel: string };
   /** 拍马屁命中AI本体，请求冻结传送带（→Game 暂停 belt/approval） */
   KissUpFreeze: { durationSec: number };
   /** AI表情请求（AIActorSystem→表现层，纯演出） */
   AIExpression: { expression: ExpressionId; durationSec: number; priority: number };
   /** 可截图、可结算、可分享的本局高光。 */
   Highlight: HighlightMoment;
+  /** 本关专属目标首次达成。 */
+  ObjectiveCompleted: { label: string };
   /** 局结束 */
   GameOver: { result: GameResult };
   /** §2.1 复活生效（认可度回滚+加时+清Boss临检）。供 UI 弹窗/演出层订阅。 */

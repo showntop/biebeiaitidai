@@ -32,7 +32,15 @@ export interface ResultDialogModel {
   missedThrows: number;
   rank: string;
   day: number;
-  meme: string;
+  careerLine: string;
+  growthTitle: string;
+  growthDetail: string;
+  /** null 表示该模式没有可比较的段位进度（例如每日/好友挑战）。 */
+  growthRatio: number | null;
+  growthPreviousRatio: number | null;
+  growthEmphasized: boolean;
+  reviewTitle: string;
+  reviewBody: string;
   /** 按钮上方的一句话内容预告，给“下一关”一个明确动机。 */
   nextHook?: string;
   buttons: ResultDialogButton[];
@@ -205,13 +213,53 @@ export class ResultDialogView {
     this.addLabel(panel, 'StatsApproval', -(chipW + resultLayout.chipGap), chipY, `${metrics[0].label}\n${metrics[0].value}`, 21, chipW - 12, 62, new Color(70, 60, 50, 255), true);
     this.addLabel(panel, 'StatsTime', 0, chipY, `${metrics[1].label}\n${metrics[1].value}`, 21, chipW - 12, 62, new Color(70, 60, 50, 255), true);
     this.addLabel(panel, 'StatsCombo', chipW + resultLayout.chipGap, chipY, `${metrics[2].label}\n${metrics[2].value}`, 21, chipW - 12, 62, new Color(70, 60, 50, 255), true);
-    this.addLabel(panel, 'Stats2', 0, chipY - resultLayout.chipHeight, `${model.rank}   ·   第${model.day}轮反击`, 18, pw * 0.85, 32, new Color(95, 84, 70, 255), false);
-    this.addLabel(panel, 'Meme', 0, noteY, model.meme, 22, noteW - 36, 92, new Color(100, 88, 72, 255), false);
-    const memeLabel = panel.getChildByName('Meme')?.getComponent(Label);
-    if (memeLabel) {
-      memeLabel.enableWrapText = true;
-      memeLabel.overflow = Label.Overflow.CLAMP;
-      memeLabel.lineHeight = 30;
+    const growthY = chipY - resultLayout.chipHeight;
+    const growthW = pw * 0.80;
+    const growthAccent = model.growthEmphasized ? new Color(220, 151, 42, 255) : UiTokens.color.blue;
+    cg.fillColor = model.growthEmphasized ? new Color(255, 239, 190, 235) : new Color(239, 245, 246, 235);
+    cg.strokeColor = new Color(growthAccent.r, growthAccent.g, growthAccent.b, 154);
+    cg.lineWidth = model.growthEmphasized ? 3 : 2;
+    cg.roundRect(-growthW / 2, growthY - 27, growthW, 54, 14);
+    cg.fill(); cg.stroke();
+    if (model.growthRatio !== null) {
+      const trackW = growthW * 0.43;
+      const trackX = growthW * 0.19;
+      const ratio = Math.max(0, Math.min(1, model.growthRatio));
+      const previousRatio = Math.max(0, Math.min(1, model.growthPreviousRatio ?? ratio));
+      cg.fillColor = new Color(117, 101, 82, 42);
+      cg.roundRect(trackX - trackW / 2, growthY - 7, trackW, 14, 7);
+      cg.fill();
+      if (ratio > 0) {
+        cg.fillColor = growthAccent;
+        cg.roundRect(trackX - trackW / 2, growthY - 7, Math.max(14, trackW * ratio), 14, 7);
+        cg.fill();
+      }
+      if (previousRatio > 0 && previousRatio < 1) {
+        const markerX = trackX - trackW / 2 + trackW * previousRatio;
+        cg.strokeColor = new Color(255, 255, 255, 230);
+        cg.lineWidth = 3;
+        cg.moveTo(markerX, growthY - 9);
+        cg.lineTo(markerX, growthY + 9);
+        cg.stroke();
+      }
+    }
+    this.addLabel(panel, 'GrowthTitle', -growthW * 0.22, growthY + 8, model.growthTitle, 20, growthW * 0.48, 28, model.growthEmphasized ? new Color(151, 91, 12, 255) : UiTokens.color.inkDeep, true);
+    this.addLabel(panel, 'GrowthDetail', model.growthRatio === null ? growthW * 0.20 : growthW * 0.19, growthY - 10, model.growthDetail, 17, growthW * 0.46, 42, new Color(95, 84, 70, 255), false);
+    if (model.growthEmphasized) {
+      const growthTitle = panel.getChildByName('GrowthTitle');
+      if (growthTitle) {
+        growthTitle.setScale(0.82, 0.82, 1);
+        tween(growthTitle).delay(0.12).to(0.28, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+      }
+    }
+    this.addLabel(panel, 'CareerLine', 0, growthY - 42, model.careerLine, 16, pw * 0.85, 28, new Color(112, 99, 82, 255), false);
+    this.addLabel(panel, 'ReviewTitle', 0, noteY + 25, model.reviewTitle, 22, noteW - 36, 32, UiTokens.color.inkDeep, true);
+    this.addLabel(panel, 'ReviewBody', 0, noteY - 18, model.reviewBody, 18, noteW - 42, 54, new Color(100, 88, 72, 255), false);
+    const reviewBodyLabel = panel.getChildByName('ReviewBody')?.getComponent(Label);
+    if (reviewBodyLabel) {
+      reviewBodyLabel.enableWrapText = true;
+      reviewBodyLabel.overflow = Label.Overflow.CLAMP;
+      reviewBodyLabel.lineHeight = 24;
     }
 
     const btnGap = Math.min(resultLayout.buttonGapMax, Math.max(resultLayout.buttonGapMin, pw * resultLayout.buttonGapRatio));
@@ -274,7 +322,6 @@ export class ResultDialogView {
     UiPainter.label(lbl, size, color, bold);
     lbl.horizontalAlign = 1;
     lbl.verticalAlign = 1;
-    lbl.overflow = Label.Overflow.SHRINK;
     lbl.overflow = Label.Overflow.SHRINK;
   }
 

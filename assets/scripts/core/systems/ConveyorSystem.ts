@@ -29,6 +29,8 @@ export class ConveyorSystem implements BeltView {
   private frozen = false;
   private lastBossTier: BossTellTier | null = null;
   private idSeq = 1;
+  private linkSeq = 1;
+  private pendingLinkCardId: number | null = null;
 
   constructor(
     private cfg: BalanceConfigT,
@@ -70,25 +72,38 @@ export class ConveyorSystem implements BeltView {
     if (this.frozen) return;
     const head = this.slots[0];
     if (head && head.state === CS.Boss) {
-      // §5.4 Boss临检：结算当前所有活跃白卡，且这些白卡视为"提前处理"被移除（防二次结算）
-      this.events.emit('BossInspection', { threatCards: this.threatCards });
+      // §5.4 Boss临检：前期只抽查最高风险任务，终局升级为全量扫描。
+      // 被抽中的任务视为提前处理并移除；未抽中的任务继续留在队列，行为与文案一致。
+      const allThreats = this.threatCards;
+      const limit = this.level.boss.inspectionLimit;
+      const inspected = limit === undefined
+        ? allThreats
+        : allThreats.slice().sort((a, b) => b.weight - a.weight).slice(0, Math.max(0, limit));
+      const inspectedIds = new Set(inspected.map((card) => card.id));
+      this.events.emit('BossInspection', {
+        threatCards: inspected,
+        totalThreats: allThreats.length,
+        patternLabel: this.level.boss.patternLabel,
+      });
       for (let i = 0; i < this.slots.length; i++) {
         const c = this.slots[i];
-        if (c && (c.state === CS.ActiveWhite || c.state === CS.Boss)) this.slots[i] = null;
+        if (c && (c.state === CS.Boss || inspectedIds.has(c.id))) this.slots[i] = null;
       }
       this.lastBossTier = null;
       this.shiftLeft();
+      this.refreshLinks();
       this.events.emit('CardShifted', { tickIndex: this.idSeq++, outgoing: head });
       return;
     }
     if (head) this.events.emit('CardEnteredProcessing', { card: head });
     this.shiftLeft();
+    this.refreshLinks();
     this.events.emit('CardShifted', { tickIndex: this.idSeq++, outgoing: head });
     this.updateBossTell();
   }
 
   /** 生成一张卡进入入口（slot N-1）。入口被占则丢弃本次生成。forceBoss 由 Game 按 Boss 规则判定后传入。 */
-  generate(phase: GamePhase, opts?: { forceBoss?: boolean }): void {
+  generate(phase: GamePhase, opts?: { forceBoss?: boolean; allowModifiers?: boolean }): void {
     if (this.frozen) return;
     const entry = this.slots.length - 1;
     if (this.slots[entry] !== null) return; // 入口被占，丢弃（稀疏带几乎不发生）
@@ -96,7 +111,12 @@ export class ConveyorSystem implements BeltView {
     if (opts?.forceBoss) {
       card = this.mkCard(CC.Boss, CS.Boss);
       this.slots[entry] = card;
-      this.events.emit('BossSpawned', { card });
+      this.events.emit('BossSpawned', {
+        card,
+        patternLabel: this.level.boss.patternLabel,
+        inspectionLimit: this.level.boss.inspectionLimit,
+      });
+      this.applyBossArrivalEffect();
       return;
     }
     if (this.rng.next() < this.level.idleCardRatio) {
@@ -105,6 +125,7 @@ export class ConveyorSystem implements BeltView {
       card = this.mkCard(this.pickCategory(phase), CS.ActiveWhite);
     }
     this.slots[entry] = card;
+    if (card.state === CS.ActiveWhite && opts?.allowModifiers !== false) this.applyTaskModifiers(card, phase);
   }
 
   /** §4.2 加需求：在 slot 处插入灰插队卡，其后整体右移一格（最右被挤出）。 */
@@ -113,14 +134,34 @@ export class ConveyorSystem implements BeltView {
     const s = clamp(slot, 0, N - 1);
     for (let i = N - 1; i > s; i--) this.slots[i] = this.slots[i - 1];
     this.slots[s] = this.mkCard(CC.Routine, CS.Inserted);
+    this.refreshLinks();
   }
 
   /** §4.2 改需求：把 slot 处活跃白卡变返工卡。返回是否成功。 */
   reworkAt(slot: number): boolean {
+    return this.changeDemandAt(slot).changed;
+  }
+
+  /** 精英任务先破盾、再返工；返回真实收益，避免 Game/UI 自行猜测。 */
+  changeDemandAt(slot: number): { changed: boolean; reworked: boolean; guardBroken: boolean; riskPrevented: number } {
     const c = this.slots[slot];
-    if (!c || c.state !== CS.ActiveWhite) return false;
+    if (!c || c.state !== CS.ActiveWhite) return { changed: false, reworked: false, guardBroken: false, riskPrevented: 0 };
+    if ((c.guard ?? 0) > 0) {
+      c.guard = Math.max(0, (c.guard ?? 0) - 1);
+      const reduction = Math.min(c.weight, this.level.taskModifiers?.eliteGuardReduction ?? 2);
+      c.baseWeight = Math.max(1, (c.baseWeight ?? c.weight) - reduction);
+      c.weight = c.baseWeight + (c.linkBonus ?? 0);
+      this.events.emit('EliteGuardBroken', { card: c, reduction });
+      return { changed: true, reworked: false, guardBroken: true, riskPrevented: reduction };
+    }
+    const beforeWeight = c.weight;
+    c.weight = c.baseWeight ?? c.weight;
+    c.linkId = undefined;
+    c.linkBonus = 0;
     c.state = CS.Rework;
-    return true;
+    c.isThreat = false;
+    this.refreshLinks();
+    return { changed: true, reworked: true, guardBroken: false, riskPrevented: beforeWeight * 2 };
   }
 
   /** §4.2 丢锅：以 slot 为中心炸 [slot-radius, slot+radius]，留出空档（不压缩，空档随传送带左移）。 */
@@ -134,6 +175,7 @@ export class ConveyorSystem implements BeltView {
         removed++;
       }
     }
+    this.refreshLinks();
     if (removed > 0) this.lastBossTier = null; // 可能炸掉 Boss，重置预警
     return removed;
   }
@@ -156,6 +198,7 @@ export class ConveyorSystem implements BeltView {
       }
     }
     if (removed > 0) this.lastBossTier = null;
+    this.refreshLinks();
     return removed;
   }
 
@@ -163,6 +206,7 @@ export class ConveyorSystem implements BeltView {
     this.slots.fill(null);
     this.frozen = false;
     this.lastBossTier = null;
+    this.pendingLinkCardId = null;
   }
 
   /* ---------- 内部 ---------- */
@@ -215,8 +259,104 @@ export class ConveyorSystem implements BeltView {
       category,
       state,
       weight: def.weight,
+      baseWeight: def.weight,
       isThreat: state === CS.ActiveWhite,
     };
+  }
+
+  private applyTaskModifiers(card: Card, phase: GamePhase): void {
+    const mods = this.level.taskModifiers;
+    if (!mods) return;
+    const eliteCount = this.threatCards.filter((candidate) => candidate.elite).length;
+    const minWeight = mods.eliteMinWeight ?? 5;
+    if (card.weight >= minWeight && eliteCount < (mods.maxElite ?? 2) && this.rng.next() < (mods.eliteRatio[phase] ?? 0)) {
+      card.elite = true;
+      card.guard = 1;
+      card.baseWeight = card.weight + 2;
+      card.weight = card.baseWeight;
+      this.events.emit('EliteTaskSpawned', { card });
+    }
+
+    const pending = this.pendingLinkCardId === null
+      ? null
+      : this.threatCards.find((candidate) => candidate.id === this.pendingLinkCardId && candidate.id !== card.id);
+    if (pending) {
+      const bonus = mods.linkBonus ?? 1;
+      const linkId = this.linkSeq++;
+      pending.linkId = linkId;
+      pending.linkBonus = bonus;
+      pending.weight = (pending.baseWeight ?? pending.weight) + bonus;
+      card.linkId = linkId;
+      card.linkBonus = bonus;
+      card.weight = (card.baseWeight ?? card.weight) + bonus;
+      this.pendingLinkCardId = null;
+      this.events.emit('TaskLinkFormed', { cards: [pending, card], bonus });
+    } else {
+      this.pendingLinkCardId = null;
+      if (this.rng.next() < (mods.linkRatio[phase] ?? 0)) this.pendingLinkCardId = card.id;
+    }
+  }
+
+  /** 任一伙伴离场/返工后，剩余任务立刻失去抱团风险。 */
+  private refreshLinks(): void {
+    if (this.pendingLinkCardId !== null && !this.threatCards.some((card) => card.id === this.pendingLinkCardId)) {
+      this.pendingLinkCardId = null;
+    }
+    const groups = new Map<number, Card[]>();
+    for (const card of this.threatCards) {
+      if (card.linkId === undefined) continue;
+      const group = groups.get(card.linkId) ?? [];
+      group.push(card);
+      groups.set(card.linkId, group);
+    }
+    for (const cards of groups.values()) {
+      if (cards.length >= 2) continue;
+      const remaining = cards[0];
+      if (!remaining) continue;
+      const bonusRemoved = remaining.linkBonus ?? 0;
+      remaining.weight = remaining.baseWeight ?? Math.max(0, remaining.weight - bonusRemoved);
+      remaining.linkId = undefined;
+      remaining.linkBonus = 0;
+      this.events.emit('TaskLinkBroken', { remaining, bonusRemoved });
+    }
+  }
+
+  private applyBossArrivalEffect(): void {
+    const effect = this.level.boss.arrivalEffect;
+    if (!effect) return;
+    const threats = this.threatCards.filter((card) => card.state === CS.ActiveWhite);
+    if (threats.length === 0) return;
+    const sorted = threats.slice().sort((a, b) => b.weight - a.weight);
+    if (effect === 'escalate-highest') {
+      const target = sorted[0];
+      target.baseWeight = (target.baseWeight ?? target.weight) + 2;
+      target.weight += 2;
+      this.events.emit('BossArrivalEffect', {
+        effect,
+        affected: 1,
+        label: '最高风险任务 +2',
+        cardIds: [target.id],
+      });
+      return;
+    }
+    const targets = effect === 'fortify-all' ? threats : sorted.slice(0, 1);
+    let affected = 0;
+    const affectedTargets: Card[] = [];
+    for (const target of targets) {
+      if ((target.guard ?? 0) > 0) continue;
+      target.elite = true;
+      target.guard = 1;
+      affected++;
+      affectedTargets.push(target);
+    }
+    if (affected > 0) {
+      this.events.emit('BossArrivalEffect', {
+        effect,
+        affected,
+        label: effect === 'fortify-all' ? `全场 ${affected} 张任务加盾` : '最高风险任务加盾',
+        cardIds: affectedTargets.map((target) => target.id),
+      });
+    }
   }
 }
 

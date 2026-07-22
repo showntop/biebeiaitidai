@@ -10,9 +10,21 @@
     "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.14 }
   },
   "idleCardRatio": 0.09,
-  "boss": { "enabled": true, "minSpawnSec": 20 },
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.10, "crisis": 0.18 },
+    "linkRatio": { "early": 0.05, "mid": 0.14, "crisis": 0.20 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
+  },
+  "boss": {
+    "enabled": true,
+    "minSpawnSec": 20,
+    "scheduleSec": [21, 41],
+    "patternLabel": "给最高风险加盾 · 深查3张 · 21/41秒",
+    "inspectionLimit": 3,
+    "arrivalEffect": "fortify-highest"
+  },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "objective": { "kind": "combo", "target": 5, "label": "Boss 压力下保持 5 连击" },
-  "hook": "Boss 与高权重白卡同场，连击不能断",
-  "challengeHint": "Boss + 高权重白卡双重压力"
+  "hook": "Boss 给最高风险任务加盾，压力下连击不能断",
+  "challengeHint": "先清高收益普通任务，再决定破盾或直接甩锅"
 }

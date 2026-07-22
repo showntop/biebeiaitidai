@@ -61,7 +61,12 @@
   },
   "combo": {
     "windowSec": 3.0,
-    "tierExpressions": 3
+    "tierExpressions": 3,
+    "rewards": [
+      { "combo": 3, "cooldownReducedSec": 0.6, "label": "节奏升温" },
+      { "combo": 5, "cooldownReducedSec": 0.9, "label": "火力全开" },
+      { "combo": 8, "cooldownReducedSec": 1.2, "label": "人类超频" }
+    ]
   },
   "control": {
     "scanSec": 1.0,

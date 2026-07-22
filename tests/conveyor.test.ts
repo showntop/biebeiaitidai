@@ -4,6 +4,7 @@ import { ConveyorSystem } from '../assets/scripts/core/systems/ConveyorSystem';
 import { BalanceConfig, DefaultLevel } from '../assets/scripts/core/config';
 import { SeededRng } from '../assets/scripts/core/rng';
 import type { Card } from '../assets/scripts/core/types';
+import type { LevelDef } from '../assets/scripts/core/config';
 
 const SLOTS = DefaultLevel.slots; // 6
 
@@ -135,5 +136,97 @@ describe('ConveyorSystem · Boss临检（§5.4）', () => {
     expect(conv.hasBoss()).toBe(true);
     expect(conv.clearBoss()).toBe(1);
     expect(conv.hasBoss()).toBe(false);
+  });
+});
+
+describe('ConveyorSystem · 中后期任务变体', () => {
+  const modifierLevel = (overrides?: Partial<LevelDef>): LevelDef => ({
+    ...DefaultLevel,
+    idleCardRatio: 0,
+    whiteDistribution: {
+      early: { routine: 0, report: 0, key: 1, proposal: 0, urgent: 0 },
+      mid: { routine: 0, report: 0, key: 1, proposal: 0, urgent: 0 },
+      crisis: { routine: 0, report: 0, key: 1, proposal: 0, urgent: 0 },
+    },
+    taskModifiers: {
+      eliteRatio: { early: 1, mid: 1, crisis: 1 },
+      linkRatio: { early: 0, mid: 0, crisis: 0 },
+      eliteMinWeight: 5,
+      eliteGuardReduction: 2,
+      linkBonus: 1,
+      maxElite: 2,
+    },
+    ...overrides,
+  });
+
+  it('精英任务第一次改需求只破盾，第二次才转返工', () => {
+    const bus = new EventBus();
+    const conv = new ConveyorSystem(BalanceConfig, modifierLevel(), bus, new SeededRng(3));
+    let broken = 0;
+    bus.on('EliteGuardBroken', () => broken++);
+    conv.generate('mid');
+    const slot = DefaultLevel.slots - 1;
+    const card = conv.slotAt(slot)!;
+    expect(card).toMatchObject({ elite: true, guard: 1, state: 'active-white', weight: 7 });
+    expect(conv.changeDemandAt(slot)).toMatchObject({ changed: true, reworked: false, guardBroken: true, riskPrevented: 2 });
+    expect(card).toMatchObject({ guard: 0, state: 'active-white', weight: 5, isThreat: true });
+    expect(conv.changeDemandAt(slot)).toMatchObject({ changed: true, reworked: true, guardBroken: false, riskPrevented: 10 });
+    expect(card).toMatchObject({ state: 'rework', isThreat: false });
+    expect(broken).toBe(1);
+  });
+
+  it('抱团形成后双方 +1 风险，移除任意伙伴会让剩余任务恢复', () => {
+    const base = modifierLevel();
+    const level = modifierLevel({
+      taskModifiers: {
+        ...base.taskModifiers!,
+        eliteRatio: { early: 0, mid: 0, crisis: 0 },
+        linkRatio: { early: 1, mid: 1, crisis: 1 },
+      },
+    });
+    const bus = new EventBus();
+    const conv = new ConveyorSystem(BalanceConfig, level, bus, new SeededRng(4));
+    let formed = 0;
+    let broken = 0;
+    bus.on('TaskLinkFormed', () => formed++);
+    bus.on('TaskLinkBroken', () => broken++);
+    conv.generate('mid');
+    conv.step();
+    conv.generate('mid');
+    const left = conv.slotAt(DefaultLevel.slots - 2)!;
+    const right = conv.slotAt(DefaultLevel.slots - 1)!;
+    expect(left.weight).toBe(6);
+    expect(right.weight).toBe(6);
+    expect(left.linkId).toBe(right.linkId);
+    conv.clearRange(DefaultLevel.slots - 1, 0);
+    expect(left).toMatchObject({ weight: 5, linkBonus: 0 });
+    expect(left.linkId).toBeUndefined();
+    expect(formed).toBe(1);
+    expect(broken).toBe(1);
+  });
+
+  it('Boss 专属加盾机制作用于现有任务，并发准确摘要', () => {
+    const level = modifierLevel({
+      taskModifiers: undefined,
+      boss: { enabled: true, minSpawnSec: 0, arrivalEffect: 'fortify-all' },
+    });
+    const bus = new EventBus();
+    const conv = new ConveyorSystem(BalanceConfig, level, bus, new SeededRng(6));
+    conv.generate('mid');
+    conv.step();
+    conv.generate('mid');
+    conv.step();
+    let affected = 0;
+    let cardIds: number[] = [];
+    bus.on('BossArrivalEffect', (event) => {
+      affected = event.affected;
+      cardIds = event.cardIds;
+    });
+    conv.generate('mid', { forceBoss: true });
+    expect(affected).toBe(2);
+    expect(cardIds).toHaveLength(2);
+    expect(new Set(cardIds).size).toBe(2);
+    expect(conv.threatCards.map((card) => card.id).sort()).toEqual([...cardIds].sort());
+    expect(conv.threatCards.every((card) => card.guard === 1 && card.elite)).toBe(true);
   });
 });

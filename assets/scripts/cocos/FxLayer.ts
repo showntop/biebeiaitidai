@@ -31,6 +31,7 @@ const UI_2D = 1 << 25; // 33554432
  */
 export class FxLayer {
   private unsubs: (() => void)[] = [];
+  private lastComboMilestone = 0;
 
   /** root 初始位置：屏震每次先归位到此基准，避免多次震动叠加导致画面残留偏移。 */
   private readonly rootBase: Vec3;
@@ -72,13 +73,20 @@ export class FxLayer {
   private bind(): void {
     this.on('CardHit', ({ slot, quality, prop }) => this.fxCardHit(slot, quality, prop));
     this.on('PerfectRewardGranted', ({ reward }) => this.fxPerfectReward(reward));
+    this.on('PerfectChainUpdated', ({ chain }) => this.fxPerfectChain(chain));
     this.on('CardResolved', ({ delta, card }) => this.fxCardResolved(delta, card));
     this.on('ApprovalChanged', ({ delta }) => this.fxApprovalChange(delta));
     this.on('ZoneChanged', ({ to }) => this.fxZoneChange(to));
     this.on('ComboUpdated', ({ combo }) => this.fxCombo(combo));
+    this.on('ComboRewardGranted', ({ combo, tier, label, cooldownReducedSec }) => this.fxComboReward(combo, tier, label, cooldownReducedSec));
     this.on('PhaseChanged', ({ to }) => this.fxPhaseChanged(to));
-    this.on('BossSpawned', () => this.fxBossSpawned());
+    this.on('LastChanceWarning', ({ cardIds, boss, impact, seconds }) => this.fxLastChanceWarning(cardIds, boss, impact, seconds));
+    this.on('EliteGuardBroken', ({ card, reduction }) => this.fxEliteGuardBroken(card.id, reduction));
+    this.on('TaskLinkBroken', ({ remaining, bonusRemoved }) => this.fxTaskLinkBroken(remaining?.id, bonusRemoved));
+    this.on('BossSpawned', ({ inspectionLimit }) => this.fxBossSpawned(inspectionLimit));
+    this.on('BossArrivalEffect', ({ effect, label, cardIds }) => this.fxBossArrivalEffect(effect, label, cardIds));
     this.on('BossInspection', () => this.fxBossInspection());
+    this.on('BossInspectionResolved', ({ checked, remaining, riskAdded }) => this.fxBossInspectionResolved(checked, remaining, riskAdded));
     this.on('KissUpFreeze', ({ durationSec }) => this.fxKissUpFreeze(durationSec));
     this.on('Revived', () => this.fxRevived());
     this.on('GameOver', () => this.fxGameOver());
@@ -267,6 +275,15 @@ export class FxLayer {
     this.statusBanner(labels[reward], color, 0.94, 92);
   }
 
+  private fxPerfectChain(chain: number): void {
+    if (chain < 2) return;
+    const color = chain >= 4 ? new Color(225, 151, 38, 255) : new Color(246, 190, 54, 255);
+    const copy = chain >= 4 ? `PERFECT ×${chain} · 神准` : `PERFECT ×${chain} · 手感升级`;
+    this.statusBanner(copy, color, chain >= 4 ? 0.92 : 0.68, 148);
+    this.rewardBurst(new Vec3(0, 132, 0), color, chain >= 4 ? 0.68 : 0.46, chain >= 4);
+    if (chain >= 4) this.shake(3.0, 0.14);
+  }
+
   /* ---------- 卡牌结算（浮动 ±N） ---------- */
 
   private fxCardResolved(delta: number, card: GameEvents['CardResolved']['card']): void {
@@ -323,9 +340,31 @@ export class FxLayer {
   /* ---------- 连击 ---------- */
 
   private fxCombo(combo: number): void {
-    if (combo < 2) return;
-    const color = combo >= 5 ? new Color(255, 100, 50) : new Color(255, 200, 50);
-    this.comboBurst(combo, color);
+    if (combo <= 0) {
+      this.lastComboMilestone = 0;
+      return;
+    }
+    const milestone = combo >= 8 ? 8 : combo >= 5 ? 5 : combo >= 3 ? 3 : combo >= 2 ? 2 : 0;
+    if (milestone <= this.lastComboMilestone) return;
+    this.lastComboMilestone = milestone;
+    const color = milestone >= 8 ? new Color(226, 64, 54, 255)
+      : milestone >= 5 ? new Color(238, 112, 48, 255)
+        : new Color(246, 190, 54, 255);
+    if (milestone === 2) {
+      this.floatText('2 连 · 节奏启动', 0, -24, color, 0.46, 19);
+      return;
+    }
+    this.comboBurst(milestone, color);
+    if (milestone >= 5) this.shake(milestone >= 8 ? 4.0 : 2.8, milestone >= 8 ? 0.20 : 0.14);
+  }
+
+  private fxComboReward(combo: number, tier: number, label: string, cooldownReducedSec: number): void {
+    const color = tier >= 3
+      ? new Color(214, 78, 62, 255)
+      : tier === 2
+        ? new Color(232, 126, 46, 255)
+        : new Color(225, 164, 43, 255);
+    this.statusBanner(`${combo} 连 · ${label} · 冷却 -${cooldownReducedSec.toFixed(1)}s`, color, 0.86, 108);
   }
 
   private fxPhaseChanged(to: GameEvents['PhaseChanged']['to']): void {
@@ -336,13 +375,73 @@ export class FxLayer {
     if (crisis) this.edgeAlarm(color, 0.46, 0.46);
   }
 
+  private fxLastChanceWarning(cardIds: number[], boss: boolean, impact: number, seconds: number): void {
+    const color = new Color(210, 54, 48, 255);
+    for (const cardId of cardIds) {
+      const target = this.getCardVisual(cardId);
+      if (target?.isValid) this.targetWarning(target, color, 1);
+    }
+    this.edgeAlarm(color, 0.86, 0.9);
+    this.criticalBanner(
+      boss
+        ? `最后机会 · ${seconds.toFixed(1)}s 后临检 +${Math.round(impact)}`
+        : `最后机会 · ${seconds.toFixed(1)}s 后任务 +${Math.round(impact)}`,
+      color,
+      1.05,
+    );
+    this.shake(6.4, 0.30);
+  }
+
+  /* ---------- 精英护盾 / 抱团链 ---------- */
+
+  private fxEliteGuardBroken(cardId: number, reduction: number): void {
+    const target = this.getCardVisual(cardId);
+    const origin = target?.isValid ? this.pointInRoot(target) : new Vec3(0, 72, 0);
+    const color = new Color(72, 184, 224, 255);
+    if (target?.isValid) this.targetWarning(target, color, 0.88);
+    this.fractureBurst(origin, color, 'shield');
+    this.floatText(`破盾 · 风险 -${Math.round(reduction)}`, origin.x, origin.y + 42, color, 0.72, 21);
+    this.shake(3.4, 0.15);
+  }
+
+  private fxTaskLinkBroken(cardId: number | undefined, bonusRemoved: number): void {
+    if (bonusRemoved <= 0) return;
+    const target = cardId === undefined ? null : this.getCardVisual(cardId);
+    const origin = target?.isValid ? this.pointInRoot(target) : new Vec3(0, 58, 0);
+    const color = new Color(225, 164, 43, 255);
+    if (target?.isValid) this.targetWarning(target, color, 0.62);
+    this.fractureBurst(origin, color, 'link');
+    this.floatText(`拆链 · 风险 -${Math.round(bonusRemoved)}`, origin.x, origin.y + 36, color, 0.68, 20);
+    this.shake(2.2, 0.11);
+  }
+
   /* ---------- Boss ---------- */
 
-  private fxBossSpawned(): void {
-    const color = new Color(198, 72, 62, 255);
+  private fxBossSpawned(inspectionLimit?: number): void {
+    const fullScan = inspectionLimit === undefined;
+    const color = fullScan ? new Color(174, 48, 48, 255) : new Color(198, 72, 62, 255);
     this.shake(4.2, 0.24);
     this.edgeAlarm(color, 0.72, 0.72);
-    this.statusBanner('BOSS 临检进入队列', color, 1.05, 118);
+    this.statusBanner(fullScan ? 'BOSS · 全量扫描进入队列' : `BOSS · 重点抽查 ${inspectionLimit} 张`, color, 1.05, 118);
+  }
+
+  private fxBossArrivalEffect(
+    effect: GameEvents['BossArrivalEffect']['effect'],
+    label: string,
+    cardIds: number[],
+  ): void {
+    const fortify = effect !== 'escalate-highest';
+    const color = fortify ? new Color(70, 156, 214, 255) : new Color(220, 92, 54, 255);
+    for (const cardId of cardIds) {
+      const target = this.getCardVisual(cardId);
+      if (!target?.isValid) continue;
+      this.targetWarning(target, color, 1);
+      const origin = this.pointInRoot(target);
+      this.fractureBurst(origin, color, fortify ? 'fortify' : 'impact');
+    }
+    this.statusBanner(`BOSS 现场施压 · ${label}`, color, 1.08, 126);
+    this.edgeAlarm(color, 0.62, 0.76);
+    this.shake(effect === 'fortify-all' ? 6.2 : 5.2, effect === 'fortify-all' ? 0.30 : 0.25);
   }
 
   private fxBossInspection(): void {
@@ -350,7 +449,12 @@ export class FxLayer {
     this.shake(7, 0.36);
     this.edgeAlarm(color, 1, 0.88);
     this.scanSweep(color, 0.62);
-    this.statusBanner('临检结算 · 正在扫描任务', color, 0.92, 104);
+  }
+
+  private fxBossInspectionResolved(checked: number, remaining: number, riskAdded: number): void {
+    const color = new Color(198, 72, 62, 255);
+    const tail = remaining > 0 ? ` · 余${remaining}张` : ' · 全扫';
+    this.statusBanner(`临检查${checked}张 · 风险 +${Math.round(riskAdded)}${tail}`, color, 1.05, 104);
   }
 
   /* ---------- 拍马屁冻结 ---------- */
@@ -737,6 +841,58 @@ export class FxLayer {
       .start();
   }
 
+  /** 仅用于即将失败：深色高对比警告条固定在显示器内沿，不与普通正反馈共享白色胶囊。 */
+  private criticalBanner(text: string, color: Color, duration: number): void {
+    const { width, height } = this.effectBounds();
+    const bannerWidth = Math.min(360, Math.max(290, width * 0.82));
+    const node = new Node('FxCriticalBanner');
+    node.layer = UI_2D;
+    node.addComponent(UITransform).setContentSize(bannerWidth, 46);
+    node.setPosition(0, height * 0.115 - 8, 0);
+    node.setScale(0.94, 0.94, 1);
+    this.root.addChild(node);
+    const g = node.addComponent(Graphics);
+    g.fillColor = new Color(72, 25, 24, 246);
+    g.strokeColor = new Color(color.r, color.g, color.b, 255);
+    g.lineWidth = 3;
+    g.roundRect(-bannerWidth / 2, -22, bannerWidth, 44, 15);
+    g.fill();
+    g.stroke();
+    g.fillColor = new Color(255, 221, 205, 245);
+    g.moveTo(-bannerWidth / 2 + 18, 8);
+    g.lineTo(-bannerWidth / 2 + 27, -8);
+    g.lineTo(-bannerWidth / 2 + 9, -8);
+    g.close();
+    g.fill();
+
+    const textNode = new Node('FxCriticalBannerText');
+    textNode.layer = UI_2D;
+    textNode.parent = node;
+    textNode.addComponent(UITransform).setContentSize(bannerWidth - 54, 38);
+    textNode.setPosition(12, 0, 0);
+    const label = textNode.addComponent(Label);
+    label.string = text;
+    label.fontSize = 19;
+    label.lineHeight = 23;
+    label.isBold = true;
+    label.color = new Color(255, 247, 236, 255);
+    label.horizontalAlign = 1;
+    label.verticalAlign = 1;
+
+    const opacity = node.addComponent(UIOpacity);
+    opacity.opacity = 0;
+    tween(opacity)
+      .to(0.07, { opacity: 255 }, { easing: 'quadOut' })
+      .delay(duration)
+      .to(0.18, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+    tween(node)
+      .to(0.10, { position: new Vec3(0, height * 0.115, 0), scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+      .delay(duration)
+      .call(() => { if (node.isValid) node.destroy(); })
+      .start();
+  }
+
   /**
    * 边缘警报：只点亮四角与短刻度，保留危险氛围但不覆盖画面内容。
    */
@@ -923,6 +1079,67 @@ export class FxLayer {
       .start();
   }
 
+  /** 机制爆点：破盾是放射碎片，拆链是断开的双环，Boss 施压是向内收紧的冲击环。 */
+  private fractureBurst(origin: Vec3, color: Color, kind: 'shield' | 'link' | 'fortify' | 'impact'): void {
+    const node = new Node(`FxMechanicBurst-${kind}`);
+    node.layer = UI_2D;
+    node.addComponent(UITransform).setContentSize(170, 170);
+    node.setPosition(origin.x, origin.y, 0);
+    this.root.addChild(node);
+    const g = node.addComponent(Graphics);
+    g.strokeColor = new Color(color.r, color.g, color.b, 235);
+    g.fillColor = new Color(color.r, color.g, color.b, 205);
+    g.lineWidth = kind === 'impact' ? 4 : 3;
+
+    if (kind === 'link') {
+      g.circle(-19, 0, 18);
+      g.circle(19, 0, 18);
+      g.stroke();
+      g.moveTo(-6, 12);
+      g.lineTo(4, 3);
+      g.lineTo(-4, -4);
+      g.lineTo(7, -14);
+      g.stroke();
+    } else {
+      g.circle(0, 0, kind === 'fortify' ? 31 : 25);
+      g.stroke();
+      const count = kind === 'shield' ? 9 : 12;
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count;
+        const inner = kind === 'fortify' ? 48 : 32;
+        const outer = kind === 'fortify' ? 66 : 58 + (i % 3) * 7;
+        g.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+        g.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+        g.stroke();
+        if (kind === 'shield' && i % 2 === 0) {
+          const x = Math.cos(angle) * outer;
+          const y = Math.sin(angle) * outer;
+          g.moveTo(x, y);
+          g.lineTo(x - 5, y + 8);
+          g.lineTo(x + 6, y + 5);
+          g.close();
+          g.fill();
+        }
+      }
+    }
+
+    const opacity = node.addComponent(UIOpacity);
+    opacity.opacity = 245;
+    const inward = kind === 'fortify' || kind === 'impact';
+    node.setScale(inward ? 1.28 : 0.72, inward ? 1.28 : 0.72, 1);
+    tween(node)
+      .to(0.34, {
+        scale: new Vec3(inward ? 0.88 : 1.28, inward ? 0.88 : 1.28, 1),
+        angle: kind === 'link' ? 10 : -8,
+      }, { easing: inward ? 'backOut' : 'quadOut' })
+      .call(() => { if (node.isValid) node.destroy(); })
+      .start();
+    tween(opacity)
+      .delay(0.12)
+      .to(0.22, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+  }
+
   /** Boss 临近时直接框住目标卡，玩家能看懂威胁来自哪里。 */
   private targetWarning(target: Node, color: Color, urgency: number): void {
     const ut = target.getComponent(UITransform);
@@ -972,8 +1189,11 @@ export class FxLayer {
 
   private comboBurst(combo: number, color: Color): void {
     const y = -46;
-    this.statusBanner(`${combo} 连击 · 节奏拉满`, color, combo >= 5 ? 0.78 : 0.54, y);
-    if (combo >= 3) this.rewardBurst(new Vec3(0, y, 0), color, combo >= 5 ? 0.62 : 0.44, combo >= 5);
+    const copy = combo >= 8 ? `${combo} 连击 · 流程粉碎!`
+      : combo >= 5 ? `${combo} 连击 · 节奏拉满`
+        : `${combo} 连击 · 接上了`;
+    this.statusBanner(copy, color, combo >= 8 ? 0.94 : combo >= 5 ? 0.78 : 0.54, y);
+    this.rewardBurst(new Vec3(0, y, 0), color, combo >= 8 ? 0.74 : combo >= 5 ? 0.62 : 0.44, combo >= 5);
   }
 
   private effectBounds(): { width: number; height: number } {

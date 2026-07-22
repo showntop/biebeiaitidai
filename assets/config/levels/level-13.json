@@ -10,11 +10,16 @@
     "crisis": { "routine": 0.16, "report": 0.18, "key": 0.25, "proposal": 0.29, "urgent": 0.12 }
   },
   "idleCardRatio": 0.14,
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.03, "crisis": 0.07 },
+    "linkRatio": { "early": 0.04, "mid": 0.10, "crisis": 0.14 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 1
+  },
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "fixedSeed": 130013,
   "propLimit": ["add-demand", "change-demand", "throw-pot"],
   "objective": { "kind": "hunt", "label": "固定任务流下完成猎杀通关" },
-  "hook": "可背板的返工连锁，找出最快反杀解法",
-  "challengeHint": "第三个小高峰：时长加长、危机密，建议猎杀式通关"
+  "hook": "抱团任务首次出现：拆掉一张，另一张同步降风险",
+  "challengeHint": "返工连锁与任务抱团同场，优先拆链再反杀"
 }

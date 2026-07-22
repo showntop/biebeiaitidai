@@ -35,6 +35,8 @@ export interface PlayerProfile {
   huntWinCount: number;
   /** §3.2 累计获得三星的关卡序号集合（去重源真值，可序列化；同一关多次三星只记一次）。 */
   star3Levels: number[];
+  /** 每关历史最佳星级（0～3），用于总星收集与重玩反馈。 */
+  bestStars: number[];
   /** 轻量成就与收藏均不改变战斗数值。 */
   achievements: AchievementId[];
   cosmetics: CosmeticId[];
@@ -49,6 +51,14 @@ export function star3Count(p: PlayerProfile): number {
   return p.star3Levels.length;
 }
 
+export function bestStarsFor(p: PlayerProfile, levelIndex: number): number {
+  return clampStars(p.bestStars[levelIndex]);
+}
+
+export function totalStars(p: PlayerProfile): number {
+  return p.bestStars.reduce((sum, stars) => sum + clampStars(stars), 0);
+}
+
 /**
  * 从持久化数据（如 JSON.parse 回来的纯对象）重建一个完整 PlayerProfile。
  * 必要性：daysEmployed 是定义在对象字面量上的 getter，JSON 序列化/反序列化会丢失它，
@@ -61,6 +71,14 @@ export function hydrateProfile(raw: Partial<PlayerProfile> | null): PlayerProfil
   p.highestUnlockedLevel = typeof raw.highestUnlockedLevel === 'number' ? raw.highestUnlockedLevel : 0;
   p.huntWinCount = typeof raw.huntWinCount === 'number' ? raw.huntWinCount : 0;
   p.star3Levels = Array.isArray(raw.star3Levels) ? [...raw.star3Levels] : [];
+  p.bestStars = Array.isArray(raw.bestStars)
+    ? raw.bestStars.slice(0, LevelSequence.length).map(clampStars)
+    : [];
+  while (p.bestStars.length < LevelSequence.length) p.bestStars.push(0);
+  // 旧存档只有三星关集合；迁移时至少恢复这些已经赢得的星级。
+  for (const levelIndex of p.star3Levels) {
+    if (levelIndex >= 0 && levelIndex < p.bestStars.length) p.bestStars[levelIndex] = 3;
+  }
   p.achievements = Array.isArray(raw.achievements) ? raw.achievements.filter(isAchievementId) : [];
   p.cosmetics = Array.isArray(raw.cosmetics) ? raw.cosmetics.filter(isCosmeticId) : ['desk-classic'];
   p.dailyRecords = Array.isArray(raw.dailyRecords)
@@ -75,6 +93,7 @@ export function createProfile(): PlayerProfile {
     highestUnlockedLevel: 0,
     huntWinCount: 0,
     star3Levels: [],
+    bestStars: new Array(LevelSequence.length).fill(0),
     achievements: [],
     cosmetics: ['desk-classic'],
     dailyRecords: [],
@@ -114,6 +133,8 @@ export function applyRunResult(profile: PlayerProfile, levelIndex: number, repor
   awardRunAchievements(profile, report);
   if (report.result === 'lose' || report.stars === 0) return profile;
 
+  profile.bestStars[levelIndex] = Math.max(bestStarsFor(profile, levelIndex), clampStars(report.stars));
+
   // 解锁下一关
   if (levelIndex + 1 > profile.highestUnlockedLevel && levelIndex + 1 < LevelSequence.length) {
     profile.highestUnlockedLevel = levelIndex + 1;
@@ -127,6 +148,11 @@ export function applyRunResult(profile: PlayerProfile, levelIndex: number, repor
   return profile;
 }
 
+function clampStars(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(3, Math.trunc(value)));
+}
+
 export type AchievementId =
   | 'first-hunt'
   | 'perfect-chain'
@@ -136,6 +162,13 @@ export type AchievementId =
   | 'daily-first';
 
 export type CosmeticId = 'desk-classic' | 'paper-blue' | 'ai-crash-face' | 'report-gold';
+
+export const CosmeticLabels: Record<CosmeticId, string> = {
+  'desk-classic': '经典工位',
+  'paper-blue': '蓝色纸团',
+  'ai-crash-face': 'AI 崩溃表情',
+  'report-gold': '金色战报纸',
+};
 
 export interface DailyRecord {
   key: string;
@@ -152,6 +185,50 @@ export const AchievementLabels: Record<AchievementId, string> = {
   'combo-5': '五连流程粉碎',
   'daily-first': '今日也没被替代',
 };
+
+/** 成就条件用于收藏页展示；规则仍以 awardRunAchievements 为唯一判定源。 */
+export const AchievementHints: Record<AchievementId, string> = {
+  'first-hunt': '完成 1 次猎杀式通关',
+  'perfect-chain': '单局连续命中 3 次 Perfect',
+  'boss-clutch': '在 Boss 临检前完成关键截胡',
+  'flawless-survive': '零失误完成生存通关',
+  'combo-5': '单局达成 5 连击',
+  'daily-first': '完成 1 次今日挑战',
+};
+
+export interface RankProgress {
+  score: number;
+  current: Rank;
+  next: Rank | null;
+  nextAt: number | null;
+  remaining: number;
+  ratio: number;
+}
+
+/** 当前段位内的成长进度，供开始页/结算页统一展示。 */
+export function rankProgress(p: PlayerProfile): RankProgress {
+  return rankProgressFromScore(rankScore(p));
+}
+
+/** 结算前的分数快照也可复用同一套段位进度计算。 */
+export function rankProgressFromScore(score: number): RankProgress {
+  const current = rankFromScore(score);
+  const index = RankThresholds.findIndex((threshold) => threshold.rank === current);
+  const threshold = RankThresholds[Math.max(0, index)];
+  const nextThreshold = RankThresholds[index + 1];
+  if (!nextThreshold) {
+    return { score, current, next: null, nextAt: null, remaining: 0, ratio: 1 };
+  }
+  const span = Math.max(1, nextThreshold.lo - threshold.lo);
+  return {
+    score,
+    current,
+    next: nextThreshold.rank,
+    nextAt: nextThreshold.lo,
+    remaining: Math.max(0, nextThreshold.lo - score),
+    ratio: Math.max(0, Math.min(1, (score - threshold.lo) / span)),
+  };
+}
 
 /** 每日挑战只比较正分；相同 key 只保留更高成绩。 */
 export function applyDailyChallengeResult(profile: PlayerProfile, key: string, report: RunReport): number {

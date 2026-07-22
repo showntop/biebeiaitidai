@@ -12,6 +12,10 @@ export type FeedbackCue =
   | 'release-kiss'
   | 'hit'
   | 'heavy-hit'
+  | 'shield-break'
+  | 'link-break'
+  | 'boss-impact'
+  | 'last-chance'
   | 'perfect'
   | 'miss'
   | 'danger'
@@ -88,7 +92,9 @@ export class SensoryFeedback {
   play(cue: FeedbackCue): void {
     if (!this.soundEnabled) return;
     const nowMs = Date.now();
-    const minGap = cue === 'target-tick' ? 70 : cue === 'boss' || cue === 'danger' ? 260 : 28;
+    const minGap = cue === 'target-tick' ? 70
+      : cue === 'boss' || cue === 'danger' || cue === 'boss-impact' || cue === 'last-chance' ? 260
+        : 28;
     if (nowMs - (this.lastCueAt.get(cue) ?? 0) < minGap) return;
     this.lastCueAt.set(cue, nowMs);
     const context = this.ensureContext();
@@ -234,6 +240,10 @@ function tonesFor(cue: FeedbackCue): Tone[] {
     case 'release-kiss': return [t(0, 0.10, 540, 720, 0.032, 'sine'), t(0.07, 0.12, 720, 980, 0.026, 'sine')];
     case 'hit': return [t(0, 0.09, 210, 125, 0.050, 'square')];
     case 'heavy-hit': return [t(0, 0.16, 145, 55, 0.065, 'square'), t(0.03, 0.10, 300, 120, 0.025)];
+    case 'shield-break': return [t(0, 0.07, 1160, 720, 0.034, 'sine'), t(0.035, 0.12, 840, 230, 0.046, 'square')];
+    case 'link-break': return [t(0, 0.065, 620, 390, 0.034), t(0.09, 0.08, 440, 740, 0.030, 'sine')];
+    case 'boss-impact': return [t(0, 0.28, 105, 42, 0.068, 'square'), t(0.05, 0.16, 330, 95, 0.035), t(0.18, 0.20, 82, 38, 0.052, 'square')];
+    case 'last-chance': return [t(0, 0.09, 240, 170, 0.055, 'square'), t(0.12, 0.09, 300, 205, 0.058, 'square'), t(0.24, 0.16, 390, 135, 0.064, 'square')];
     case 'perfect': return [t(0, 0.12, 660, 760, 0.045, 'sine'), t(0.07, 0.14, 880, 1040, 0.04, 'sine'), t(0.14, 0.18, 1100, 1320, 0.035, 'sine')];
     case 'miss': return [t(0, 0.16, 190, 105, 0.027, 'sine')];
     case 'danger': return [t(0, 0.11, 185, 145, 0.045, 'square'), t(0.15, 0.11, 185, 145, 0.045, 'square')];

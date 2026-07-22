@@ -9,7 +9,7 @@ import { UiTokens, alphaColor, mixColor } from './UiTokens';
  *  - 不显示阈值刻度数字：绿/黄/红分区颜色本身就是信息；
  *  - 不显示事件控制台：只显示短战报提示，重反馈仍走 FxLayer 飘字；
  *  - 危险态只保留一个抖动徽章，不再叠加外圈脉冲描边。
- * 底部保留一行无框提示小字（教学引导用），视觉权重最低。
+ * 底部保留一行提示条；教学使用蓝色强调，普通战报仍保持低视觉权重。
  */
 export class ApprovalGaugeView {
   private readonly frame: Graphics;
@@ -53,7 +53,7 @@ export class ApprovalGaugeView {
     this.root.getComponent(UITransform)?.setContentSize(width, height);
     this.barW = width - 60;
     this.barH = Math.min(22, Math.max(16, height * 0.18));
-    this.barY = -height * 0.24;
+    this.barY = -height * 0.10;
 
     const rowY = height * 0.22;
     this.valueBaseX = -this.barW / 2;
@@ -62,12 +62,12 @@ export class ApprovalGaugeView {
 
     this.place(this.value, this.valueBaseX + width * 0.22, rowY, width * 0.46, 38);
     this.place(this.zone, this.zoneBaseX, this.zoneBaseY, 78, 30);
-    this.place(this.hint, 0, -height / 2 + 12, this.barW, 20);
+    this.place(this.hint, 0, -height / 2 + 16, this.barW, 28);
     this.place(this.delta, this.valueBaseX + width * 0.35, rowY + 28, 74, 26);
 
     UiPainter.label(this.value, Math.min(30, Math.max(22, width * 0.040)), UiTokens.color.inkDeep, true);
     UiPainter.label(this.zone, UiTokens.type.caption, UiTokens.color.inkDeep, true);
-    UiPainter.label(this.hint, UiTokens.type.micro, alphaColor(UiTokens.color.muted, 170));
+    UiPainter.label(this.hint, 19, alphaColor(UiTokens.color.muted, 190), true);
     UiPainter.label(this.delta, UiTokens.type.caption, UiTokens.color.danger, true);
     this.value.horizontalAlign = 0;
 
@@ -90,10 +90,10 @@ export class ApprovalGaugeView {
     g.fill();
 
     const segs = [
-      { x: 0, w: 0.28, c: UiTokens.color.good },
-      { x: 0.28, w: 0.22, c: UiTokens.color.ok },
-      { x: 0.50, w: 0.20, c: UiTokens.color.gold },
-      { x: 0.70, w: 0.30, c: UiTokens.color.danger },
+      { x: 0, w: 0.18, c: UiTokens.color.gold },
+      { x: 0.18, w: 0.31, c: UiTokens.color.good },
+      { x: 0.49, w: 0.20, c: UiTokens.color.gold },
+      { x: 0.69, w: 0.31, c: UiTokens.color.danger },
     ];
     segs.forEach((seg, i) => {
       const sx = -this.barW / 2 + this.barW * seg.x;
@@ -107,7 +107,17 @@ export class ApprovalGaugeView {
     this.dynamic.node.setPosition(0, 0, 0);
   }
 
-  update(approval: number, zone: string, hintText: string, elapsed: number): void {
+  update(
+    approval: number,
+    zone: string,
+    hintText: string,
+    elapsed: number,
+    remainingSec = 0,
+    huntProgress = 0,
+    huntThreshold = 18,
+    huntHoldSec = 2,
+    objectiveText = '',
+  ): void {
     const copy: Record<string, string> = { hunt: '反杀!', good: '良好', ok: '一般', danger: '危险!' };
     const colors: Record<string, Readonly<Color>> = {
       hunt: UiTokens.color.gold,
@@ -143,9 +153,21 @@ export class ApprovalGaugeView {
     this.value.string = `认可度  ${shownApproval}`;
     this.zone.string = copy[zone] ?? zone;
     this.zone.color = zoneColor;
-    const hint = hintText.trim();
-    this.hint.string = hint ? `战报 · ${hint}` : '';
-    this.hint.node.active = !!hint;
+    const eventHint = hintText.trim();
+    const teaching = eventHint.startsWith('教学 ·');
+    const huntRemain = Math.max(0, huntHoldSec * (1 - huntProgress));
+    const routeHint = huntProgress > 0
+      ? `反杀锁定 ${Math.round(huntProgress * 100)}% · 再稳 ${huntRemain.toFixed(1)}s`
+      : `守住 ${Math.ceil(remainingSec)}s  ｜  压到 ≤${huntThreshold} 可提前反杀`;
+    const objectiveHint = objectiveText.trim();
+    const hint = eventHint ? (teaching ? eventHint : `战报 · ${eventHint}`) : huntProgress > 0 ? routeHint : objectiveHint ? `目标 · ${objectiveHint}` : routeHint;
+    this.hint.string = hint;
+    this.hint.node.active = true;
+    this.hint.color = teaching
+      ? UiTokens.color.blue
+      : huntProgress > 0 && !eventHint
+      ? UiTokens.color.gold
+      : objectiveHint && !eventHint ? alphaColor(UiTokens.color.blue, 220) : alphaColor(UiTokens.color.muted, 190);
     this.delta.node.active = elapsed < this.deltaUntil && !!this.deltaText;
 
     const shakeX = danger ? Math.sin(elapsed * 18) * 1.4 : 0;
@@ -155,12 +177,16 @@ export class ApprovalGaugeView {
       || elapsed < this.deltaUntil
       || elapsed < this.zoneFlashUntil
       || danger
-      || !!hint;
+      || !!eventHint
+      || huntProgress > 0;
     const paintBucket = animating ? Math.floor(elapsed * 15) : 0;
     const dynamicSignature = [
       shownApproval,
       zone,
       hint,
+      Math.round(huntProgress * 100),
+      Math.ceil(remainingSec),
+      objectiveHint,
       this.delta.node.active ? this.deltaText : '',
       paintBucket,
       Math.round(this.barW),
@@ -196,6 +222,24 @@ export class ApprovalGaugeView {
       g.fill();
     }
 
+    // 反杀线与连续维持进度：细轨道位于主仪表下方，不新增占屏 UI。
+    const huntW = trackInnerW * Math.max(0, Math.min(1, huntThreshold / 100));
+    const huntRailY = this.barY - innerH / 2 - 4;
+    g.fillColor = alphaColor(UiTokens.color.inkDeep, 35);
+    g.roundRect(left, huntRailY - 1.5, huntW, 3, 1.5);
+    g.fill();
+    if (huntProgress > 0) {
+      g.fillColor = UiTokens.color.gold;
+      g.roundRect(left, huntRailY - 2, Math.max(4, huntW * huntProgress), 4, 2);
+      g.fill();
+    }
+    const thresholdX = left + huntW;
+    g.strokeColor = alphaColor(UiTokens.color.inkDeep, 120);
+    g.lineWidth = 1.5;
+    g.moveTo(thresholdX, this.barY - innerH / 2 - 5);
+    g.lineTo(thresholdX, this.barY + innerH / 2 + 3);
+    g.stroke();
+
     if (elapsed < this.deltaUntil && this.deltaText) {
       const remain = this.deltaUntil - elapsed;
       const positive = this.deltaText.startsWith('+');
@@ -218,15 +262,15 @@ export class ApprovalGaugeView {
       g.stroke();
     }
 
-    if (hint) {
+    if (eventHint || huntProgress > 0) {
       const pulse = 0.88 + Math.sin(elapsed * 9) * 0.08;
-      const hintW = Math.min(this.barW, 320);
-      const hintH = 22;
-      const hintY = -this.root.getComponent(UITransform)!.height / 2 + 12;
+      const hintW = Math.min(this.barW, 560);
+      const hintH = 28;
+      const hintY = -this.root.getComponent(UITransform)!.height / 2 + 16;
       g.fillColor = alphaColor(UiTokens.color.paper, 220);
       g.roundRect(-hintW / 2, hintY - hintH / 2, hintW, hintH, hintH / 2);
       g.fill();
-      g.strokeColor = alphaColor(zoneColor, 80 + pulse * 45);
+      g.strokeColor = alphaColor(teaching ? UiTokens.color.blue : zoneColor, 80 + pulse * 45);
       g.lineWidth = 1.5;
       g.roundRect(-hintW / 2, hintY - hintH / 2, hintW, hintH, hintH / 2);
       g.stroke();
@@ -239,7 +283,7 @@ export class ApprovalGaugeView {
     this.targetApproval = approval;
     this.lastElapsed = elapsed;
     this.lastDynamicSignature = '';
-    this.update(approval, zone, hintText, elapsed);
+    this.update(approval, zone, hintText, elapsed, 0, 0);
   }
 
   private ensureGraphics(name: string): Graphics {

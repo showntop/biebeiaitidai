@@ -35,4 +35,38 @@ describe('QA 启动参数', () => {
       levelIndex: 1,
     });
   });
+
+  it('支持暂停菜单的固定视觉验收场景', () => {
+    expect(parseQaLaunchConfig('?qa=pause&level=4')).toMatchObject({
+      scenario: 'pause',
+      levelIndex: 3,
+    });
+  });
+
+  it('支持范围预览和临检预警视觉场景', () => {
+    expect(parseQaLaunchConfig('?qa=blast&level=10')?.scenario).toBe('blast');
+    expect(parseQaLaunchConfig('?qa=boss-warning&level=10')?.scenario).toBe('boss-warning');
+    expect(parseQaLaunchConfig('?qa=boss-critical&level=18')?.scenario).toBe('boss-critical');
+  });
+
+  it('支持连击奖励和连续 Perfect 演出场景', () => {
+    expect(parseQaLaunchConfig('?qa=combo-reward&level=17')?.scenario).toBe('combo-reward');
+    expect(parseQaLaunchConfig('?qa=perfect-chain&level=18')?.scenario).toBe('perfect-chain');
+    expect(parseQaLaunchConfig('?qa=elite-link&level=18')?.scenario).toBe('elite-link');
+    expect(parseQaLaunchConfig('?qa=shield-break&level=18')?.scenario).toBe('shield-break');
+    expect(parseQaLaunchConfig('?qa=rework-hit&level=1')?.scenario).toBe('rework-hit');
+    expect(parseQaLaunchConfig('?qa=last-chance&level=18')?.scenario).toBe('last-chance');
+  });
+
+  it('支持关卡路线和成就收藏视觉验收场景', () => {
+    expect(parseQaLaunchConfig('?qa=career-route&level=8')?.scenario).toBe('career-route');
+    expect(parseQaLaunchConfig('?qa=career-achievements')?.scenario).toBe('career-achievements');
+    expect(parseQaLaunchConfig('?qa=result-daily&level=6')?.scenario).toBe('result-daily');
+    expect(parseQaLaunchConfig('?qa=result-rankup')?.scenario).toBe('result-rankup');
+  });
+
+  it('支持前3关教学提示视觉验收场景', () => {
+    expect(parseQaLaunchConfig('?qa=onboarding-perfect&level=2')?.scenario).toBe('onboarding-perfect');
+    expect(parseQaLaunchConfig('?qa=onboarding-hunt&level=3')?.scenario).toBe('onboarding-hunt');
+  });
 });

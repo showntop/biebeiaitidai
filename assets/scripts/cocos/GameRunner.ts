@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, Rect, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate } from 'cc';
+import { _decorator, Component, Node, Label, Color, UITransform, UIOpacity, tween, Tween, Vec3, Rect, input, Input, EventKeyboard, EventTouch, EventMouse, Sprite, SpriteFrame, resources, Texture2D, view, Graphics, sys, Mask, instantiate, game as ccGame, Game as CocosGame } from 'cc';
 import { Game } from '../core/Game';
 import { getLevel, BalanceConfig, getCardDef } from '../core/config';
 import { SeededRng } from '../core/rng';
@@ -7,22 +7,33 @@ import type { Storage } from '../core/Session';
 import { parseQaLaunchConfig } from '../core/QaLaunchConfig';
 import type { QaLaunchConfig } from '../core/QaLaunchConfig';
 import type { RunTelemetry } from '../core/Telemetry';
-import { AchievementLabels, buildReportText } from '../core/profile';
+import { onboardingBriefing, onboardingNudge, onboardingRetryHint } from '../core/Onboarding';
+import { AchievementHints, AchievementLabels, CosmeticLabels, RankLabels, bestStarsFor, buildReportText, rankProgress, rankProgressFromScore, totalStars } from '../core/profile';
 import { highlightQuip } from '../core/systems/HighlightSystem';
 import { buildSharePayload, createDailyChallenge, encodeChallenge, localDateKey, parseChallengeQuery } from '../core/SocialChallenge';
 import type { ChallengeSpec } from '../core/SocialChallenge';
-import type { PlayerProfile } from '../core/profile';
+import type { AchievementId, PlayerProfile } from '../core/profile';
 import type { RunReport } from '../core/RunReport';
 import { CardState as CS, HitQuality as HQ, PropType as PT } from '../core/types';
 import type { Card, HitQuality, PerfectRewardType, PropType } from '../core/types';
+import {
+  findLockedCardSlot,
+  isHorizontalTargetGesture,
+  isManualThrowGesture,
+  isThrowCancelGesture,
+  throwPresentationStrength,
+} from '../core/ThrowGesture';
 import { FxLayer } from './FxLayer';
 import { ApprovalGaugeView } from './ui/ApprovalGaugeView';
 import { PropDockView } from './ui/PropDockView';
 import { PropButtonView } from './ui/PropButtonView';
 import { ResultDialogView, type ResultDialogButton } from './ui/ResultDialogView';
 import { TaskCardView } from './ui/TaskCardView';
+import { CharacterRigView } from './ui/CharacterRigView';
+import { PressureAtmosphereView } from './ui/PressureAtmosphereView';
+import { PauseMenuView } from './ui/PauseMenuView';
 import { UiPainter, type CardShellState, type KeycapState } from './ui/UiPainter';
-import { UiTokens } from './ui/UiTokens';
+import { UiTokens, alphaColor } from './ui/UiTokens';
 import { createTelemetryBridge } from './TelemetryBridge';
 import { SensoryFeedback } from './SensoryFeedback';
 import { ShareBridge } from './ShareBridge';
@@ -46,8 +57,6 @@ interface PaperTuning {
   startScale: Vec3;
   midScale: Vec3;
   endScale: Vec3;
-  guideDots: number;
-  guideDotRadius: number;
   /** 越高越跟手；重道具刻意保留一点惯性。 */
   followHz: number;
   /** 起手弹起尺度，让四种道具在第一触感上可区分。 */
@@ -96,6 +105,14 @@ export class GameRunner extends Component {
   private deskDecorNode: Node | null = null;
   private deskItemNodes: Node[] = [];
   private charNode: Node | null = null;
+  private characterRigView: CharacterRigView | null = null;
+  private pressureAtmosphereNode: Node | null = null;
+  private pressureAtmosphereView: PressureAtmosphereView | null = null;
+  private pauseButtonNode: Node | null = null;
+  private pauseMenuNode: Node | null = null;
+  private readonly pauseMenuView = new PauseMenuView();
+  private paused = false;
+  private pauseWasAutomatic = false;
   /** 动态创建的游戏标题和倒计时（不依赖场景绑定节点） */
   private gameTitleNode: Node | null = null;
   private gameTimerNode: Node | null = null;
@@ -146,6 +163,9 @@ export class GameRunner extends Component {
   private aimingSlot = 0;
   private aimStart = new Vec3();
   private aimPoint = new Vec3();
+  /** 目标选择轴与纸团手指位置解耦：纸团跟手，横向位移只推动这根虚拟选择轴。 */
+  private aimSelectionX = 0;
+  private aimInitialSelectionX = 0;
   /** 触摸事件只更新目标点；真正的视觉跟随在 update 中每帧最多执行一次。 */
   private aimDesiredPoint = new Vec3();
   private aimSlotTargets: Vec3[] = [];
@@ -156,20 +176,40 @@ export class GameRunner extends Component {
   private aimLockSec = 0;
   private aimPerfectReady = false;
   private aimTargetValid = true;
+  private aimRecommendationSlot = -1;
+  /** 轻点默认使用推荐目标；越过手势死区后才切换为左右手动选位。 */
+  private aimManualTargeting = false;
+  /** 改需求/甩锅锁定卡片身份，传送带移动时不会误命中新来的邻卡。 */
+  private aimLockedCardId: number | null = null;
+  /** 范围道具允许锁住中心附近卡片，并保持它相对爆心的槽位偏移。 */
+  private aimLockedCardOffset = 0;
+  private aimGestureStart = new Vec3();
+  private aimGestureLast = new Vec3();
+  private aimGestureLastMs = 0;
+  private aimReleaseVelocityY = 0;
+  private aimCancelArmed = false;
+  private activeAimTouchId: number | null = null;
   private readonly sensory = new SensoryFeedback();
   private paperAimNode: Node | null = null;
   private paperAimShadowNode: Node | null = null;
-  private aimGuideNode: Node | null = null;
+  private aimEffectPreviewNode: Node | null = null;
+  private aimDirectionNode: Node | null = null;
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
   /** 首次失败仍可复活时延迟 level_end，确保复活后的最终结果只结算一次。 */
   private pendingTelemetryReport: { report: RunReport; failReason: 'unhandled-task' | 'boss-inspection' | 'unknown' } | null = null;
   private uiState: 'select' | 'playing' | 'result' = 'select';
   private levelSelectRoot: Node | null = null;
+  private careerPanelNode: Node | null = null;
   private tutorialRoot: Node | null = null;
   private tutorialStep = 0;
   private tutorialDone = false;
+  private onboardingNudgeShown = false;
   private perfectTipShown = false;
+  private highRiskTipShown = false;
+  private bossTipShown = false;
+  private eliteTipShown = false;
+  private linkTipShown = false;
   private fx: FxLayer | null = null;
   private eventUnsubs: Array<() => void> = [];
   private lastEventText = '';
@@ -199,8 +239,6 @@ export class GameRunner extends Component {
       startScale: new Vec3(1, 1, 1),
       midScale: new Vec3(0.92, 1.08, 1),
       endScale: new Vec3(0.72, 0.72, 1),
-      guideDots: 8,
-      guideDotRadius: 3.2,
       followHz: 38,
       liftScale: 1.04,
       dragStretchFactor: 0.88,
@@ -212,8 +250,6 @@ export class GameRunner extends Component {
       startScale: new Vec3(1.03, 0.97, 1),
       midScale: new Vec3(0.84, 1.16, 1),
       endScale: new Vec3(0.66, 0.66, 1),
-      guideDots: 9,
-      guideDotRadius: 3,
       followHz: 30,
       liftScale: 1.07,
       dragStretchFactor: 1.02,
@@ -225,8 +261,6 @@ export class GameRunner extends Component {
       startScale: new Vec3(1.08, 1.08, 1),
       midScale: new Vec3(1.08, 0.92, 1),
       endScale: new Vec3(0.82, 0.82, 1),
-      guideDots: 7,
-      guideDotRadius: 3.8,
       followHz: 22,
       liftScale: 1.11,
       dragStretchFactor: 1.18,
@@ -238,8 +272,6 @@ export class GameRunner extends Component {
       startScale: new Vec3(0.96, 0.96, 1),
       midScale: new Vec3(0.86, 1.12, 1),
       endScale: new Vec3(0.42, 0.42, 1),
-      guideDots: 8,
-      guideDotRadius: 3.1,
       followHz: 33,
       liftScale: 1.02,
       dragStretchFactor: 0.94,
@@ -288,6 +320,10 @@ export class GameRunner extends Component {
   private static readonly START_MUTED = UiTokens.environment.startMuted;
   private static readonly TUTORIAL_DONE_KEY = 'biebeiaitidai.tutorial.done.v1';
   private static readonly PERFECT_TIP_KEY = 'biebeiaitidai.perfect.tip.v1';
+  private static readonly HIGH_RISK_TIP_KEY = 'biebeiaitidai.high-risk.tip.v1';
+  private static readonly BOSS_TIP_KEY = 'biebeiaitidai.boss.tip.v1';
+  private static readonly ELITE_TIP_KEY = 'biebeiaitidai.elite.tip.v1';
+  private static readonly LINK_TIP_KEY = 'biebeiaitidai.link.tip.v1';
 
   private startCardMetrics(): { width: number; height: number; cy: number; narrow: boolean } {
     const vis = view.getVisibleSize();
@@ -311,6 +347,10 @@ export class GameRunner extends Component {
     this.runtimeMonitor.start();
     this.tutorialDone = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.TUTORIAL_DONE_KEY) === '1';
     this.perfectTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.PERFECT_TIP_KEY) === '1';
+    this.highRiskTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.HIGH_RISK_TIP_KEY) === '1';
+    this.bossTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.BOSS_TIP_KEY) === '1';
+    this.eliteTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.ELITE_TIP_KEY) === '1';
+    this.linkTipShown = this.qaConfig !== null || sys.localStorage?.getItem(GameRunner.LINK_TIP_KEY) === '1';
     this.session = new Session(this.qaConfig ? new InMemoryStorage() : new CocosStorage());
     if (this.qaConfig) this.session.profile.highestUnlockedLevel = this.qaConfig.levelIndex;
     this.session.continueProgress(); // 继续"最高解锁关"进度
@@ -337,6 +377,8 @@ export class GameRunner extends Component {
     input.on(Input.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
     input.on(Input.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
     input.on(Input.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
+    ccGame.on(CocosGame.EVENT_HIDE, this.onAppHide, this);
+    ccGame.on(CocosGame.EVENT_SHOW, this.onAppShow, this);
 
     // 美术资源自动加载：扫描 resources/art/ 下所有 PNG，按文件名建索引
     // 加载完成后自动建 Bg/Char 节点并接线，编辑器里无需任何手动操作
@@ -406,11 +448,14 @@ export class GameRunner extends Component {
     input.off(Input.EventType.TOUCH_CANCEL, this.onGlobalTouchCancel, this);
     input.off(Input.EventType.MOUSE_MOVE, this.onGlobalMouseMove, this);
     input.off(Input.EventType.MOUSE_UP, this.onGlobalMouseUp, this);
+    ccGame.off(CocosGame.EVENT_HIDE, this.onAppHide, this);
+    ccGame.off(CocosGame.EVENT_SHOW, this.onAppShow, this);
     this.fx?.dispose();
     this.resetCardVisuals();
     this.clearPaperAim(true);
     this.clearEventFeed();
     this.hideTutorial();
+    this.pauseMenuView.destroy();
     this.sensory.dispose();
     this.runtimeMonitor?.dispose();
     this.runtimeMonitor = null;
@@ -423,6 +468,10 @@ export class GameRunner extends Component {
       if (e.keyCode === 13 || e.keyCode === 32 || e.keyCode === 49) this.onLevelSelected(0);
       return;
     }
+    if (this.paused) {
+      if (e.keyCode === 27 || e.keyCode === 80 || e.keyCode === 32) this.setPaused(false);
+      return;
+    }
     // 结算页：R 重试 / N 下一关 / V 复活(仅lose) / B 返回选关
     if (this.game.over) {
       if (e.keyCode === 82) this.onRetry(); // R
@@ -431,8 +480,8 @@ export class GameRunner extends Component {
       else if (e.keyCode === 66 || e.keyCode === 27) this.onBackToSelect(); // B / Escape
       return;
     }
-    // 游玩中：B/Escape 返回选关
-    if (e.keyCode === 66 || e.keyCode === 27) { this.onBackToSelect(); return; }
+    // 游玩中：P / B / Escape 打开暂停；返回主页改为面板内二次动作，防止误触丢局。
+    if (e.keyCode === 80 || e.keyCode === 66 || e.keyCode === 27) { this.setPaused(true); return; }
     // 仅在未蓄力时开始（防键盘自动连按重置扫描）
     if (this.game.prop.chargingProp === null) {
       switch (e.keyCode) {
@@ -445,7 +494,7 @@ export class GameRunner extends Component {
   }
 
   private onKeyUp(e: EventKeyboard): void {
-    if (this.uiState !== 'playing') return;
+    if (this.uiState !== 'playing' || this.paused) return;
     switch (e.keyCode) {
       case 49: this.game.release(PT.AddDemand); break; // '1'
       case 50: this.game.release(PT.ChangeDemand); break; // '2'
@@ -457,6 +506,7 @@ export class GameRunner extends Component {
 
   /** 用 Session 当前关开新一局。 */
   private startGame(): void {
+    this.clearPauseState();
     this.resetCardVisuals();
     this.clearPaperAim(true);
     const idx = this.session.currentIndex;
@@ -477,9 +527,25 @@ export class GameRunner extends Component {
     this.uiState = 'playing';
     this.eventTextPriority = 0;
     this.eventTextUntilSec = 0;
-    if (this.tutorialDone) {
+    // 重试/下一关进入时直接同步新局初值，避免结算前的 100 或猎杀低值残留一帧再缓动回来。
+    this.approvalGaugeView?.snap(this.game.approval.value, this.game.approval.currentZone, '', 0);
+    this.onboardingNudgeShown = false;
+    const onboarding = onboardingBriefing({
+      levelIndex: idx,
+      elapsedSec: 0,
+      bestStars: bestStarsFor(this.session.profile, idx),
+      effectiveHits: 0,
+      perfectHits: 0,
+      huntProgress: 0,
+      huntThreshold: BalanceConfig.zones.hunt.hi,
+      huntHoldSec: BalanceConfig.zones.hunt.holdSec ?? 2,
+    });
+    if (onboarding) {
+      this.setEventText(onboarding, 5.6, 5);
+    } else if (this.tutorialDone) {
       const objective = levelDef.objective?.label ?? levelDef.challengeHint ?? '先处理高风险卡片';
-      this.setEventText(`本关目标 · ${objective}`, 4.2, 2);
+      const bossPattern = levelDef.boss.patternLabel ? ` · ${levelDef.boss.patternLabel}` : '';
+      this.setEventText(`本关目标 · ${objective}${bossPattern}`, 4.8, 2);
     }
     this.hideReport();
     this.hideLevelSelect();
@@ -513,7 +579,19 @@ export class GameRunner extends Component {
     if (!qa || this.qaApplied) return;
     this.qaApplied = true;
 
-    if (qa.scenario === 'entry') {
+    if (qa.scenario === 'entry' || qa.scenario === 'career-route' || qa.scenario === 'career-achievements') {
+      if (qa.scenario !== 'entry') {
+        this.session.profile.highestUnlockedLevel = Math.max(7, qa.levelIndex);
+        for (let i = 0; i < this.session.profile.highestUnlockedLevel; i++) {
+          this.session.profile.bestStars[i] = (i % 3) + 1;
+        }
+        if (qa.scenario === 'career-achievements') {
+          this.session.profile.achievements = ['first-hunt', 'perfect-chain', 'combo-5'];
+          this.session.profile.cosmetics = ['desk-classic', 'paper-blue', 'ai-crash-face'];
+        }
+        this.updateLevelSelectContent();
+        this.showCareerPanel(qa.scenario === 'career-route' ? 'route' : 'achievements');
+      }
       this.publishQaReady();
       return;
     }
@@ -522,11 +600,20 @@ export class GameRunner extends Component {
       this.session.profile.highestUnlockedLevel,
       qa.levelIndex,
     );
-    this.session.startLevel(qa.levelIndex);
+    if (qa.scenario === 'result-daily') this.session.startChallenge(createDailyChallenge('2026-07-18'));
+    else this.session.startLevel(qa.levelIndex);
+    if (qa.scenario === 'result-rankup') {
+      // 18 分 → 猎杀三星后 22.5 分，稳定触发首个段位晋升演出。
+      this.session.profile.huntWinCount = 6;
+      this.session.profile.bestStars.fill(0);
+      this.session.profile.star3Levels = [];
+      this.session.profile.highestUnlockedLevel = 0;
+      this.session.currentIndex = 0;
+    }
     this.startGame();
 
     // P0 是静态布局基线，不把一次性事件 tween 混进截图；动态反馈由后续手感专项验收。
-    if (qa.scenario === 'crisis' || qa.scenario.startsWith('result-')) {
+    if (qa.scenario === 'crisis' || qa.scenario === 'pause' || qa.scenario === 'boss-warning' || qa.scenario === 'boss-critical' || qa.scenario.startsWith('result-')) {
       this.fx?.dispose();
       this.fx = null;
     }
@@ -536,16 +623,74 @@ export class GameRunner extends Component {
       this.game.elapsed = Math.max(0, this.game.level.def.durationSec - 8);
       const delta = Math.max(0, 78 - this.game.approval.value);
       if (delta > 0) this.game.approval.resolveCard(this.qaCard(CS.ActiveWhite, delta));
+    } else if (qa.scenario === 'boss-warning' || qa.scenario === 'boss-critical') {
+      this.fillQaBelt(false);
+      const firstBossAt = this.game.level.def.boss.scheduleSec?.[0] ?? 24;
+      this.game.elapsed = Math.max(0, firstBossAt - (qa.scenario === 'boss-critical' ? 3.1 : 6.1));
+      this.game.tick(0.15);
     } else {
       this.fillQaBelt(false);
     }
 
+    if (qa.scenario === 'elite-link' || qa.scenario === 'shield-break') {
+      const cards = this.game.conveyor.cards;
+      cards.fill(null);
+      cards[1] = { id: -21, category: 'boss', state: CS.Boss, weight: 0, baseWeight: 0, isThreat: false };
+      cards[2] = { id: -22, category: 'proposal', state: CS.ActiveWhite, weight: 8, baseWeight: 7, isThreat: true, elite: true, guard: 1, linkId: 9, linkBonus: 1 };
+      cards[3] = { id: -23, category: 'key', state: CS.ActiveWhite, weight: 6, baseWeight: 5, isThreat: true, linkId: 9, linkBonus: 1 };
+      cards[4] = { id: -24, category: 'urgent', state: CS.ActiveWhite, weight: 12, baseWeight: 12, isThreat: true, elite: true, guard: 1 };
+    }
+    if (qa.scenario === 'rework-hit') {
+      const cards = this.game.conveyor.cards;
+      cards.fill(null);
+      cards[1] = { id: -41, category: 'report', state: CS.ActiveWhite, weight: 3, baseWeight: 3, isThreat: true };
+      cards[2] = { id: -42, category: 'urgent', state: CS.ActiveWhite, weight: 10, baseWeight: 10, isThreat: true };
+      cards[4] = { id: -43, category: 'key', state: CS.ActiveWhite, weight: 5, baseWeight: 5, isThreat: true };
+    }
+    if (qa.scenario === 'last-chance') {
+      const cards = this.game.conveyor.cards;
+      cards.fill(null);
+      const raiseBy = Math.max(0, 92 - this.game.approval.value);
+      if (raiseBy > 0) this.game.approval.resolveCard(this.qaCard(CS.ActiveWhite, raiseBy));
+      cards[0] = { id: -31, category: 'urgent', state: CS.ActiveWhite, weight: 10, baseWeight: 10, isThreat: true };
+      cards[2] = { id: -32, category: 'proposal', state: CS.ActiveWhite, weight: 7, baseWeight: 7, isThreat: true };
+      cards[4] = { id: -33, category: 'key', state: CS.ActiveWhite, weight: 5, baseWeight: 5, isThreat: true };
+    }
+    if (qa.scenario === 'onboarding-perfect' || qa.scenario === 'onboarding-hunt') {
+      this.game.elapsed = qa.scenario === 'onboarding-perfect' ? 12.1 : 14.1;
+    }
+
     this.render();
 
-    if (qa.scenario === 'drag' || qa.scenario === 'perfect') {
+    if (qa.scenario === 'shield-break') {
+      this.game.beginCharge(PT.ChangeDemand);
+      this.game.releaseAtSlot(PT.ChangeDemand, 2, HQ.Perfect);
+      this.render();
+    } else if (qa.scenario === 'rework-hit') {
+      this.game.beginCharge(PT.ChangeDemand);
+      this.game.releaseAtSlot(PT.ChangeDemand, 2, HQ.Normal);
+      this.render();
+    } else if (qa.scenario === 'last-chance') {
+      this.game.tick(0.01);
+      this.render();
+    } else if (qa.scenario === 'pause') {
+      this.setPaused(true);
+    } else if (qa.scenario === 'perfect-chain') {
+      this.game.bus.emit('PerfectChainUpdated', { chain: 4 });
+    } else if (qa.scenario === 'combo-reward') {
+      this.game.bus.emit('ComboUpdated', { combo: 5 });
+      this.game.bus.emit('ComboRewardGranted', { combo: 5, tier: 2, label: '火力全开', cooldownReducedSec: 0.9 });
+    } else if (qa.scenario === 'drag' || qa.scenario === 'blast' || qa.scenario === 'perfect') {
+      if (qa.scenario === 'blast') {
+        for (let i = 0; i < 4; i++) {
+          this.game.beginCharge(PT.AddDemand);
+          this.game.releaseAtSlot(PT.AddDemand, Math.min(2, this.game.level.def.slots - 1), HQ.Normal);
+          this.game.prop.tick(10, this.game.phase);
+        }
+      }
       const targetSlot = this.game.conveyor.cards.findIndex((card, index) => index >= 2 && card !== null);
       const slot = targetSlot >= 0 ? targetSlot : Math.max(0, Math.floor(this.slotNodes.length / 2));
-      this.onPropDown(PT.AddDemand);
+      this.onPropDown(qa.scenario === 'blast' ? PT.ThrowPot : PT.AddDemand);
       const target = this.aimSlotTargets[slot] ?? this.targetPointForSlot(slot);
       this.aimDesiredPoint.set(target.x, this.actionDockNode?.position.y ?? this.aimPoint.y, 0);
       this.propInteractionState = 'dragging';
@@ -559,8 +704,8 @@ export class GameRunner extends Component {
       this.game.maxCombo = qa.scenario === 'result-hunt' ? 5 : 3;
       this.game.missedThrows = qa.scenario === 'result-lose' ? 2 : 0;
       if (qa.scenario === 'result-lose') {
-        this.game.approval.resolveCard(this.qaCard(CS.ActiveWhite, 100));
-      } else if (qa.scenario === 'result-survive') {
+        this.game.bus.emit('CardEnteredProcessing', { card: this.qaCard(CS.ActiveWhite, 100) });
+      } else if (qa.scenario === 'result-survive' || qa.scenario === 'result-daily') {
         this.game.elapsed = this.game.level.def.durationSec;
         this.game.approval.declareSurviveOnTimeout();
       } else {
@@ -582,6 +727,8 @@ export class GameRunner extends Component {
       this.game.conveyor.generate(phase);
       this.game.conveyor.step();
       this.game.conveyor.generate(phase, { forceBoss: true });
+      this.game.conveyor.step();
+      this.game.conveyor.generate(phase);
       this.game.conveyor.step();
       this.game.conveyor.generate(phase);
       this.game.conveyor.step();
@@ -617,6 +764,7 @@ export class GameRunner extends Component {
       seed: qa.seed,
       levelIndex: qa.levelIndex,
       uiState: this.uiState,
+      paused: this.paused,
       result: this.game?.result ?? 'not-started',
       cards,
       perfectReady: this.aimPerfectReady,
@@ -633,8 +781,22 @@ export class GameRunner extends Component {
         this.completeTutorial();
         this.setEventText(perfect ? `完美命中：${this.propDisplayName(prop)}压住了任务` : UiTokens.tutorial.hitHint, 2.6, perfect ? 5 : 3);
       }),
+      this.game.bus.on('PropEffectResolved', ({ prop, affected, riskPrevented, bufferedSlots }) => {
+        const benefit = prop === PT.AddDemand
+          ? `缓冲 +${bufferedSlots} 格`
+          : prop === PT.ChangeDemand
+            ? `风险摆幅 -${riskPrevented}`
+            : `清场 ${affected} 张${riskPrevented > 0 ? ` · 挡住 ${riskPrevented} 风险` : ''}`;
+        this.setEventText(`${this.propDisplayName(prop)} · ${benefit}`, 2.6, 6);
+      }),
       this.game.bus.on('PerfectRewardGranted', ({ reward }) => {
         this.setEventText(`Perfect 奖励：${this.perfectRewardLabel(reward)}`, 2.8, 6);
+      }),
+      this.game.bus.on('PerfectChainUpdated', ({ chain }) => {
+        if (chain >= 2) this.setEventText(`连续 Perfect ×${chain} · 精准升级`, 2.4, 7 + Math.min(chain, 3));
+      }),
+      this.game.bus.on('ComboRewardGranted', ({ combo, label, cooldownReducedSec }) => {
+        this.setEventText(`${combo} 连 ${label} · 当前纸团冷却 -${cooldownReducedSec.toFixed(1)}s`, 2.8, 8);
       }),
       this.game.bus.on('PropUnavailable', ({ reason }) => {
         this.setEventText(reason === 'empty' ? '空位没砸中，换个任务卡试试' : '这个目标不吃这招，换道具试试', 2.0, 4);
@@ -652,14 +814,67 @@ export class GameRunner extends Component {
         };
         this.setEventText(copy[to] ?? '状态变化', 3.0, 6);
       }),
-      this.game.bus.on('AIHit', () => {
-        this.setEventText('拍马屁生效，传送带短暂停住', 2.4, 5);
+      this.game.bus.on('KissUpFreeze', ({ durationSec }) => {
+        this.setEventText(`拍马屁生效 · 队列冻结 ${durationSec.toFixed(1)}s`, 2.4, 6);
+      }),
+      this.game.bus.on('BossBeatWarning', ({ seconds }) => {
+        const pattern = this.game.level.def.boss.inspectionLimit
+          ? `重点抽查 ${this.game.level.def.boss.inspectionLimit} 张`
+          : '全量扫描';
+        this.setEventText(`${seconds} 秒后${pattern} · 留好甩锅`, 2.2, seconds === 3 ? 9 : 7);
+      }),
+      this.game.bus.on('LastChanceWarning', ({ boss, impact, seconds }) => {
+        this.setEventText(
+          boss
+            ? `最后机会：${seconds.toFixed(1)} 秒后临检将推高 ${Math.round(impact)} · 立刻甩锅`
+            : `最后机会：${seconds.toFixed(1)} 秒后将被接管 · 立刻改需求或甩锅`,
+          3.0,
+          12,
+        );
+      }),
+      this.game.bus.on('BossSpawned', ({ inspectionLimit }) => {
+        if (!this.bossTipShown) {
+          this.bossTipShown = true;
+          sys.localStorage?.setItem(GameRunner.BOSS_TIP_KEY, '1');
+          this.setEventText('首次临检：Boss 会抽查高风险任务 · 留好甩锅，拍马屁能争取时间', 4.8, 10);
+        } else {
+          this.setEventText(inspectionLimit === undefined
+            ? '全量扫描已入场 · 立刻拦截 Boss'
+            : `重点抽查 ${inspectionLimit} 张已入场 · 优先甩锅`, 2.8, 9);
+        }
+      }),
+      this.game.bus.on('BossInspectionResolved', ({ checked, remaining, riskAdded }) => {
+        this.setEventText(`临检查 ${checked} 张 · 风险 +${Math.round(riskAdded)}${remaining > 0 ? ` · 余 ${remaining} 张` : ''}`, 2.8, 9);
+      }),
+      this.game.bus.on('ObjectiveCompleted', ({ label }) => {
+        this.setEventText(`目标完成 ✓ ${label}`, 3.0, 10);
       }),
       this.game.bus.on('PhaseChanged', ({ to }) => {
         const phaseText = to === 'mid'
           ? '中盘加速：任务生成变快了'
           : '最后冲刺：守住岗位别让队列爆掉';
         this.setEventText(phaseText, 3.0, 6);
+      }),
+      this.game.bus.on('EliteTaskSpawned', () => {
+        if (this.eliteTipShown) return;
+        this.eliteTipShown = true;
+        sys.localStorage?.setItem(GameRunner.ELITE_TIP_KEY, '1');
+        this.setEventText('首次精英任务 · 改需求先破盾，再命中一次才会返工', 4.5, 8);
+      }),
+      this.game.bus.on('EliteGuardBroken', ({ reduction }) => {
+        this.setEventText(`护盾击破 · 风险 -${reduction} · 再用改需求可转返工`, 3.0, 8);
+      }),
+      this.game.bus.on('TaskLinkFormed', ({ bonus }) => {
+        if (this.linkTipShown) return;
+        this.linkTipShown = true;
+        sys.localStorage?.setItem(GameRunner.LINK_TIP_KEY, '1');
+        this.setEventText(`首次任务抱团 · 双方风险 +${bonus} · 清掉任意一张即可拆链`, 4.5, 8);
+      }),
+      this.game.bus.on('TaskLinkBroken', ({ bonusRemoved }) => {
+        if (bonusRemoved > 0) this.setEventText(`抱团已拆 · 剩余任务风险 -${bonusRemoved}`, 2.6, 7);
+      }),
+      this.game.bus.on('BossArrivalEffect', ({ label }) => {
+        this.setEventText(`Boss 现场施压 · ${label}`, 3.6, 10);
       }),
       this.game.bus.on('Highlight', ({ id, tier }) => {
         this.setEventText(highlightQuip(id), tier >= 3 ? 3.8 : 2.8, 7 + tier);
@@ -705,6 +920,31 @@ export class GameRunner extends Component {
       this.game.bus.on('BossIncoming', ({ tier }) => {
         if (tier === 4 || tier === 1) this.sensory.play('boss');
         if (tier === 1) this.sensory.haptic('heavy', 260);
+      }),
+      this.game.bus.on('BossBeatWarning', ({ seconds }) => {
+        this.sensory.play(seconds === 3 ? 'boss' : 'target-tick');
+        this.sensory.haptic(seconds === 3 ? 'medium' : 'light', 180);
+      }),
+      this.game.bus.on('EliteGuardBroken', () => {
+        this.sensory.play('shield-break');
+        this.sensory.haptic('medium', 90);
+      }),
+      this.game.bus.on('TaskLinkBroken', ({ bonusRemoved }) => {
+        if (bonusRemoved <= 0) return;
+        this.sensory.play('link-break');
+        this.sensory.haptic('light', 100);
+      }),
+      this.game.bus.on('BossArrivalEffect', () => {
+        this.sensory.play('boss-impact');
+        this.sensory.haptic('heavy', 220);
+      }),
+      this.game.bus.on('LastChanceWarning', () => {
+        this.sensory.play('last-chance');
+        this.sensory.haptic('heavy', 260);
+      }),
+      this.game.bus.on('ComboRewardGranted', ({ tier }) => {
+        this.sensory.play(tier >= 2 ? 'perfect' : 'target-tick');
+        this.sensory.haptic(tier >= 2 ? 'medium' : 'light', 120);
       }),
       this.game.bus.on('Revived', () => {
         this.sensory.play('revive');
@@ -883,6 +1123,7 @@ export class GameRunner extends Component {
     this.startGame();
   }
   private onBackToSelect(): void {
+    this.clearPauseState();
     this.finalizePendingTelemetry();
     this.telemetry.navigation('return_home');
     if (this.session.activeChallenge) {
@@ -890,6 +1131,74 @@ export class GameRunner extends Component {
       this.incomingChallenge = null;
     }
     this.showLevelSelect();
+  }
+
+  private onAppHide(): void {
+    if (this.uiState === 'playing' && !this.game?.over) this.setPaused(true, true);
+  }
+
+  private onAppShow(): void {
+    // 切回前台不自动开跑，必须由玩家明确点“继续游戏”。
+    if (this.paused && this.pauseWasAutomatic && this.pauseMenuNode?.isValid) {
+      this.pauseMenuNode.setSiblingIndex(this.node.children.length - 1);
+    }
+  }
+
+  private setPaused(paused: boolean, automatic = false): void {
+    if (paused) {
+      if (this.paused || this.uiState !== 'playing' || !this.game || this.game.over) return;
+      this.paused = true;
+      this.pauseWasAutomatic = automatic;
+      this.accumulator = 0;
+      this.game.suspendCharge();
+      this.clearPaperAim(true);
+      this.propInteractionState = 'idle';
+      this.hideTutorial();
+      if (this.pauseButtonNode) this.pauseButtonNode.active = false;
+      this.updateAmbientPresentation(0);
+      const vis = view.getVisibleSize();
+      this.pauseMenuNode = this.pauseMenuView.show({
+        parent: this.node,
+        layer: 1 << 25,
+        viewWidth: vis.width,
+        viewHeight: vis.height,
+        automatic,
+        soundEnabled: () => this.sensory.settings.soundEnabled,
+        hapticsEnabled: () => this.sensory.settings.hapticsEnabled,
+        toggleSound: () => {
+          const next = !this.sensory.settings.soundEnabled;
+          this.sensory.setSoundEnabled(next);
+          if (next) { this.sensory.unlock(); this.sensory.play('pickup'); }
+        },
+        toggleHaptics: () => {
+          const next = !this.sensory.settings.hapticsEnabled;
+          this.sensory.setHapticsEnabled(next);
+          if (next) this.sensory.haptic('medium', 0);
+        },
+        resume: () => this.setPaused(false),
+        retry: () => { this.clearPauseState(); this.onRetry(); },
+        returnHome: () => { this.clearPauseState(); this.onBackToSelect(); },
+      });
+      return;
+    }
+    if (!this.paused) return;
+    this.clearPauseState();
+    if (this.pauseButtonNode) this.pauseButtonNode.active = this.uiState === 'playing' && !this.game.over;
+    if (this.shouldShowTutorial()) {
+      const copy = this.tutorialStep <= 0 ? UiTokens.tutorial.holdHint
+        : this.tutorialStep === 1 ? UiTokens.tutorial.dragHint
+          : UiTokens.tutorial.releaseHint;
+      this.showTutorial(copy);
+    }
+    this.updateAmbientPresentation(0);
+  }
+
+  private clearPauseState(): void {
+    this.paused = false;
+    this.pauseWasAutomatic = false;
+    this.pauseMenuView.hide();
+    this.pauseMenuNode = null;
+    this.accumulator = 0;
   }
   /** §2.1 复活：仅 lose 且本关未用过复活时有效。成功后回到 playing 继续本关（core 已回滚认可度到69/+8s/清Boss）。 */
   private async onRevive(): Promise<void> {
@@ -913,6 +1222,7 @@ export class GameRunner extends Component {
   /** 显示开始页：隐藏游戏 UI，创建/显示开局覆盖层。 */
   private showLevelSelect(): void {
     this.hideDebugOverlays();
+    this.clearPauseState();
     this.uiState = 'select';
     this.setGameUIVisible(false);
     this.hideReport();
@@ -990,15 +1300,15 @@ export class GameRunner extends Component {
 
     this.makeStartButton(root, 0, cardCY - cardH * 0.328, cardW * 0.875, cardH * 0.124,
       this.primaryStartText(), () => this.onPrimaryStart());
-    this.makeStartSecondaryButton(
-      root,
-      0,
-      cardCY - cardH * 0.58,
-      Math.min(cardW * 0.52, 240),
-      Math.min(62, cardH * 0.105),
-      '今日同局挑战',
-      () => this.onDailyChallenge(),
-    );
+    const utilityY = cardCY - cardH * 0.58;
+    const utilityW = Math.min(cardW * 0.275, 132);
+    const utilityH = Math.min(62, cardH * 0.105);
+    this.makeStartSecondaryButton(root, 'CareerRouteButton', -cardW * 0.30, utilityY, utilityW, utilityH,
+      '关卡路线', () => this.showCareerPanel('route'));
+    this.makeStartSecondaryButton(root, 'DailyChallengeButton', 0, utilityY, utilityW, utilityH,
+      '今日挑战', () => this.onDailyChallenge());
+    this.makeStartSecondaryButton(root, 'AchievementButton', cardW * 0.30, utilityY, utilityW, utilityH,
+      '成就 0/6', () => this.showCareerPanel('achievements'));
 
     const rankIcon = new Node('RankIcon');
     rankIcon.layer = 33554432;
@@ -1028,14 +1338,23 @@ export class GameRunner extends Component {
     if (rankInfo) {
       const label = rankInfo.getComponent(Label);
       if (label) {
-        const day = this.session.daysEmployed;
-        label.string = `已到第${this.session.profile.highestUnlockedLevel + 1}关 · 坚守${day}天 · 成就${this.session.profile.achievements.length}/6`;
+        const progress = rankProgress(this.session.profile);
+        const growth = progress.next
+          ? `距${RankLabels[progress.next]} ${Math.ceil(progress.remaining)}分`
+          : '最高段位';
+        label.string = `${this.session.rankLabel} · 总星${totalStars(this.session.profile)}/${this.session.levelCount * 3} · ${growth}`;
         label.color = GameRunner.UI_MUTED;
         label.isBold = false;
       }
     }
     const startLabel = this.levelSelectRoot.getChildByName('StartButton')?.getChildByName('StartButtonLabel')?.getComponent(Label);
     if (startLabel) startLabel.string = this.primaryStartText();
+    const achievementLabel = this.levelSelectRoot.getChildByName('AchievementButton')?.getChildByName('AchievementButtonLabel')?.getComponent(Label);
+    if (achievementLabel) achievementLabel.string = `成就 ${this.session.profile.achievements.length}/${Object.keys(AchievementLabels).length}`;
+    const daily = createDailyChallenge(localDateKey());
+    const dailyRecord = this.session.profile.dailyRecords.find((record) => record.key === daily.keyHash.toString(36));
+    const dailyLabel = this.levelSelectRoot.getChildByName('DailyChallengeButton')?.getChildByName('DailyChallengeButtonLabel')?.getComponent(Label);
+    if (dailyLabel) dailyLabel.string = dailyRecord ? `今日最佳 ${dailyRecord.score}` : '今日挑战 · 有奖';
   }
 
   private primaryStartText(): string {
@@ -1062,6 +1381,137 @@ export class GameRunner extends Component {
     this.startGame();
   }
 
+  /** 二级抽屉承载路线与收藏，避免把 20 关信息永久塞进开始页。 */
+  private showCareerPanel(mode: 'route' | 'achievements'): void {
+    this.hideCareerPanel();
+    if (!this.levelSelectRoot) return;
+    const vis = view.getVisibleSize();
+    const root = new Node('CareerPanel');
+    root.layer = 33554432;
+    root.parent = this.levelSelectRoot;
+    root.addComponent(UITransform).setContentSize(vis.width, vis.height);
+    const scrim = root.addComponent(Graphics);
+    scrim.fillColor = new Color(38, 32, 27, 180);
+    scrim.rect(-vis.width / 2, -vis.height / 2, vis.width, vis.height);
+    scrim.fill();
+
+    const panelW = Math.min(vis.width * 0.9, 620);
+    const panelH = Math.min(vis.height * 0.72, 700);
+    const panel = new Node('CareerPaper');
+    panel.layer = 33554432;
+    panel.parent = root;
+    panel.addComponent(UITransform).setContentSize(panelW, panelH);
+    const pg = panel.addComponent(Graphics);
+    pg.fillColor = GameRunner.START_CARD;
+    pg.strokeColor = new Color(132, 98, 70, 245);
+    pg.lineWidth = 3;
+    pg.roundRect(-panelW / 2, -panelH / 2, panelW, panelH, 24);
+    pg.fill(); pg.stroke();
+
+    const title = mode === 'route'
+      ? `职业路线 · ${totalStars(this.session.profile)}/${this.session.levelCount * 3}星`
+      : `成长成就 · ${this.session.profile.achievements.length}/${Object.keys(AchievementLabels).length}`;
+    const titleNode = this.mkLabel(panel, 'CareerTitle', 0, panelH * 0.42, title, Math.min(34, panelW * 0.068), panelW * 0.78, 52);
+    this.styleStartLabel(titleNode, GameRunner.START_TEXT, true);
+    this.makeCareerAction(panel, 'CareerCloseButton', panelW * 0.40, panelH * 0.42, 48, 44, '×', () => this.hideCareerPanel(), true);
+
+    if (mode === 'route') this.populateCareerRoute(panel, panelW, panelH);
+    else this.populateAchievements(panel, panelW, panelH);
+    this.careerPanelNode = root;
+  }
+
+  private hideCareerPanel(): void {
+    if (this.careerPanelNode?.isValid) this.careerPanelNode.destroy();
+    this.careerPanelNode = null;
+  }
+
+  private populateCareerRoute(panel: Node, panelW: number, panelH: number): void {
+    const cols = 4;
+    const gapX = panelW * 0.205;
+    const gapY = panelH * 0.135;
+    const btnW = Math.min(92, panelW * 0.17);
+    const btnH = Math.min(72, panelH * 0.105);
+    for (let i = 0; i < this.session.levelCount; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const unlocked = this.session.isLevelUnlocked(i);
+      const stars = bestStarsFor(this.session.profile, i);
+      const text = unlocked ? `${i + 1}\n${stars > 0 ? '★'.repeat(stars) : '待挑战'}` : `${i + 1}\n未解锁`;
+      this.makeCareerAction(
+        panel,
+        `LevelRoute${i + 1}`,
+        (col - 1.5) * gapX,
+        panelH * 0.27 - row * gapY,
+        btnW,
+        btnH,
+        text,
+        () => { if (unlocked) this.onLevelSelected(i); },
+        !unlocked,
+      );
+    }
+    const hook = getLevel(this.session.profile.highestUnlockedLevel).hook
+      ?? getLevel(this.session.profile.highestUnlockedLevel).challengeHint
+      ?? '新的任务正在排队';
+    const footer = this.mkLabel(panel, 'RouteHook', 0, -panelH * 0.43,
+      `当前目标 · 第${this.session.profile.highestUnlockedLevel + 1}关 · ${hook}`, Math.min(24, panelW * 0.045), panelW * 0.82, 54);
+    this.styleStartLabel(footer, GameRunner.START_MUTED, false);
+  }
+
+  private populateAchievements(panel: Node, panelW: number, panelH: number): void {
+    const ids = Object.keys(AchievementLabels) as AchievementId[];
+    ids.forEach((id, index) => {
+      const unlocked = this.session.profile.achievements.includes(id);
+      const y = panelH * 0.275 - index * panelH * 0.115;
+      const row = new Node(`Achievement-${id}`);
+      row.layer = 33554432;
+      row.parent = panel;
+      row.setPosition(0, y, 0);
+      row.addComponent(UITransform).setContentSize(panelW * 0.82, panelH * 0.09);
+      const g = row.addComponent(Graphics);
+      g.fillColor = unlocked ? new Color(74, 145, 125, 34) : new Color(91, 70, 49, 18);
+      g.strokeColor = unlocked ? new Color(74, 145, 125, 190) : new Color(126, 114, 99, 80);
+      g.lineWidth = unlocked ? 2 : 1;
+      g.roundRect(-panelW * 0.41, -panelH * 0.045, panelW * 0.82, panelH * 0.09, 12);
+      g.fill(); g.stroke();
+      const state = this.mkLabel(row, 'State', -panelW * 0.34, 0, unlocked ? '✓' : '○', 27, 38, 38);
+      this.styleStartLabel(state, unlocked ? new Color(52, 127, 105, 255) : GameRunner.START_MUTED, true);
+      const name = this.mkLabel(row, 'Name', -panelW * 0.08, panelH * 0.014, AchievementLabels[id], Math.min(25, panelW * 0.047), panelW * 0.52, 30);
+      this.styleStartLabel(name, unlocked ? GameRunner.START_TEXT : GameRunner.START_MUTED, true);
+      const hint = this.mkLabel(row, 'Hint', -panelW * 0.08, -panelH * 0.019, AchievementHints[id], Math.min(19, panelW * 0.036), panelW * 0.52, 25);
+      this.styleStartLabel(hint, GameRunner.START_MUTED, false);
+    });
+    const footer = this.mkLabel(panel, 'CosmeticCount', 0, -panelH * 0.43,
+      `已收藏 ${this.session.profile.cosmetics.length}/4 款工位外观 · 成就只奖励展示，不加战斗数值`, Math.min(21, panelW * 0.039), panelW * 0.82, 46);
+    this.styleStartLabel(footer, GameRunner.START_MUTED, false);
+  }
+
+  private makeCareerAction(parent: Node, name: string, x: number, y: number, w: number, h: number, text: string, onTap: () => void, muted = false): Node {
+    const btn = new Node(name);
+    btn.layer = 33554432;
+    btn.parent = parent;
+    btn.setPosition(x, y, 0);
+    btn.addComponent(UITransform).setContentSize(w, h);
+    const g = btn.addComponent(Graphics);
+    const labelNode = this.mkLabel(btn, `${name}Label`, 0, 0, text, Math.min(25, Math.max(16, h * 0.28)), w - 12, h - 8);
+    const label = labelNode.getComponent(Label)!;
+    label.isBold = true;
+    label.color = muted ? GameRunner.START_MUTED : GameRunner.START_TEXT;
+    const paint = (pressed: boolean) => {
+      g.clear();
+      g.fillColor = muted ? GameRunner.START_SOFT : new Color(238, 232, 220, 255);
+      g.strokeColor = muted ? new Color(126, 114, 99, 75) : new Color(GameRunner.START_BLUE.r, GameRunner.START_BLUE.g, GameRunner.START_BLUE.b, 190);
+      g.lineWidth = muted ? 1 : 2;
+      g.roundRect(-w / 2, -h / 2 + (pressed ? -2 : 0), w, h, Math.min(13, h * 0.22));
+      g.fill(); g.stroke();
+      btn.setScale(pressed ? 0.96 : 1, pressed ? 0.96 : 1, 1);
+    };
+    paint(false);
+    btn.on(Node.EventType.TOUCH_START, () => paint(true));
+    btn.on(Node.EventType.TOUCH_CANCEL, () => paint(false));
+    btn.on(Node.EventType.TOUCH_END, () => { paint(false); onTap(); });
+    return btn;
+  }
+
   /** 选关回调。 */
   private onLevelSelected(idx: number): void {
     if (!this.session.isLevelUnlocked(idx)) return;
@@ -1084,6 +1534,8 @@ export class GameRunner extends Component {
     if (this.deskDecorNode) this.deskDecorNode.active = v;
     this.deskItemNodes.forEach((node) => { if (node?.isValid) node.active = v; });
     if (this.charNode) this.charNode.active = v;
+    if (this.pressureAtmosphereNode) this.pressureAtmosphereNode.active = v;
+    if (this.pauseButtonNode) this.pauseButtonNode.active = v && !this.paused;
     if (this.subtitleNode) this.subtitleNode.active = v;
     if (this.lowerHudNode) this.lowerHudNode.active = v;
     if (this.actionDockNode) this.actionDockNode.active = v;
@@ -1321,14 +1773,14 @@ export class GameRunner extends Component {
   }
 
   /** 每日挑战是次级、自愿入口：沿用纸质按键语言，但不与主线蓝色主按钮争抢权重。 */
-  private makeStartSecondaryButton(parent: Node, x: number, y: number, w: number, h: number, text: string, onTap: () => void): Node {
-    const btn = new Node('DailyChallengeButton');
+  private makeStartSecondaryButton(parent: Node, name: string, x: number, y: number, w: number, h: number, text: string, onTap: () => void): Node {
+    const btn = new Node(name);
     btn.layer = 33554432;
     btn.parent = parent;
     btn.addComponent(UITransform).setContentSize(w, h + 8);
     btn.setPosition(x, y, 0);
     const g = btn.addComponent(Graphics);
-    const labelNode = this.mkLabel(btn, 'DailyChallengeLabel', 0, 2, text, Math.min(27, Math.max(22, h * 0.42)), w - 28, h - 8);
+    const labelNode = this.mkLabel(btn, `${name}Label`, 0, 2, text, Math.min(24, Math.max(18, h * 0.38)), w - 14, h - 8);
     const label = labelNode.getComponent(Label)!;
     label.isBold = true;
     label.color = GameRunner.START_TEXT;
@@ -1498,16 +1950,25 @@ export class GameRunner extends Component {
     const idx = this.session.currentIndex;
     const report = this.game.buildReport(idx);
     const canRevive = report.result === 'lose' && !this.game.revived;
+    const challengeBeforeFinish = this.session.activeChallenge;
+    const dailyKey = challengeBeforeFinish?.mode === 'daily' ? challengeBeforeFinish.keyHash.toString(36) : null;
     this.pendingTelemetryReport = {
       report,
       failReason: this.game.lastFailReason ?? 'unknown',
     };
     if (!canRevive) this.finalizePendingTelemetry();
-    const achievementsBefore = new Set(this.session.profile.achievements);
     this.session.finishLevel(report);
-    const newAchievementLabels = this.session.profile.achievements
-      .filter((id) => !achievementsBefore.has(id))
-      .map((id) => AchievementLabels[id]);
+    const progression = this.session.lastProgression;
+    const newAchievementLabels = (progression?.newAchievements ?? []).map((id) => AchievementLabels[id]);
+    const newCosmeticLabels = (progression?.newCosmetics ?? []).map((id) => CosmeticLabels[id]);
+    const currentDaily = dailyKey ? this.session.profile.dailyRecords.find((record) => record.key === dailyKey) : undefined;
+    const dailyRewardLine = progression?.daily && currentDaily
+      ? progression.daily.firstAttempt
+        ? `今日首通奖励 ✓ 蓝色纸团外观 +「${AchievementLabels['daily-first']}」`
+        : progression.daily.newRecord
+          ? `今日新纪录 ${progression.daily.previousBest}→${currentDaily.score}`
+          : `今日最佳 ${currentDaily.score} · 再冲一次刷新纪录`
+      : '';
     this.approvalGaugeView?.snap(report.finalApproval, this.game.approval.currentZone, '', report.timeUsedSec);
 
     const vis = view.getVisibleSize();
@@ -1521,19 +1982,55 @@ export class GameRunner extends Component {
       : '';
     const highlightLine = report.highlightTitle ? `本局高光 · ${report.highlightTitle}` : '';
     const achievementLine = newAchievementLabels.length > 0 ? `新成就 · ${newAchievementLabels.join(' / ')}` : '';
-    const accoladeLine = [highlightLine, achievementLine].filter(Boolean).join(' · ');
-    const meme = [accoladeLine, objectiveLine, reportMeme].filter(Boolean).join('\n');
+    const cosmeticLine = !dailyRewardLine && newCosmeticLabels.length > 0 ? `新收藏 · ${newCosmeticLabels.join(' / ')}` : '';
+    const accolades = [dailyRewardLine, highlightLine, achievementLine, cosmeticLine].filter(Boolean);
+    const primaryAccolade = accolades[0] ?? '';
+    const secondaryAccolade = accolades.slice(1).join(' · ');
+    const failureCoach = this.game.getFailureCoach();
+    const reviewTitle = won
+      ? this.compactResultText(primaryAccolade || objectiveLine || (report.result === 'win-hunt' ? '主动反杀 · AI 被你劝退了' : '生存成功 · 今天的岗位守住了'), 30)
+      : this.compactResultText(`失败复盘 · ${failureCoach.title}`, 30);
+    const reviewBody = won
+      ? this.compactResultText([secondaryAccolade, primaryAccolade ? objectiveLine : '', reportMeme].filter(Boolean).join(' · '), 54)
+      : this.compactResultText([achievementLine, cosmeticLine, failureCoach.advice].filter(Boolean).join(' · '), 54);
     const rank = this.session.rankLabel;
     const day = this.session.daysEmployed;
+    const currentBestStars = progression?.bestStarsAfter ?? bestStarsFor(this.session.profile, idx);
+    const previousBestStars = progression?.bestStarsBefore ?? currentBestStars;
+    const starsGained = Math.max(0, currentBestStars - previousBestStars);
+    const starRecord = starsGained > 0
+      ? `新收集 +${starsGained}★ · 本关最佳 ${currentBestStars}★`
+      : `本关最佳 ${currentBestStars}★`;
+    const rankGain = Math.max(0, (progression?.rankScoreAfter ?? 0) - (progression?.rankScoreBefore ?? 0));
+    const rankUp = !!progression && progression.rankAfter !== progression.rankBefore;
+    const currentRankProgress = rankProgress(this.session.profile);
+    const previousRankProgress = progression ? rankProgressFromScore(progression.rankScoreBefore) : currentRankProgress;
+    const careerLine = dailyKey
+      ? `每日挑战 · ${currentDaily ? `今日最佳 ${currentDaily.score}` : '成绩已记录'} · 奖励不增加战斗数值`
+      : `${starRecord} · 总星${totalStars(this.session.profile)}/${this.session.levelCount * 3}${progression?.unlockedNextLevel ? ' · 新关卡已解锁' : ''}`;
+    const growthTitle = progression?.daily
+      ? progression.daily.firstAttempt ? '今日奖励已入库' : progression.daily.newRecord ? '今日纪录刷新' : '今日成绩已记录'
+      : progression?.mode === 'friend'
+        ? '好友挑战 · 独立计分'
+        : rankUp
+          ? `段位晋升 · ${RankLabels[progression!.rankAfter]}`
+          : `${rank}${rankGain > 0 ? ` · 成长 +${rankGain}` : ''}`;
+    const growthDetail = progression?.daily
+      ? `本局 ${progression.daily.score} · 最佳 ${progression.daily.best}`
+      : progression?.mode === 'friend'
+        ? '不影响主线星级与段位'
+        : currentRankProgress.next
+          ? `${progression?.rankScoreBefore ?? currentRankProgress.score}→${currentRankProgress.score} · 距${RankLabels[currentRankProgress.next]} ${Math.ceil(currentRankProgress.remaining)}分`
+          : `${currentRankProgress.score}分 · 已达最高段位`;
     const canNext = won && this.session.hasNext;
     const nextLevel = canNext ? getLevel(idx + 1) : null;
-    const nextHook = canNext
+    const nextHook = this.compactResultText(canNext
       ? `下一关 · ${nextLevel?.hook ?? nextLevel?.objective?.label ?? nextLevel?.challengeHint ?? '新的任务正在排队'}`
       : this.session.activeChallenge
         ? '同一套任务流 · 晒出战报让好友接招'
       : won
         ? '全部轮次完成 · 回到选关复盘高光'
-        : `再试一次 · ${report.objectiveLabel ?? getLevel(idx).challengeHint ?? '稳住认可度'}`;
+        : `再试一次 · ${onboardingRetryHint(idx) ?? report.objectiveLabel ?? getLevel(idx).challengeHint ?? '稳住认可度'}`, 44);
 
     if (this.reportLabel) this.reportLabel.node.active = false;
     if (this.retryBtn) this.retryBtn.active = false;
@@ -1586,12 +2083,24 @@ export class GameRunner extends Component {
       missedThrows: report.missedThrows,
       rank,
       day,
-      meme,
+      careerLine,
+      growthTitle,
+      growthDetail,
+      growthRatio: progression?.mode === 'main' ? currentRankProgress.ratio : null,
+      growthPreviousRatio: progression?.mode === 'main' && !rankUp ? previousRankProgress.ratio : rankUp ? 0 : null,
+      growthEmphasized: rankUp || !!progression?.daily?.newRecord,
+      reviewTitle,
+      reviewBody,
       nextHook,
       buttons,
     });
     this.resultPanelNode = nodes.panel;
     this.resultScrimNode = nodes.scrim;
+  }
+
+  private compactResultText(text: string, maxChars: number): string {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    return normalized.length > maxChars ? `${normalized.slice(0, Math.max(1, maxChars - 1))}…` : normalized;
   }
 
   private async onShareReport(report: RunReport, rank: string, day: number): Promise<void> {
@@ -1633,6 +2142,16 @@ export class GameRunner extends Component {
     // 选关页：不驱动游戏逻辑
     if (this.uiState === 'select') return;
 
+    if (this.paused) {
+      this.updateAmbientPresentation(0);
+      return;
+    }
+
+    // 常驻表现独立于固定逻辑步进；QA 场景只同步状态、不推进时间。
+    this.updateAmbientPresentation(this.qaConfig && this.qaApplied ? 0 : dt);
+    // QA 只冻结玩法规则，不冻结手势表现，保证固定场景仍可验收跟手与投掷反馈。
+    if (this.aimingProp !== null) this.updateAimFrame(dt);
+
     // QA URL 是静态视觉基线：场景建立完成后冻结规则推进，保证等待多久截图都一致。
     if (this.qaConfig && this.qaApplied) return;
 
@@ -1650,8 +2169,6 @@ export class GameRunner extends Component {
     } else {
       this.scanPos = 0;
     }
-    if (this.aimingProp !== null) this.updateAimFrame(dt);
-
     // 逻辑固定步进
     this.accumulator += dt;
     let guard = 0;
@@ -1704,9 +2221,11 @@ export class GameRunner extends Component {
         iconNode.setSiblingIndex(0); // 图标在文字之下层（先绘制），避免遮住状态文字
         this.propIconSprites[i] = icon;
       }
-      // 起手由按钮命中区负责；移动、松手、取消统一交给全局输入，
-      // 避免按钮隐藏/重排时重复派发 TOUCH_END / TOUCH_CANCEL。
+      // 同一次手势优先由按钮闭环处理。微信小游戏里节点触摸可能不会继续冒泡到
+      // input.TOUCH_END；全局监听只作为手指拖出按钮后的兜底。状态机会过滤重复派发。
       btn.on(Node.EventType.TOUCH_START, (event: EventTouch) => this.onPropDown(type, event));
+      btn.on(Node.EventType.TOUCH_END, (event: EventTouch) => this.onPropUp(type, event));
+      btn.on(Node.EventType.TOUCH_CANCEL, (event: EventTouch) => this.onPropCancel(type, event));
     });
   }
 
@@ -1717,6 +2236,7 @@ export class GameRunner extends Component {
   }
 
   private onPropDown(prop: PropType, event?: EventTouch): void {
+    if (this.paused) return;
     if (this.propInteractionState !== 'idle') return;
     this.sensory.unlock();
     this.sensory.play('press');
@@ -1741,17 +2261,31 @@ export class GameRunner extends Component {
     if (this.game.beginCharge(prop)) {
       this.sensory.play('pickup');
       this.aimStart = this.propSourcePoint(prop);
-      this.aimPoint = event ? this.pointFromPointer(event) : this.aimStart.clone();
-      this.aimingSlot = this.slotFromAimPoint(this.aimPoint);
+      const recommendation = this.game.getTargetRecommendation(prop);
+      this.aimingSlot = recommendation?.slot ?? this.slotFromAimPoint(this.aimStart);
+      this.aimPoint = this.aimStart.clone();
       this.showPaperAim(prop);
+      this.activeAimTouchId = event?.getID() ?? null;
       this.propInteractionState = 'arming';
       this.aimingProp = prop;
+      this.aimManualTargeting = false;
+      this.lockAimCardAtSlot(prop, this.aimingSlot);
+      const pointer = event ? this.pointFromPointer(event) : this.aimStart.clone();
+      this.aimGestureStart.set(pointer);
+      this.aimGestureLast.set(pointer);
+      this.aimGestureLastMs = Date.now();
+      this.aimReleaseVelocityY = 0;
+      this.aimCancelArmed = false;
       this.suppressSyntheticPropCancelUntil = Date.now() + UiTokens.feedback.syntheticCancelMs;
       { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
-      if (event) this.queueAimPointer(event);
-      this.updateAimFrame(1 / 60, true);
+      const recommendedPoint = this.targetPointForSlot(this.aimingSlot);
+      this.aimSelectionX = recommendedPoint.x;
+      this.aimInitialSelectionX = recommendedPoint.x;
+      // 起手纸团留在手指下，不再为了推荐目标横向瞬移。
+      this.aimDesiredPoint.set(pointer.x, pointer.y, 0);
+      this.updateAimFrame(1 / 60);
       this.advanceTutorial(1, UiTokens.tutorial.dragHint);
-      this.setEventText(UiTokens.tutorial.dockHint, UiTokens.feedback.eventHintTtlSec, 7);
+      this.setEventText(this.aimRecommendationText(prop), UiTokens.feedback.eventHintTtlSec, 7);
     } else {
       this.setEventText(`${this.propDisplayName(prop)}暂时不能扔`);
     }
@@ -1759,16 +2293,17 @@ export class GameRunner extends Component {
   }
   private onPropUp(prop: PropType, event?: EventTouch | EventMouse): void {
     if (this.propInteractionState !== 'arming' && this.propInteractionState !== 'dragging') return;
+    if (event && !this.activeAimPointerMatches(event)) return;
     this.suppressSyntheticPropCancelUntil = 0;
     if (prop === PT.KissUp) return;
     this.finishPaperThrow(prop, event);
     this.punchButton(prop, false);
   }
-  private onPropCancel(prop: PropType): void {
+  private onPropCancel(prop: PropType, event?: EventTouch): void {
     if (this.propInteractionState === 'launching' || this.propInteractionState === 'idle') return;
+    if (event && !this.activeAimPointerMatches(event)) return;
     if (this.aimingProp === prop) {
-      // 按住后会把原按钮隐藏，Cocos 会给这个按钮派发 TOUCH_CANCEL。
-      // 这是视觉切换产生的按钮级取消，不是玩家取消拖拽；真实取消仍由 onGlobalTouchCancel 处理。
+      // 操作轨重排时部分平台会给起手按钮派发 TOUCH_CANCEL；真实取消统一由全局输入处理。
       if (this.actionDockNode?.active) return;
       if (prop !== PT.KissUp) this.game.cancel(prop);
       this.clearPaperAim(true);
@@ -1781,37 +2316,63 @@ export class GameRunner extends Component {
 
   private finishPaperThrow(prop: PropType, event?: EventTouch | EventMouse): void {
     if (this.aimingProp !== prop) return;
-    if (event) this.queueAimPointer(event);
+    if (event) {
+      const releasePoint = this.sampleAimGesture(event);
+      this.aimCancelArmed = isThrowCancelGesture(releasePoint.y - this.aimGestureStart.y);
+    }
+    if (this.aimCancelArmed) {
+      this.cancelPaperThrow(prop, '已收回道具');
+      return;
+    }
+    const lockedSlot = this.resolvedAimSlot(prop);
+    if (lockedSlot < 0) {
+      this.cancelPaperThrow(prop, '目标已离场，道具未消耗');
+      return;
+    }
+    this.aimingSlot = lockedSlot;
     this.updateAimFrame(1 / 60, true);
-    const slot = this.aimingSlot;
+    const slot = lockedSlot;
     const quality = this.currentDragHitQuality();
+    const velocityFresh = Date.now() - this.aimGestureLastMs <= UiTokens.aim.releaseVelocityHoldMs;
+    const throwStrength = throwPresentationStrength(velocityFresh ? this.aimReleaseVelocityY : 0);
+    const lockedCardId = this.aimLockedCardId;
+    const lockedCardOffset = this.aimLockedCardOffset;
     this.telemetry.released(prop);
     this.propInteractionState = 'launching';
-    this.animatePaperThrow(prop, slot, quality, () => this.game.releaseAtSlot(prop, slot, quality));
+    this.animatePaperThrow(prop, slot, quality, throwStrength, () => {
+      const arrivalAnchorSlot = prop === PT.ChangeDemand || prop === PT.ThrowPot
+        ? findLockedCardSlot(this.game.conveyor.cards, lockedCardId)
+        : slot;
+      const arrivalSlot = arrivalAnchorSlot < 0 ? -1 : arrivalAnchorSlot - lockedCardOffset;
+      if (arrivalSlot < 0 || arrivalSlot >= this.game.conveyor.cards.length) this.game.cancel(prop);
+      else this.game.releaseAtSlot(prop, arrivalSlot, quality);
+    });
     this.clearPaperAim(false);
     this.punchButton(prop, false);
   }
 
   private onGlobalTouchMove(event: EventTouch): void {
+    if (this.paused) return;
     if (this.aimingProp === null) return;
-    this.propInteractionState = 'dragging';
-    this.telemetry.dragStarted();
-    this.suppressSyntheticPropCancelUntil = 0;
-    this.queueAimPointer(event);
-    this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
+    if (!this.activeAimPointerMatches(event)) return;
+    this.handleAimPointerMove(event);
   }
 
   private onGlobalTouchEnd(event: EventTouch): void {
+    if (this.paused) return;
+    if (!this.activeAimPointerMatches(event)) return;
     const prop = this.aimingProp;
     if (prop === null) return;
     this.onPropUp(prop, event);
   }
 
-  private onGlobalTouchCancel(): void {
+  private onGlobalTouchCancel(event: EventTouch): void {
+    if (this.paused) return;
+    if (!this.activeAimPointerMatches(event)) return;
     const prop = this.aimingProp;
     if (prop === null) return;
     if (this.actionDockNode?.active && Date.now() < this.suppressSyntheticPropCancelUntil) {
-      // 进入道具拖拽时会隐藏/重排底部按钮，Cocos 会立刻派发一次全局 TOUCH_CANCEL。
+      // 进入道具操作态重排底部 HUD 时，Cocos 可能立刻派发一次全局 TOUCH_CANCEL。
       // 这不是玩家取消操作，忽略它，避免按住按钮后马上显示“取消”。
       return;
     }
@@ -1822,18 +2383,94 @@ export class GameRunner extends Component {
   }
 
   private onGlobalMouseMove(event: EventMouse): void {
+    if (this.paused) return;
     if (this.aimingProp === null) return;
-    this.propInteractionState = 'dragging';
-    this.telemetry.dragStarted();
-    this.suppressSyntheticPropCancelUntil = 0;
-    this.queueAimPointer(event);
-    this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
+    this.handleAimPointerMove(event);
   }
 
   private onGlobalMouseUp(event: EventMouse): void {
+    if (this.paused) return;
     const prop = this.aimingProp;
     if (prop === null) return;
     this.onPropUp(prop, event);
+  }
+
+  /** 鼠标始终视为同一指针；触摸只接受发起当前投掷的那根手指。 */
+  private activeAimPointerMatches(event: EventTouch | EventMouse): boolean {
+    const getId = (event as EventTouch).getID;
+    if (typeof getId !== 'function') return true;
+    const id = getId.call(event);
+    return this.activeAimTouchId === null || id === this.activeAimTouchId;
+  }
+
+  private handleAimPointerMove(event: EventTouch | EventMouse): void {
+    const raw = this.sampleAimGesture(event);
+    const dx = raw.x - this.aimGestureStart.x;
+    const dy = raw.y - this.aimGestureStart.y;
+    this.aimCancelArmed = isThrowCancelGesture(dy);
+    if (this.propInteractionState === 'arming' && isManualThrowGesture(dx, dy)) {
+      this.propInteractionState = 'dragging';
+      this.telemetry.dragStarted();
+      this.suppressSyntheticPropCancelUntil = 0;
+      this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
+    }
+    // 只有明确的横向扫动才改目标；纯向上甩保持推荐/已选目标不漂移。
+    if (!this.aimManualTargeting && isHorizontalTargetGesture(dx, dy)) {
+      this.aimManualTargeting = true;
+    }
+    if (this.aimManualTargeting) {
+      // 选卡和纸团使用同一套 root-local 绝对横坐标，避免“手在左边、准星在右边”。
+      this.aimSelectionX = raw.x * UiTokens.aim.horizontalSelectionGain;
+    }
+    // 纸团始终跟随真实手指；目标选择由 aimSelectionX 独立控制。
+    this.queueAimRawPoint(raw);
+    if (this.aimCancelArmed) this.setEventText('松手取消 · 不消耗道具', 0.4, 9);
+  }
+
+  private sampleAimGesture(event: EventTouch | EventMouse): Vec3 {
+    const raw = this.pointFromPointer(event);
+    const now = Date.now();
+    const dt = (now - this.aimGestureLastMs) / 1000;
+    const dy = raw.y - this.aimGestureLast.y;
+    if (this.aimGestureLastMs > 0 && dt > 0.004 && Math.abs(dy) > 0.5) {
+      const velocity = dy / Math.min(dt, 0.08);
+      this.aimReleaseVelocityY += (velocity - this.aimReleaseVelocityY) * UiTokens.aim.releaseVelocitySmoothing;
+    }
+    if (Math.hypot(raw.x - this.aimGestureLast.x, dy) > 0.5) {
+      this.aimGestureLast.set(raw);
+      this.aimGestureLastMs = now;
+    }
+    return raw;
+  }
+
+  private cancelPaperThrow(prop: PropType, message: string): void {
+    this.game.cancel(prop);
+    this.clearPaperAim(true);
+    this.punchButton(prop, false);
+    this.setEventText(message, 1.4, 9);
+  }
+
+  private lockAimCardAtSlot(prop: PropType, slot: number): void {
+    this.aimLockedCardOffset = 0;
+    if (prop !== PT.ChangeDemand && prop !== PT.ThrowPot) {
+      this.aimLockedCardId = null;
+      return;
+    }
+    let anchorSlot = slot;
+    if (prop === PT.ThrowPot && !this.game.conveyor.slotAt(slot)) {
+      const nearby = [slot - 1, slot + 1].find((candidate) => this.game.conveyor.slotAt(candidate));
+      if (nearby !== undefined) anchorSlot = nearby;
+    }
+    this.aimLockedCardId = this.game.conveyor.slotAt(anchorSlot)?.id ?? null;
+    this.aimLockedCardOffset = anchorSlot - slot;
+  }
+
+  private resolvedAimSlot(prop: PropType): number {
+    if (prop !== PT.ChangeDemand && prop !== PT.ThrowPot) return this.aimingSlot;
+    const anchorSlot = findLockedCardSlot(this.game.conveyor.cards, this.aimLockedCardId);
+    if (anchorSlot < 0) return -1;
+    const slot = anchorSlot - this.aimLockedCardOffset;
+    return slot >= 0 && slot < this.game.conveyor.cards.length ? slot : -1;
   }
 
   private propSourcePoint(prop: PropType): Vec3 {
@@ -1845,6 +2482,13 @@ export class GameRunner extends Component {
   private propDisplayName(prop: PropType): string {
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     return GameRunner.PROP_LABELS[idx] ?? '纸团';
+  }
+
+  private aimRecommendationText(prop: PropType): string {
+    const recommendation = this.game.getTargetRecommendation(prop);
+    return recommendation
+      ? `推荐 ${recommendation.slot + 1} 号位 · ${recommendation.label}`
+      : UiTokens.tutorial.dockHint;
   }
 
   private pointFromPointer(event: EventTouch | EventMouse): Vec3 {
@@ -1865,16 +2509,26 @@ export class GameRunner extends Component {
     return node ? this.nodePointInRoot(node) : new Vec3(0, 120, 0);
   }
 
+  /** 选槽几何必须固定，不能跟着卡片换挡 tween 漂移。 */
+  private slotAnchorPointForSlot(slot: number): Vec3 {
+    const node = this.slotNodes[slot];
+    return node ? this.nodePointInRoot(node) : new Vec3(0, 120, 0);
+  }
+
   private slotFromAimPoint(point: Vec3): number {
+    return this.slotFromAimX(point.x);
+  }
+
+  private slotFromAimX(x: number): number {
     const targets = this.aimSlotTargets.length === this.slotNodes.length
       ? this.aimSlotTargets
-      : this.slotNodes.map((_, i) => this.targetPointForSlot(i));
+      : this.slotNodes.map((_, i) => this.slotAnchorPointForSlot(i));
     if (targets.length === 0) return 0;
     let best = 0;
     let bestDist = Number.POSITIVE_INFINITY;
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i];
-      const dx = Math.abs(point.x - p.x);
+      const dx = Math.abs(x - p.x);
       if (dx < bestDist) {
         best = i;
         bestDist = dx;
@@ -1887,7 +2541,7 @@ export class GameRunner extends Component {
     this.clearPaperAim(true);
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
-    this.aimSlotTargets = this.slotNodes.map((_, i) => this.targetPointForSlot(i));
+    this.aimSlotTargets = this.slotNodes.map((_, i) => this.slotAnchorPointForSlot(i));
     this.aimRenderedSlot = -1;
     this.aimVelocityX = 0;
     this.aimVisualTime = 0;
@@ -1895,6 +2549,7 @@ export class GameRunner extends Component {
     this.aimLockSec = 0;
     this.aimPerfectReady = false;
     this.aimTargetValid = true;
+    this.aimRecommendationSlot = this.game.getTargetRecommendation(prop)?.slot ?? -1;
     this.aimDesiredPoint.set(this.aimPoint.x, this.aimPoint.y, 0);
 
     const propNode = new Node('PropDragAim');
@@ -1943,14 +2598,6 @@ export class GameRunner extends Component {
       this.drawPaperWad(visualNode, prop, 1);
     }
 
-    const guide = new Node('PropThrowGuide');
-    guide.layer = 1 << 25;
-    guide.addComponent(UITransform).setContentSize(1, 1);
-    guide.addComponent(Graphics);
-    this.node.addChild(guide);
-    guide.setSiblingIndex(Math.max(0, propNode.getSiblingIndex() - 1));
-    this.aimGuideNode = guide;
-
     const target = new Node('PropAimTarget');
     target.layer = 1 << 25;
     target.addComponent(UITransform).setContentSize(UiTokens.aim.targetSize, UiTokens.aim.targetSize);
@@ -1958,7 +2605,40 @@ export class GameRunner extends Component {
     target.addComponent(UIOpacity).opacity = 220;
     this.node.addChild(target);
     this.aimTargetNode = target;
+    target.setPosition(this.targetPointForSlot(this.aimingSlot));
     this.paintAimTarget(prop, false, true);
+
+    // 方向提示只画一次，拖动时仅旋转/平移；它和最终锁定槽共用同一个目标。
+    const direction = new Node('PropAimDirection');
+    direction.layer = 1 << 25;
+    direction.addComponent(UITransform).setContentSize(112, 28);
+    const directionG = direction.addComponent(Graphics);
+    directionG.strokeColor = new Color(base.r, base.g, base.b, 205);
+    directionG.fillColor = new Color(base.r, base.g, base.b, 220);
+    directionG.lineWidth = 4;
+    directionG.lineCap = Graphics.LineCap.ROUND;
+    directionG.moveTo(42, 0);
+    directionG.lineTo(91, 0);
+    directionG.stroke();
+    directionG.moveTo(91, 0);
+    directionG.lineTo(78, 8);
+    directionG.lineTo(80, 0);
+    directionG.lineTo(78, -8);
+    directionG.close();
+    directionG.fill();
+    direction.addComponent(UIOpacity).opacity = 180;
+    this.node.addChild(direction);
+    direction.setSiblingIndex(Math.max(0, target.getSiblingIndex() - 1));
+    this.aimDirectionNode = direction;
+
+    const effectPreview = new Node('PropEffectPreview');
+    effectPreview.layer = 1 << 25;
+    effectPreview.addComponent(UITransform).setContentSize(1, 1);
+    effectPreview.addComponent(Graphics);
+    this.node.addChild(effectPreview);
+    effectPreview.setSiblingIndex(Math.max(0, target.getSiblingIndex() - 1));
+    this.aimEffectPreviewNode = effectPreview;
+    this.paintAimEffectPreview(prop, this.aimingSlot, true);
 
     const shadow = new Node('PropDragShadow');
     shadow.layer = 1 << 25;
@@ -1982,9 +2662,8 @@ export class GameRunner extends Component {
       .start();
   }
 
-  /** 触摸回调只做坐标采样和裁切，避免一帧内被平台派发多次时重复重绘。 */
-  private queueAimPointer(event: EventTouch | EventMouse): void {
-    const raw = this.pointFromPointer(event);
+  /** 触摸回调只做坐标裁切，真正的视觉跟随在 update 中每帧最多执行一次。 */
+  private queueAimRawPoint(raw: Vec3): void {
     const vis = view.getVisibleSize();
     const safe = sys.getSafeAreaRect(false);
     const safeBottomY = safe.y - vis.height / 2;
@@ -1995,14 +2674,10 @@ export class GameRunner extends Component {
     if (this.actionDockNode?.active) {
       const dockUt = this.actionDockNode.getComponent(UITransform);
       const dockW = dockUt?.contentSize.width ?? 0;
-      const dockH = dockUt?.contentSize.height ?? 0;
       const dockX = this.actionDockNode.position.x;
-      const dockY = this.actionDockNode.position.y;
-      if (dockH > 0) {
+      if (dockW > 0) {
         minX = dockX - dockW / 2 + UiTokens.aim.dockClampInset;
         maxX = dockX + dockW / 2 - UiTokens.aim.dockClampInset;
-        minY = dockY - dockH / 2 + UiTokens.aim.dockClampVerticalInset;
-        maxY = dockY + dockH / 2 - UiTokens.aim.dockClampVerticalInset;
       }
     }
     this.aimDesiredPoint.set(
@@ -2015,36 +2690,50 @@ export class GameRunner extends Component {
   /** 每帧最多执行一次的拖动表现更新：跟手、速度形变、影子、吸附与轨迹。 */
   private updateAimFrame(dt: number, force = false): void {
     if (this.aimingProp === null) return;
+    this.aimSlotTargets = this.slotNodes.map((_, i) => this.slotAnchorPointForSlot(i));
     const tuning = this.paperTuning(this.aimingProp);
     const prevX = this.aimPoint.x;
-    const follow = force ? 1 : 1 - Math.exp(-tuning.followHz * Math.max(0.001, Math.min(dt, 0.05)));
-    this.aimPoint.set(
-      this.aimPoint.x + (this.aimDesiredPoint.x - this.aimPoint.x) * follow,
-      this.aimPoint.y + (this.aimDesiredPoint.y - this.aimPoint.y) * follow,
-      0,
-    );
+    // 意图死区只决定是否换目标，不再拖慢纸团；从按下第一帧起就严格跟手。
+    this.aimPoint.set(this.aimDesiredPoint);
     const instantVelocityX = (this.aimPoint.x - prevX) / Math.max(dt, 1 / 120);
     this.aimVelocityX += (instantVelocityX - this.aimVelocityX) * (force ? 1 : UiTokens.aim.velocitySmoothing);
-    const nextSlot = this.slotFromAimPoint(this.aimPoint);
+    const identitySlot = this.resolvedAimSlot(this.aimingProp);
+    const nextSlot = this.aimManualTargeting
+      ? this.slotFromAimX(this.aimSelectionX)
+      : identitySlot >= 0 ? identitySlot : this.aimingSlot;
     const slotChanged = nextSlot !== this.aimRenderedSlot;
-    const targetValid = this.isAimTargetValid(this.aimingProp, nextSlot);
+    const identityMissing = (this.aimingProp === PT.ChangeDemand || this.aimingProp === PT.ThrowPot)
+      && this.aimLockedCardId !== null
+      && identitySlot < 0;
+    const targetValid = !identityMissing && this.isAimTargetValid(this.aimingProp, nextSlot);
     const validityChanged = targetValid !== this.aimTargetValid;
+    const recommendationSlot = this.game.getTargetRecommendation(this.aimingProp)?.slot ?? -1;
+    const recommendationChanged = recommendationSlot !== this.aimRecommendationSlot;
+    this.aimRecommendationSlot = recommendationSlot;
+    if (this.aimManualTargeting && nextSlot !== this.aimingSlot) {
+      this.lockAimCardAtSlot(this.aimingProp, nextSlot);
+    }
     this.aimingSlot = nextSlot;
     this.aimTargetValid = targetValid;
+    const resolvedVisualSlot = this.resolvedAimSlot(this.aimingProp);
+    const visualTargetSlot = resolvedVisualSlot >= 0 ? resolvedVisualSlot : nextSlot;
     if (slotChanged) {
       const previousSlot = this.aimRenderedSlot;
       this.aimRenderedSlot = nextSlot;
       this.aimTargetKick = UiTokens.aim.targetKick;
-      const target = this.aimSlotTargets[nextSlot] ?? this.targetPointForSlot(nextSlot);
+      const target = this.targetPointForSlot(visualTargetSlot);
       this.aimTargetNode?.setPosition(target);
-      this.drawAimGuide();
+      this.paintAimEffectPreview(this.aimingProp, nextSlot, targetValid);
       this.aimLockSec = 0;
       if (this.aimPerfectReady) {
         this.aimPerfectReady = false;
       }
       if (previousSlot >= 0) this.lightAimFeedback('tick');
     }
-    const alignment = this.aimAlignmentRatio(nextSlot);
+    if (!slotChanged && this.aimTargetNode?.isValid) {
+      this.aimTargetNode.setPosition(this.targetPointForSlot(visualTargetSlot));
+    }
+    const alignment = this.aimManualTargeting ? this.aimAlignmentRatio(nextSlot) : 1;
     if (targetValid && !slotChanged && alignment <= UiTokens.aim.perfectAlignmentRatio) {
       this.aimLockSec = Math.min(UiTokens.aim.perfectLockSec * 2, this.aimLockSec + dt);
     } else if (!targetValid || alignment > UiTokens.aim.perfectAlignmentRatio) {
@@ -2053,9 +2742,10 @@ export class GameRunner extends Component {
     const perfectReady = targetValid
       && this.aimLockSec >= UiTokens.aim.perfectLockSec
       && alignment <= UiTokens.aim.perfectAlignmentRatio;
-    if (perfectReady !== this.aimPerfectReady || validityChanged || slotChanged) {
+    if (perfectReady !== this.aimPerfectReady || validityChanged || slotChanged || recommendationChanged) {
       this.aimPerfectReady = perfectReady;
       this.paintAimTarget(this.aimingProp, perfectReady, targetValid);
+      if (validityChanged || recommendationChanged) this.paintAimEffectPreview(this.aimingProp, nextSlot, targetValid);
       if (perfectReady) {
         this.lightAimFeedback('lock');
         if (!this.perfectTipShown) {
@@ -2066,8 +2756,11 @@ export class GameRunner extends Component {
       }
     }
 
+    // 纸团严格跟手；吸附只体现在轨道刻度与卡片准星，不再暗改纸团位置。
+    const visualAimX = this.aimPoint.x;
+
     if (this.paperAimNode?.isValid) {
-      this.paperAimNode.setPosition(this.aimPoint.x, this.aimPoint.y, 0);
+      this.paperAimNode.setPosition(visualAimX, this.aimPoint.y, 0);
       const speed = Math.min(UiTokens.aim.velocityCap, Math.abs(this.aimVelocityX));
       const stretch = Math.min(
         UiTokens.aim.dragStretchMax,
@@ -2084,12 +2777,21 @@ export class GameRunner extends Component {
       const shadowPos = this.paperAimShadowNode.position;
       const shadowFollow = force ? 1 : UiTokens.aim.shadowFollow;
       this.paperAimShadowNode.setPosition(
-        shadowPos.x + (this.aimPoint.x + 5 - shadowPos.x) * shadowFollow,
+        shadowPos.x + (visualAimX + 5 - shadowPos.x) * shadowFollow,
         shadowPos.y + (this.aimPoint.y - UiTokens.aim.shadowDrop - shadowPos.y) * shadowFollow,
         0,
       );
       const shadowStretch = 1 + Math.min(0.34, Math.abs(this.aimVelocityX) / UiTokens.aim.velocityCap * 0.34);
       this.paperAimShadowNode.setScale(shadowStretch, 1 / shadowStretch, 1);
+    }
+    if (this.aimDirectionNode?.isValid) {
+      const targetPoint = this.targetPointForSlot(visualTargetSlot);
+      this.aimDirectionNode.setPosition(this.aimPoint);
+      this.aimDirectionNode.angle = Math.atan2(
+        targetPoint.y - this.aimPoint.y,
+        targetPoint.x - this.aimPoint.x,
+      ) * 180 / Math.PI;
+      this.aimDirectionNode.active = !this.aimCancelArmed;
     }
     this.aimVisualTime += dt;
     if (this.aimTargetNode?.isValid) {
@@ -2098,16 +2800,17 @@ export class GameRunner extends Component {
       const pulse = 1 + Math.sin(this.aimVisualTime * UiTokens.aim.targetPulseHz * Math.PI * 2) * 0.035 + kick * 0.16;
       this.aimTargetNode.setScale(pulse, pulse, 1);
     }
-    const dockY = this.actionDockNode?.position.y ?? 0;
-    const strength = Math.min(1, Math.abs(this.aimPoint.x - this.aimStart.x) / Math.max(1, view.getVisibleSize().width * 0.32));
+    const strength = Math.min(1, Math.hypot(
+      this.aimPoint.x - this.aimStart.x,
+      Math.max(0, this.aimPoint.y - this.aimStart.y) * 1.15,
+    ) / Math.max(1, view.getVisibleSize().width * 0.26));
     this.propDockView?.updateInteraction(
-      this.aimPoint.x,
-      this.aimPoint.y - dockY,
       this.aimingSlot,
       strength,
       Math.min(1, Math.abs(this.aimVelocityX) / UiTokens.aim.velocityCap),
       this.aimPerfectReady,
       targetValid,
+      this.aimCancelArmed,
     );
   }
 
@@ -2121,7 +2824,7 @@ export class GameRunner extends Component {
     const halfSpan = Number.isFinite(nearestGap)
       ? Math.max(18, nearestGap * 0.5)
       : Math.max(36, view.getVisibleSize().width / Math.max(2, this.slotNodes.length) * 0.5);
-    return Math.abs(this.aimPoint.x - target.x) / halfSpan;
+    return Math.abs(this.aimSelectionX - target.x) / halfSpan;
   }
 
   private currentDragHitQuality(): HitQuality {
@@ -2143,7 +2846,8 @@ export class GameRunner extends Component {
     if (!g) return;
     const idx = prop ? GameRunner.PROP_TYPES.indexOf(prop) : -1;
     const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
-    const focus = !targetValid ? UiTokens.color.muted : perfectReady ? UiTokens.color.gold : UiTokens.color.blue;
+    const recommended = prop !== null && this.game.getTargetRecommendation(prop)?.slot === this.aimingSlot;
+    const focus = !targetValid ? UiTokens.color.muted : perfectReady || recommended ? UiTokens.color.gold : UiTokens.color.blue;
     g.clear();
     g.fillColor = new Color(focus.r, focus.g, focus.b, perfectReady ? 64 : 30);
     g.circle(0, 0, UiTokens.aim.targetInnerRadius);
@@ -2164,47 +2868,65 @@ export class GameRunner extends Component {
     g.stroke();
   }
 
+  private paintAimEffectPreview(prop: PropType | null, slot: number, targetValid: boolean): void {
+    const g = this.aimEffectPreviewNode?.getComponent(Graphics);
+    if (!g || !prop) return;
+    g.clear();
+    const radius = prop === PT.ThrowPot ? 1 : 0;
+    const lo = Math.max(0, slot - radius);
+    const hi = Math.min(this.slotNodes.length - 1, slot + radius);
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = targetValid ? (GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue) : UiTokens.color.muted;
+    for (let i = lo; i <= hi; i++) {
+      const slotNode = this.slotNodes[i];
+      const ut = slotNode?.getComponent(UITransform);
+      const point = this.aimSlotTargets[i] ?? this.targetPointForSlot(i);
+      const hasCard = this.game.conveyor.slotAt(i) !== null;
+      const w = (ut?.width ?? 76) + 10;
+      const h = (ut?.height ?? 66) + 10;
+      g.fillColor = new Color(base.r, base.g, base.b, hasCard ? 34 : 12);
+      g.strokeColor = new Color(base.r, base.g, base.b, i === slot ? 220 : hasCard ? 145 : 70);
+      g.lineWidth = i === slot ? 3 : 2;
+      g.roundRect(point.x - w / 2, point.y - h / 2, w, h, 13);
+      g.fill(); g.stroke();
+    }
+    const recommendation = this.game.getTargetRecommendation(prop);
+    if (recommendation && recommendation.slot >= 0 && recommendation.slot < this.slotNodes.length) {
+      const point = this.aimSlotTargets[recommendation.slot] ?? this.targetPointForSlot(recommendation.slot);
+      const ut = this.slotNodes[recommendation.slot]?.getComponent(UITransform);
+      const w = (ut?.width ?? 76) + 16;
+      const h = (ut?.height ?? 66) + 16;
+      const gold = UiTokens.color.gold;
+      g.strokeColor = new Color(gold.r, gold.g, gold.b, recommendation.slot === slot ? 245 : 190);
+      g.lineWidth = recommendation.slot === slot ? 3.5 : 2.5;
+      g.roundRect(point.x - w / 2, point.y - h / 2, w, h, 15);
+      g.stroke();
+      g.fillColor = new Color(gold.r, gold.g, gold.b, 240);
+      g.moveTo(point.x - 8, point.y + h / 2 + 6);
+      g.lineTo(point.x + 8, point.y + h / 2 + 6);
+      g.lineTo(point.x, point.y + h / 2 - 3);
+      g.close();
+      g.fill();
+    }
+  }
+
   private lightAimFeedback(kind: 'tick' | 'lock'): void {
     this.sensory.play(kind === 'lock' ? 'target-lock' : 'target-tick');
     this.sensory.haptic(kind === 'lock' ? 'medium' : 'light', UiTokens.aim.hapticMinIntervalMs);
   }
 
-  private releaseAimFeedback(prop: PropType): void {
+  private releaseAimFeedback(prop: PropType, strength = 0): void {
     this.sensory.playRelease(prop);
-    this.sensory.haptic(prop === PT.ThrowPot ? 'heavy' : 'medium', 72);
-  }
-
-  private drawAimGuide(): void {
-    const g = this.aimGuideNode?.getComponent(Graphics);
-    if (!g) return;
-    const prop = this.aimingProp;
-    const tuning = this.paperTuning(prop ?? PT.AddDemand);
-    const start = this.aimStart;
-    const end = this.aimSlotTargets[this.aimingSlot] ?? this.targetPointForSlot(this.aimingSlot);
-    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight * 0.82, 0);
-    g.clear();
-    const focus = UiTokens.color.blue;
-    g.fillColor = new Color(focus.r, focus.g, focus.b, prop === PT.ThrowPot ? 220 : 185);
-    // 起点蓄力环只在目标切换时重画，呼吸感由拖动道具与目标圈承担，避免高频 Graphics.clear。
-    g.strokeColor = new Color(focus.r, focus.g, focus.b, 175);
-    g.lineWidth = 3;
-    g.circle(start.x, start.y, UiTokens.aim.startChargeRadius + UiTokens.aim.startChargePulse * 0.55);
-    g.stroke();
-    for (let i = 1; i <= tuning.guideDots; i++) {
-      const t = i / (tuning.guideDots + 1);
-      const x = (1 - t) * (1 - t) * start.x + 2 * (1 - t) * t * peak.x + t * t * end.x;
-      const y = (1 - t) * (1 - t) * start.y + 2 * (1 - t) * t * peak.y + t * t * end.y;
-      const r = tuning.guideDotRadius * (0.75 + t * 0.35);
-      g.circle(x, y, r);
-      g.fill();
-    }
+    this.sensory.haptic(prop === PT.ThrowPot || strength >= 0.58 ? 'heavy' : 'medium', 72);
   }
 
   private clearPaperAim(destroyPaper: boolean): void {
     this.suppressSyntheticPropCancelUntil = 0;
     this.aimingProp = null;
-    this.aimGuideNode?.destroy();
-    this.aimGuideNode = null;
+    this.aimEffectPreviewNode?.destroy();
+    this.aimEffectPreviewNode = null;
+    this.aimDirectionNode?.destroy();
+    this.aimDirectionNode = null;
     this.aimTargetNode?.destroy();
     this.aimTargetNode = null;
     this.paperAimShadowNode?.destroy();
@@ -2220,6 +2942,16 @@ export class GameRunner extends Component {
     this.aimLockSec = 0;
     this.aimPerfectReady = false;
     this.aimTargetValid = true;
+    this.aimRecommendationSlot = -1;
+    this.aimManualTargeting = false;
+    this.aimSelectionX = 0;
+    this.aimInitialSelectionX = 0;
+    this.aimLockedCardId = null;
+    this.aimLockedCardOffset = 0;
+    this.aimGestureLastMs = 0;
+    this.aimReleaseVelocityY = 0;
+    this.aimCancelArmed = false;
+    this.activeAimTouchId = null;
     if (this.propInteractionState !== 'launching') this.propInteractionState = 'idle';
     if (this.propButtons) {
       const vis = view.getVisibleSize();
@@ -2227,39 +2959,41 @@ export class GameRunner extends Component {
     }
   }
 
-  private animatePaperThrow(prop: PropType, slot: number, quality: HitQuality, onArrive: () => void): void {
+  private animatePaperThrow(prop: PropType, slot: number, quality: HitQuality, strength: number, onArrive: () => void): void {
     const paper = this.paperAimNode?.isValid ? this.paperAimNode : this.makePaperWadNode(prop, 'PaperWadThrow');
     const tuning = this.paperTuning(prop);
     const outcome = this.paperOutcome(prop, slot);
     const start = this.aimPoint.clone();
     const end = this.targetPointForSlot(slot);
-    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight, 0);
+    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight * (1 + strength * 0.34), 0);
     if (!paper.parent) this.node.addChild(paper);
     paper.setPosition(start);
     paper.setScale(tuning.startScale);
     const op = paper.getComponent(UIOpacity) ?? paper.addComponent(UIOpacity);
     op.opacity = 255;
-    this.emitLaunchBurst(start, prop);
-    this.releaseAimFeedback(prop);
-    const outDuration = tuning.duration * (prop === PT.ThrowPot ? 0.42 : 0.48);
-    const inDuration = Math.max(0.08, tuning.duration - outDuration);
-    const launchScale = new Vec3(tuning.startScale.x * 1.16, tuning.startScale.y * 0.76, 1);
+    this.emitLaunchBurst(start, prop, strength);
+    this.releaseAimFeedback(prop, strength);
+    const flightDuration = tuning.duration * (1 - strength * 0.36);
+    const outDuration = flightDuration * (prop === PT.ThrowPot ? 0.42 : 0.48);
+    const inDuration = Math.max(0.08, flightDuration - outDuration);
+    const launchScale = new Vec3(tuning.startScale.x * (1.16 + strength * 0.32), tuning.startScale.y * (0.76 - strength * 0.14), 1);
+    const spin = tuning.spin * (1 + strength * 0.72);
     tween(paper)
       .to(UiTokens.feedback.releaseSquashSec, { scale: launchScale }, { easing: 'quadOut' })
-      .to(outDuration, { position: peak, angle: tuning.spin * 0.52, scale: tuning.midScale }, { easing: 'quadOut' })
-      .to(inDuration, { position: end, angle: tuning.spin, scale: tuning.endScale }, { easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn' })
+      .to(outDuration, { position: peak, angle: spin * 0.52, scale: tuning.midScale }, { easing: 'quadOut' })
+      .to(inDuration, { position: end, angle: spin, scale: tuning.endScale }, { easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn' })
       .call(() => {
         onArrive();
         this.propInteractionState = 'idle';
-        this.paperImpact(end, prop, outcome);
-        this.paperOutcomeText(end, prop, outcome, quality);
+        this.paperImpact(end, prop, outcome, strength);
+        this.paperOutcomeText(end, prop, outcome, quality, strength);
         this.settlePaperWad(paper, op, prop, outcome);
       })
       .start();
   }
 
   /** 松手瞬间的局部发射反馈：短环 + 速度线，只创建一次，不参与拖动帧更新。 */
-  private emitLaunchBurst(origin: Vec3, prop: PropType): void {
+  private emitLaunchBurst(origin: Vec3, prop: PropType, strength = 0): void {
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
     const node = new Node('PropLaunchBurst');
@@ -2275,16 +3009,17 @@ export class GameRunner extends Component {
     g.stroke();
     g.strokeColor = new Color(255, 252, 241, 225);
     g.lineWidth = 2.5;
-    for (let i = 0; i < 8; i++) {
-      const a = i * Math.PI / 4;
+    const rayCount = strength >= 0.58 ? 12 : 8;
+    for (let i = 0; i < rayCount; i++) {
+      const a = i * Math.PI * 2 / rayCount;
       g.moveTo(Math.cos(a) * 39, Math.sin(a) * 39);
-      g.lineTo(Math.cos(a) * 52, Math.sin(a) * 52);
+      g.lineTo(Math.cos(a) * (52 + strength * 14), Math.sin(a) * (52 + strength * 14));
     }
     g.stroke();
     const op = node.addComponent(UIOpacity);
     op.opacity = 220;
     tween(node)
-      .to(0.16, { scale: new Vec3(1.24, 1.24, 1), angle: 12 }, { easing: 'quadOut' })
+      .to(0.16, { scale: new Vec3(1.24 + strength * 0.24, 1.24 + strength * 0.24, 1), angle: 12 + strength * 10 }, { easing: 'quadOut' })
       .call(() => { if (node.isValid) node.destroy(); })
       .start();
     tween(op).to(0.16, { opacity: 0 }, { easing: 'quadIn' }).start();
@@ -2331,7 +3066,7 @@ export class GameRunner extends Component {
     return 'hit';
   }
 
-  private paperImpact(pos: Vec3, prop: PropType, outcome: PaperOutcome): void {
+  private paperImpact(pos: Vec3, prop: PropType, outcome: PaperOutcome, strength = 0): void {
     const ring = new Node('PaperImpact');
     ring.layer = 1 << 25;
     ring.addComponent(UITransform).setContentSize(64, 64);
@@ -2349,7 +3084,7 @@ export class GameRunner extends Component {
     ring.setPosition(pos);
     const op = ring.addComponent(UIOpacity);
     op.opacity = miss ? 130 : prop === PT.ThrowPot ? 230 : 180;
-    const scale = miss ? 0.9 : prop === PT.ThrowPot ? 1.55 : prop === PT.ChangeDemand ? 1.35 : 1.2;
+    const scale = (miss ? 0.9 : prop === PT.ThrowPot ? 1.55 : prop === PT.ChangeDemand ? 1.35 : 1.2) * (1 + strength * 0.55);
     tween(ring)
       .to(UiTokens.feedback.impactSec, { scale: new Vec3(scale, scale, 1) }, { easing: 'quadOut' })
       .call(() => { if (ring.isValid) ring.destroy(); })
@@ -2357,10 +3092,12 @@ export class GameRunner extends Component {
     tween(op).to(UiTokens.feedback.impactSec, { opacity: 0 }, { easing: 'quadOut' }).start();
   }
 
-  private paperOutcomeText(pos: Vec3, prop: PropType, outcome: PaperOutcome, quality: HitQuality = HQ.Normal): void {
+  private paperOutcomeText(pos: Vec3, prop: PropType, outcome: PaperOutcome, quality: HitQuality = HQ.Normal, strength = 0): void {
     const idx = GameRunner.PROP_TYPES.indexOf(prop);
     const base = GameRunner.PROP_COLORS[idx] ?? new Color(255, 255, 255);
-    const text = quality === HQ.Perfect && outcome === 'hit' ? 'PERFECT!' : this.paperOutcomeLabel(prop, outcome);
+    const text = quality === HQ.Perfect && outcome === 'hit'
+      ? 'PERFECT!'
+      : strength >= 0.68 && outcome === 'hit' ? '重甩!' : this.paperOutcomeLabel(prop, outcome);
     const color = quality === HQ.Perfect
       ? new Color(UiTokens.color.gold.r, UiTokens.color.gold.g, UiTokens.color.gold.b, 255)
       : outcome === 'hit' ? new Color(base.r, base.g, base.b, 255) : new Color(120, 115, 108, 255);
@@ -2369,7 +3106,7 @@ export class GameRunner extends Component {
     node.addComponent(UITransform).setContentSize(96, 34);
     const label = node.addComponent(Label);
     label.string = text;
-    label.fontSize = quality === HQ.Perfect ? 25 : outcome === 'hit' && prop === PT.ThrowPot ? 24 : 20;
+    label.fontSize = quality === HQ.Perfect || strength >= 0.68 ? 25 : outcome === 'hit' && prop === PT.ThrowPot ? 24 : 20;
     label.lineHeight = label.fontSize + 4;
     label.isBold = true;
     label.color = color;
@@ -2474,8 +3211,6 @@ export class GameRunner extends Component {
    */
   private renderPropHUD(): void {
     if (!this.propButtons) return;
-    // 投掷滑轨出现后四个按钮全部隐藏；此时继续每帧重画 4 套键帽只会制造拖动卡顿。
-    if (this.aimingProp !== null) return;
     this.propButtonNodes.forEach((btn: Node, i: number) => {
       const type = GameRunner.PROP_TYPES[i];
       const st = this.game.prop.getState(type);
@@ -2744,7 +3479,38 @@ export class GameRunner extends Component {
       }
     }
 
-    this.updateLowerHud(Math.round(snap.approval), snap.zone);
+    const queueText = this.monitorEntryLabelNode?.getChildByName('QueueText')?.getComponent(Label);
+    if (queueText) {
+      const forecast = this.game.getThreatForecast(3);
+      const delta = Math.round(forecast.delta);
+      const deltaText = `${delta >= 0 ? '+' : ''}${delta}`;
+      if (snap.bossActive) {
+        queueText.string = `临检中 ${deltaText}`;
+        queueText.color = UiTokens.color.danger;
+      } else if (snap.nextBossInSec !== null) {
+        queueText.string = snap.nextBossInSec <= 6
+          ? `临检${Math.ceil(snap.nextBossInSec)}s ${deltaText}`
+          : forecast.label;
+        queueText.color = snap.nextBossInSec <= 6 || forecast.projectedApproval >= 70
+          ? UiTokens.color.danger
+          : delta >= 8 ? UiTokens.color.gold : GameRunner.START_MUTED;
+      } else {
+        queueText.string = forecast.label;
+        queueText.color = forecast.projectedApproval >= 70
+          ? UiTokens.color.danger
+          : delta >= 8 ? UiTokens.color.gold : GameRunner.START_MUTED;
+      }
+    }
+
+    this.maybeShowOnboardingNudge();
+    this.updateLowerHud(
+      Math.round(snap.approval),
+      snap.zone,
+      remain,
+      snap.huntProgress,
+      snap.huntThreshold,
+      snap.huntHoldSec,
+    );
 
     const cards = this.game.conveyor.cards;
     this.ensureSlotBackgrounds();
@@ -2757,6 +3523,7 @@ export class GameRunner extends Component {
       }
     }
     this.syncCardVisuals(cards);
+    this.maybeShowHighRiskTip(cards);
 
     if (this.scanIndicator) {
       // 指针拖动时使用新的吸附目标圈；旧扫描指示器只保留给键盘蓄力兜底，避免双重光圈抢视觉。
@@ -2772,6 +3539,34 @@ export class GameRunner extends Component {
     }
 
     this.renderPropHUD();
+  }
+
+  /** 前三关目标迟迟没有进展时给一次短提示，不暂停、不遮挡操作区。 */
+  private maybeShowOnboardingNudge(): void {
+    if (this.onboardingNudgeShown || !this.game || this.game.over) return;
+    const snap = this.game.getSnapshot();
+    const cue = onboardingNudge({
+      levelIndex: this.session.currentIndex,
+      elapsedSec: snap.elapsed,
+      bestStars: bestStarsFor(this.session.profile, this.session.currentIndex),
+      effectiveHits: this.game.effectiveHits,
+      perfectHits: this.game.perfectHits,
+      huntProgress: snap.huntProgress,
+      huntThreshold: snap.huntThreshold,
+      huntHoldSec: snap.huntHoldSec,
+    });
+    if (!cue) return;
+    if (snap.elapsed <= this.eventTextUntilSec && this.eventTextPriority > 7) return;
+    this.onboardingNudgeShown = true;
+    this.setEventText(cue, 4.8, 7);
+  }
+
+  /** 高危卡第一次出现时只占用事件提示行，不弹窗、不暂停传送带。 */
+  private maybeShowHighRiskTip(cards: Array<Card | null>): void {
+    if (this.highRiskTipShown || !cards.some((card) => card?.state === CS.ActiveWhite && card.isThreat && card.weight >= 7)) return;
+    this.highRiskTipShown = true;
+    sys.localStorage?.setItem(GameRunner.HIGH_RISK_TIP_KEY, '1');
+    this.setEventText('首次高危：橙红角标越大，进处理区时风险越高 · 优先用“改需求”压低权重', 4.8, 8);
   }
 
   /** 为每个传送带卡槽创建 Graphics 背景节点。背景跟随卡槽自身，避免被显示器层级吞掉。 */
@@ -2809,7 +3604,7 @@ export class GameRunner extends Component {
     const h = ut.height;
     if (w <= 0 || h <= 0) return;
     const signature = card
-      ? `${Math.round(w)}x${Math.round(h)}|${card.category}|${card.state}|${card.weight}|${card.isThreat ? 1 : 0}`
+      ? `${Math.round(w)}x${Math.round(h)}|${card.category}|${card.state}|${card.weight}|${card.isThreat ? 1 : 0}|${card.elite ? 1 : 0}|${card.guard ?? 0}|${card.linkId ?? 0}`
       : `${Math.round(w)}x${Math.round(h)}|empty`;
     if (this.cardBackgroundSignatures.get(bg.uuid) === signature) return;
     this.cardBackgroundSignatures.set(bg.uuid, signature);
@@ -2862,6 +3657,98 @@ export class GameRunner extends Component {
       : card.state === CS.Boss ? 'boss'
       : 'active';
     UiPainter.card(g, w, h, base, shellState);
+
+    if (card.elite) {
+      const shieldColor = (card.guard ?? 0) > 0 ? new Color(76, 169, 205, 255) : new Color(126, 114, 99, 210);
+      const sx = w * 0.29;
+      const sy = h * 0.29;
+      g.fillColor = alphaColor(shieldColor, 225);
+      g.strokeColor = alphaColor(Color.WHITE, 220);
+      g.lineWidth = 2;
+      g.moveTo(sx, sy + 10);
+      g.lineTo(sx + 10, sy + 5);
+      g.lineTo(sx + 7, sy - 8);
+      g.lineTo(sx, sy - 14);
+      g.lineTo(sx - 7, sy - 8);
+      g.lineTo(sx - 10, sy + 5);
+      g.close();
+      g.fill(); g.stroke();
+    }
+    if (card.linkId !== undefined && (card.linkBonus ?? 0) > 0) {
+      const lx = w * 0.29;
+      const ly = -h * 0.10;
+      g.strokeColor = alphaColor(UiTokens.color.gold, 235);
+      g.lineWidth = 3;
+      g.circle(lx - 5, ly + 5, 5);
+      g.circle(lx + 5, ly - 5, 5);
+      g.moveTo(lx - 1, ly + 1);
+      g.lineTo(lx + 1, ly - 1);
+      g.stroke();
+    }
+
+    const isBoss = card.state === CS.Boss;
+    const isRework = card.state === CS.Rework;
+    const severity = isBoss ? 3 : card.isThreat && card.weight >= 10 ? 3
+      : card.isThreat && card.weight >= 7 ? 2
+      : card.isThreat && card.weight >= 5 ? 1
+      : 0;
+    if (severity > 0 || isRework) {
+      const alertColor = isRework ? UiTokens.color.good
+        : severity >= 3 ? UiTokens.color.danger
+        : severity === 2 ? new Color(230, 113, 58, 255)
+        : UiTokens.color.gold;
+      const chipW = Math.max(26, w * 0.34);
+      const chipH = Math.max(17, h * 0.16);
+      const chipX = -w * 0.27;
+      const chipY = h * 0.30;
+      g.fillColor = alphaColor(alertColor, 235);
+      g.roundRect(chipX - chipW / 2, chipY - chipH / 2, chipW, chipH, chipH / 2);
+      g.fill();
+
+      // 高危卡多一条侧边警示带，在快速移动中也能靠轮廓辨认，而非只靠小字。
+      if (severity >= 2) {
+        const bandW = Math.max(4, w * 0.055);
+        g.fillColor = alertColor;
+        g.roundRect(-w / 2 + 3, -h * 0.28, bandW, h * 0.56, bandW / 2);
+        g.fill();
+      }
+      if (severity >= 3) {
+        g.strokeColor = alphaColor(alertColor, 210);
+        g.lineWidth = 2.5;
+        g.roundRect(-w / 2 + 3, -h / 2 + 3, w - 6, h - 6, Math.min(13, w * 0.15));
+        g.stroke();
+      }
+      if (severity >= 2 && !isBoss) {
+        // 高危任务使用三道斜切刻痕；即使看不清角标，也能靠轮廓快速识别。
+        g.strokeColor = alphaColor(alertColor, 210);
+        g.lineWidth = 2.5;
+        for (let i = 0; i < 3; i++) {
+          const x = w * 0.18 + i * 7;
+          g.moveTo(x, -h * 0.34);
+          g.lineTo(x + 7, -h * 0.22);
+        }
+        g.stroke();
+      }
+      if (isBoss) {
+        const fullScan = this.game.level.def.boss.inspectionLimit === undefined;
+        const bossColor = fullScan ? new Color(164, 42, 42, 255) : alertColor;
+        g.fillColor = alphaColor(bossColor, 238);
+        g.roundRect(-w * 0.34, -h * 0.44, w * 0.68, Math.max(18, h * 0.19), 8);
+        g.fill();
+        g.strokeColor = alphaColor(Color.WHITE, 170);
+        g.lineWidth = fullScan ? 3 : 2;
+        const scanY = h * 0.03;
+        g.moveTo(-w * 0.28, scanY);
+        g.lineTo(w * 0.28, scanY);
+        g.stroke();
+        if (fullScan) {
+          g.strokeColor = alphaColor(bossColor, 220);
+          g.lineWidth = 2;
+          g.roundRect(-w / 2 + 7, -h / 2 + 7, w - 14, h - 14, Math.min(11, w * 0.13));
+          g.stroke();
+        }
+      }
+    }
   }
 
   private renderSlot(node: Node, card: Card | null, slotIndex: number): void {
@@ -2897,21 +3784,29 @@ export class GameRunner extends Component {
 
     // 任务卡在移动端尺寸有限，底部小字会和图标/角标抢层级，显得碎且廉价。
     // 语义交给大图标和类别角标表达，保留更干净的游戏道具感。
-    title.enabled = false;
-    title.string = getCardDef(card.category).label;
+    const bossLimit = card.state === 'boss' ? this.game.level.def.boss.inspectionLimit : undefined;
+    const modifierTitle = card.state === CS.Rework
+      ? '返工 · 抵达减分'
+      : card.elite && (card.guard ?? 0) > 0
+        ? card.linkId !== undefined ? '精英盾1·抱团' : '精英·盾1'
+        : card.linkId !== undefined ? `抱团+${card.linkBonus ?? 1}` : '';
+    title.enabled = card.state === 'boss' || !!modifierTitle;
+    title.string = card.state === 'boss' ? (bossLimit === undefined ? '全量扫描' : `抽查${bossLimit}张`) : modifierTitle || getCardDef(card.category).label;
     title.color = Color.WHITE;
     title.isBold = true;
 
-    const weightText = card.state === 'boss' ? '!'
-      : card.isThreat ? `+${card.weight}`
+    const weightText = card.state === 'boss' ? (bossLimit === undefined ? '全' : `查${bossLimit}`)
       : card.state === 'rework' ? `-${card.weight}`
+      : card.isThreat ? `+${card.weight}`
       : card.weight > 0 ? `+${card.weight}` : '';
-    value.enabled = false;
+    const showWeight = card.state === 'boss'
+      || card.state === 'rework'
+      || (card.isThreat && card.weight >= 5);
+    value.enabled = showWeight;
     value.string = weightText;
-    value.color = card.state === 'rework' ? new Color(255, 248, 185, 255)
-      : card.state === 'boss' ? new Color(255, 232, 120, 255)
-      : new Color(255, 252, 242, 232);
+    value.color = new Color(255, 252, 242, 255);
     value.isBold = true;
+    if (showWeight) value.node.setSiblingIndex(node.children.length - 1);
   }
 
   private spriteChild(parent: Node, name: string, siblingIndex: number): Sprite {
@@ -3146,7 +4041,7 @@ export class GameRunner extends Component {
   }
 
   private cardSignature(card: Card): string {
-    return `${card.id}:${card.category}:${card.state}:${card.weight}:${card.isThreat ? 1 : 0}`;
+    return `${card.id}:${card.category}:${card.state}:${card.weight}:${card.isThreat ? 1 : 0}:${card.elite ? 1 : 0}:${card.guard ?? 0}:${card.linkId ?? 0}:${card.linkBonus ?? 0}`;
   }
 
   /** 队列图标使用独立子节点，避免与槽位本身的 Label 渲染器争用同一节点。 */
@@ -3659,13 +4554,12 @@ export class GameRunner extends Component {
         this.charNode.layer = LAYER_2D;
         this.charNode.parent = this.node;
         this.charNode.addComponent(UITransform);
-        const sprite = this.charNode.addComponent(Sprite);
-        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        sprite.spriteFrame = charSf;
       }
+      if (!this.characterRigView) this.characterRigView = new CharacterRigView(this.charNode, charSf);
+      else this.characterRigView.setSpriteFrame(charSf);
       const charH = Math.min(deskH * 0.84, visSize.height * 0.210);
       const charW = charH * GameRunner.CHAR_ASPECT;
-      this.charNode.getComponent(UITransform)!.setContentSize(charW, charH);
+      this.characterRigView.layout(charW, charH);
       const keyboardRestY = objectTableFrontY + tableDepth * 0.26;
       this.charNode.setPosition(0, deskY + keyboardRestY + charH * 0.11, 0);
       this.charNode.setSiblingIndex(3);
@@ -3685,6 +4579,82 @@ export class GameRunner extends Component {
     this.deskItemNodes.forEach((node) => { if (node?.isValid) node.active = playing; });
     if (this.deskDecorNode) this.deskDecorNode.active = false;
     if (this.actionDockNode) this.actionDockNode.active = playing && this.aimingProp !== null;
+    this.layoutPauseButton(hudY, pillH);
+
+    if (!this.pressureAtmosphereNode) {
+      this.pressureAtmosphereNode = new Node('PressureAtmosphere');
+      this.pressureAtmosphereNode.layer = LAYER_2D;
+      this.pressureAtmosphereNode.parent = this.node;
+      this.pressureAtmosphereView = new PressureAtmosphereView(this.pressureAtmosphereNode);
+    }
+    this.pressureAtmosphereView?.layout(visSize.width, visSize.height);
+    this.pressureAtmosphereNode.setSiblingIndex(this.node.children.length - 1);
+    this.pressureAtmosphereNode.active = playing;
+    this.updateAmbientPresentation(0);
+  }
+
+  private layoutPauseButton(hudY: number, referenceHeight: number): void {
+    if (!this.pauseButtonNode) {
+      const node = new Node('PauseButton');
+      node.layer = 1 << 25;
+      node.parent = this.node;
+      node.addComponent(UITransform);
+      node.addComponent(Graphics);
+      node.on(Node.EventType.TOUCH_START, () => node.setScale(0.94, 0.94, 1));
+      node.on(Node.EventType.TOUCH_CANCEL, () => node.setScale(1, 1, 1));
+      node.on(Node.EventType.TOUCH_END, () => {
+        node.setScale(1, 1, 1);
+        this.sensory.unlock();
+        this.sensory.play('press');
+        this.setPaused(true);
+      });
+      this.pauseButtonNode = node;
+    }
+    const node = this.pauseButtonNode;
+    const size = Math.min(52, Math.max(44, referenceHeight * 0.78));
+    node.getComponent(UITransform)!.setContentSize(size + 10, size + 10);
+    node.setPosition(0, hudY, 0);
+    node.setSiblingIndex(this.node.children.length - 1);
+    node.active = this.uiState === 'playing' && !this.paused;
+    const g = node.getComponent(Graphics)!;
+    g.clear();
+    g.fillColor = new Color(54, 48, 42, 30);
+    g.circle(2, -4, size / 2);
+    g.fill();
+    g.fillColor = new Color(255, 252, 246, 252);
+    g.strokeColor = new Color(211, 196, 177, 235);
+    g.lineWidth = 1.5;
+    g.circle(0, 0, size / 2);
+    g.fill(); g.stroke();
+    g.fillColor = UiTokens.color.inkDeep;
+    const barW = Math.max(3.5, size * 0.09);
+    const barH = size * 0.34;
+    const gap = size * 0.10;
+    g.roundRect(-gap - barW, -barH / 2, barW, barH, barW / 2);
+    g.roundRect(gap, -barH / 2, barW, barH, barW / 2);
+    g.fill();
+  }
+
+  /** 角色微动和常驻边缘氛围只读取快照，不参与任何玩法判定。 */
+  private updateAmbientPresentation(dt: number): void {
+    if (!this.game) return;
+    const snap = this.game.getSnapshot();
+    const remainingSec = Math.max(0, snap.duration - snap.elapsed);
+    this.characterRigView?.update(dt, {
+      zone: snap.zone,
+      phase: snap.phase,
+      combo: snap.combo,
+      frozen: snap.frozen,
+    });
+    this.pressureAtmosphereView?.update(dt, {
+      zone: snap.zone,
+      phase: snap.phase,
+      remainingSec,
+      nextBossInSec: snap.nextBossInSec,
+      bossActive: snap.bossActive,
+      lastChanceImminent: snap.lastChanceImminent,
+      playing: this.uiState === 'playing' && !this.game.over && !this.paused,
+    });
   }
 
   /** 认可度仪表：尺寸与状态由 ApprovalGaugeView 统一管理。 */
@@ -3715,11 +4685,46 @@ export class GameRunner extends Component {
     node.active = this.uiState === 'playing';
   }
 
-  private updateLowerHud(approval: number, zone: string): void {
+  private updateLowerHud(
+    approval: number,
+    zone: string,
+    remainingSec = 0,
+    huntProgress = 0,
+    huntThreshold = 18,
+    huntHoldSec = 2,
+  ): void {
     const elapsed = this.game?.getSnapshot().elapsed ?? 0;
-    const displayZone = approval >= 69 ? 'danger' : approval >= 49 ? 'ok' : approval >= 18 ? 'good' : zone;
     const hint = elapsed <= this.eventTextUntilSec ? this.lastEventText : '';
-    this.approvalGaugeView?.update(approval, displayZone, hint, elapsed);
+    const objective = this.objectiveHudText();
+    this.approvalGaugeView?.update(
+      approval,
+      zone,
+      hint,
+      elapsed,
+      remainingSec,
+      huntProgress,
+      huntThreshold,
+      huntHoldSec,
+      objective,
+    );
+  }
+
+  private objectiveHudText(): string {
+    const objective = this.game?.getObjectiveSnapshot();
+    if (!objective) return '';
+    if (objective.mode === 'hunt') {
+      const pct = objective.target > 0 ? Math.round(objective.current / objective.target * 100) : 0;
+      return `反杀锁定 ${Math.min(100, pct)}%${objective.complete ? ' ✓' : ''}`;
+    }
+    if (objective.mode === 'guard') {
+      const name = objective.kind === 'boss-safe' ? '临检生效' : '失误';
+      return `${name} ${Math.round(objective.current)} 次 · 保持 0${objective.complete ? ' ✓' : ''}`;
+    }
+    const name = objective.kind === 'effective-hits' ? '有效命中'
+      : objective.kind === 'perfect' ? 'Perfect'
+        : objective.kind === 'combo' ? '最高连击'
+          : objective.prop ? this.propDisplayName(objective.prop) : '目标';
+    return `${name} ${Math.min(objective.target, Math.round(objective.current))}/${objective.target}${objective.complete ? ' ✓' : ''}`;
   }
 
   /** 把 Belt 下的 6 个卡槽横向等距重新排布到指定区域内（居中）。 */
@@ -3818,7 +4823,9 @@ export class GameRunner extends Component {
     this.ensurePropButtonBackgrounds();
     this.propButtonNodes.forEach((btn: Node, i: number) => {
       const x = startX + i * (btnW + gap);
-      btn.active = !choosing;
+      btn.active = true;
+      const buttonOpacity = btn.getComponent(UIOpacity) ?? btn.addComponent(UIOpacity);
+      buttonOpacity.opacity = choosing ? (i === aimingIndex ? 255 : 82) : 255;
       let ut = btn.getComponent(UITransform);
       if (!ut) ut = btn.addComponent(UITransform);
       ut.setContentSize(btnW, btnH);
@@ -3841,7 +4848,9 @@ export class GameRunner extends Component {
 
       const bg = this.propButtonBackgrounds[i];
       if (bg) {
-        bg.active = !choosing;
+        bg.active = true;
+        const bgOpacity = bg.getComponent(UIOpacity) ?? bg.addComponent(UIOpacity);
+        bgOpacity.opacity = choosing ? (i === aimingIndex ? 255 : 82) : 255;
         bg.getComponent(UITransform)!.setContentSize(btnW, btnH);
         bg.setPosition(x, 0, 0);
       }
@@ -3908,6 +4917,7 @@ class CocosStorage implements Storage {
       highestUnlockedLevel: p.highestUnlockedLevel,
       huntWinCount: p.huntWinCount,
       star3Levels: p.star3Levels,
+      bestStars: p.bestStars,
       achievements: p.achievements,
       cosmetics: p.cosmetics,
       dailyRecords: p.dailyRecords,

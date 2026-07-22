@@ -10,7 +10,18 @@
     "crisis": { "routine": 0.22, "report": 0.20, "key": 0.21, "proposal": 0.24, "urgent": 0.13 }
   },
   "idleCardRatio": 0.16,
-  "boss": { "enabled": true, "minSpawnSec": 25 },
+  "taskModifiers": {
+    "eliteRatio": { "early": 0.00, "mid": 0.04, "crisis": 0.08 },
+    "linkRatio": { "early": 0.03, "mid": 0.08, "crisis": 0.12 },
+    "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 1
+  },
+  "boss": {
+    "enabled": true,
+    "minSpawnSec": 25,
+    "scheduleSec": [30],
+    "patternLabel": "喘息抽查 · 最多2张 · 30秒",
+    "inspectionLimit": 2
+  },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],
   "objective": { "kind": "no-miss", "label": "有 Boss 的甜点关保持零失误" },
   "hook": "最后喘息：Boss 还在，但这一轮要求干净利落",

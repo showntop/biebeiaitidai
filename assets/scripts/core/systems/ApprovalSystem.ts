@@ -44,6 +44,12 @@ export class ApprovalSystem {
   get currentResult(): GameResult {
     return this.result;
   }
+  /** 当前猎杀式通关的维持进度，供 HUD 反馈使用；不参与规则判定。 */
+  get huntProgress(): number {
+    const holdSec = this.cfg.zones.hunt.holdSec ?? Infinity;
+    if (!Number.isFinite(holdSec) || holdSec <= 0) return 0;
+    return clamp(this.huntHoldAccum / holdSec, 0, 1);
+  }
 
   /** 拍马屁冻结开关：冻结期间不结算、不计时猎杀维持（卡都静止）。 */
   setFrozen(frozen: boolean): void {

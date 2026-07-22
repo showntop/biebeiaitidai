@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryTelemetrySink, RunTelemetry } from '../assets/scripts/core/Telemetry';
+import { CompositeTelemetrySink, MemoryTelemetrySink, RunTelemetry } from '../assets/scripts/core/Telemetry';
 import type { RunReport } from '../assets/scripts/core/RunReport';
 
 function report(result: RunReport['result'] = 'win-survive'): RunReport {
@@ -25,6 +25,24 @@ function report(result: RunReport['result'] = 'win-survive'): RunReport {
 }
 
 describe('RunTelemetry', () => {
+  it('组合出口会隔离单个 SDK 故障并继续写入可靠缓冲', () => {
+    const delivered = new MemoryTelemetrySink();
+    let flushes = 0;
+    const sink = new CompositeTelemetrySink([
+      { emit: () => { throw new Error('sdk unavailable'); }, flush: () => { throw new Error('flush unavailable'); } },
+      delivered,
+      { emit: () => undefined, flush: () => { flushes++; } },
+    ]);
+    const telemetry = new RunTelemetry(sink, {
+      sessionId: 'fanout', platform: 'test', deviceTier: 'mid', appVersion: '0.1.0',
+    }, () => 1);
+
+    telemetry.runtimeSignal('boot-ok');
+
+    expect(delivered.events.map((event) => event.name)).toEqual(['session_start', 'runtime_signal']);
+    expect(flushes).toBe(1);
+  });
+
   it('首个漏斗事件按局去重并保留耗时', () => {
     let now = 1000;
     const sink = new MemoryTelemetrySink();

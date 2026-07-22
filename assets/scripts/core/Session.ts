@@ -10,12 +10,47 @@
  */
 import { LevelSequence, getLevel, allowedPropsForLevel } from './config';
 import type { PropType } from './types';
-import { createProfile, applyDailyChallengeResult, applyRunResult, rankOf, RankLabels, hydrateProfile } from './profile';
-import type { PlayerProfile } from './profile';
+import { applyDailyChallengeResult, applyRunResult, bestStarsFor, rankOf, rankScore, RankLabels, hydrateProfile, totalStars } from './profile';
+import type { AchievementId, CosmeticId, PlayerProfile, Rank } from './profile';
 import type { RunReport } from './RunReport';
 import type { ChallengeSpec } from './SocialChallenge';
 
 export type SessionPhase = 'ready' | 'playing' | 'finished';
+
+export interface DailyProgressionResult {
+  score: number;
+  previousBest: number | null;
+  best: number;
+  firstAttempt: boolean;
+  newRecord: boolean;
+}
+
+/** 一局结束后可直接交给表现层的成长增量；不包含任何付费或战斗数值奖励。 */
+export interface ProgressionResult {
+  mode: 'main' | 'daily' | 'friend';
+  rankBefore: Rank;
+  rankAfter: Rank;
+  rankScoreBefore: number;
+  rankScoreAfter: number;
+  totalStarsBefore: number;
+  totalStarsAfter: number;
+  bestStarsBefore: number;
+  bestStarsAfter: number;
+  unlockedNextLevel: boolean;
+  newAchievements: AchievementId[];
+  newCosmetics: CosmeticId[];
+  daily: DailyProgressionResult | null;
+}
+
+interface ProgressionSnapshot {
+  rank: Rank;
+  rankScore: number;
+  totalStars: number;
+  bestStars: number;
+  highestUnlockedLevel: number;
+  achievements: Set<AchievementId>;
+  cosmetics: Set<CosmeticId>;
+}
 
 /** 档案持久化接口（由表现层实现：微信 wx.setStorageSync / 浏览器 LocalStorage 等）。 */
 export interface Storage {
@@ -50,6 +85,7 @@ export class Session {
   readonly profile: PlayerProfile;
   currentIndex: number;
   lastReport: RunReport | null = null;
+  lastProgression: ProgressionResult | null = null;
   phase: SessionPhase = 'ready';
   activeChallenge: ChallengeSpec | null = null;
 
@@ -95,6 +131,7 @@ export class Session {
     this.currentIndex = clamp(idx, 0, LevelSequence.length - 1);
     this.phase = 'playing';
     this.lastReport = null;
+    this.lastProgression = null;
     this.activeChallenge = null;
     return true;
   }
@@ -106,6 +143,7 @@ export class Session {
     this.activeChallenge = spec;
     this.phase = 'playing';
     this.lastReport = null;
+    this.lastProgression = null;
     return true;
   }
 
@@ -126,14 +164,56 @@ export class Session {
    */
   finishLevel(report: RunReport): void {
     this.lastReport = report;
+    const challenge = this.activeChallenge;
+    const dailyKey = challenge?.mode === 'daily' ? challenge.keyHash.toString(36) : null;
+    const previousDaily = dailyKey ? this.profile.dailyRecords.find((record) => record.key === dailyKey) : undefined;
+    const before = this.progressionSnapshot();
+    let dailyScore: number | null = null;
     if (!this.activeChallenge) {
       applyRunResult(this.profile, this.currentIndex, report);
       this.storage.saveProfile(this.profile);
     } else if (this.activeChallenge.mode === 'daily') {
-      applyDailyChallengeResult(this.profile, this.activeChallenge.keyHash.toString(36), report);
+      dailyScore = applyDailyChallengeResult(this.profile, dailyKey!, report);
       this.storage.saveProfile(this.profile);
     }
+    const after = this.progressionSnapshot();
+    const currentDaily = dailyKey ? this.profile.dailyRecords.find((record) => record.key === dailyKey) : undefined;
+    this.lastProgression = {
+      mode: !challenge ? 'main' : challenge.mode,
+      rankBefore: before.rank,
+      rankAfter: after.rank,
+      rankScoreBefore: before.rankScore,
+      rankScoreAfter: after.rankScore,
+      totalStarsBefore: before.totalStars,
+      totalStarsAfter: after.totalStars,
+      bestStarsBefore: before.bestStars,
+      bestStarsAfter: after.bestStars,
+      unlockedNextLevel: after.highestUnlockedLevel > before.highestUnlockedLevel,
+      newAchievements: [...after.achievements].filter((id) => !before.achievements.has(id)),
+      newCosmetics: [...after.cosmetics].filter((id) => !before.cosmetics.has(id)),
+      daily: dailyKey && dailyScore !== null && currentDaily
+        ? {
+          score: dailyScore,
+          previousBest: previousDaily?.score ?? null,
+          best: currentDaily.score,
+          firstAttempt: !previousDaily,
+          newRecord: !previousDaily || currentDaily.score > previousDaily.score,
+        }
+        : null,
+    };
     this.phase = 'finished';
+  }
+
+  private progressionSnapshot(): ProgressionSnapshot {
+    return {
+      rank: rankOf(this.profile),
+      rankScore: rankScore(this.profile),
+      totalStars: totalStars(this.profile),
+      bestStars: bestStarsFor(this.profile, this.currentIndex),
+      highestUnlockedLevel: this.profile.highestUnlockedLevel,
+      achievements: new Set(this.profile.achievements),
+      cosmetics: new Set(this.profile.cosmetics),
+    };
   }
 
   /** 下一关是否可进入（需通关解锁了下一关）。 */

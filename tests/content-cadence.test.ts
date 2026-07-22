@@ -46,6 +46,37 @@ describe('P3 · 前 10 分钟内容节奏', () => {
     expect(getLevel(9).boss.enabled).toBe(true);
   });
 
+  it('Boss 关使用清晰且递进的固定临检节拍', () => {
+    const bossLevels = LevelSequence.filter((level) => level.boss.enabled);
+    expect(bossLevels).toHaveLength(6);
+    bossLevels.forEach((level) => {
+      expect(level.boss.scheduleSec?.length).toBeGreaterThan(0);
+      expect(level.boss.patternLabel?.length).toBeGreaterThan(6);
+      expect(level.boss.scheduleSec).toEqual([...(level.boss.scheduleSec ?? [])].sort((a, b) => a - b));
+      expect((level.boss.scheduleSec ?? []).every((sec) => sec > 0 && sec < level.durationSec)).toBe(true);
+    });
+    expect(getLevel(9).boss.scheduleSec).toEqual([24]);
+    expect(getLevel(9).boss.inspectionLimit).toBe(2);
+    expect(getLevel(15).boss.inspectionLimit).toBe(2);
+    expect(getLevel(16).boss.inspectionLimit).toBe(3);
+    expect(getLevel(17).boss.inspectionLimit).toBe(3);
+    expect(getLevel(18).boss.inspectionLimit).toBe(2);
+    expect(getLevel(19).boss.inspectionLimit).toBeUndefined();
+    expect(getLevel(17).boss.scheduleSec).toHaveLength(3);
+    expect(getLevel(19).boss.scheduleSec).toHaveLength(3);
+  });
+
+  it('L11 起引入任务变体，后期 Boss 使用不同入场机制', () => {
+    expect(LevelSequence.slice(0, 10).every((level) => !level.taskModifiers)).toBe(true);
+    expect(LevelSequence.slice(10).every((level) => !!level.taskModifiers)).toBe(true);
+    expect(getLevel(10).taskModifiers?.maxElite).toBe(1);
+    expect(getLevel(17).taskModifiers?.eliteRatio.crisis).toBeGreaterThan(getLevel(10).taskModifiers?.eliteRatio.crisis ?? 0);
+    expect(getLevel(15).boss.arrivalEffect).toBe('escalate-highest');
+    expect(getLevel(16).boss.arrivalEffect).toBe('fortify-highest');
+    expect(getLevel(17).boss.arrivalEffect).toBe('fortify-all');
+    expect(getLevel(19).boss.arrivalEffect).toBe('fortify-all');
+  });
+
   it('11～20 关包含固定任务流、限道具和多类挑战', () => {
     const late = LevelSequence.slice(10);
     expect(late.filter((level) => typeof level.fixedSeed === 'number')).toHaveLength(5);

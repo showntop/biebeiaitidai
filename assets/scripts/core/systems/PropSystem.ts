@@ -23,7 +23,7 @@ interface PropRuntime {
  *  - §4.3 离散挡位瞄准：松手即命中当前高亮挡位的卡；Perfect 命中走可变奖励池。
  *  - §4.3-3 扫满后：有效目标则保持(不强制开火)，空挡/无效才自动脱手。
  *  - §4.3-4 取消手势不消耗次数。
- *  - §4.4 连击为纯演出层，不产生数值收益、不与 Perfect 奖励叠加。
+ *  - §4.4 连击跨阶段时返还当前纸团少量冷却；Perfect 奖励仍独立结算。
  *  - §5.4② Boss 资源保底：Boss 生成时若丢锅/拍马屁能量均<阈值，把丢锅充至保证值。
  *
  * 只读 BeltView 判定目标有效性；命中后发 CardHit 事件，由 ConveyorSystem 执行插入/污染/清空。
@@ -33,6 +33,7 @@ export class PropSystem {
   private charging: PropType | null = null;
   private scan = 0; // 蓄力扫描进度 [0..1]
   private combo = 0;
+  private perfectChain = 0;
   private lastHit = -Infinity;
   private clock = 0;
   private phase: GamePhase = 'early';
@@ -122,6 +123,12 @@ export class PropSystem {
     this.endCharge();
   }
 
+  /** 系统暂停/切后台时静默终止蓄力：不消耗、不冷却，也不记为玩家取消。 */
+  suspendCharge(): void {
+    if (this.charging === null) return;
+    this.endCharge();
+  }
+
   /** 拍马屁：点按即放、无需瞄准、无 Perfect。命中AI本体→请求冻结。 */
   useKissUp(): boolean {
     if (!this.canUse(PT.KissUp)) return false;
@@ -201,6 +208,7 @@ export class PropSystem {
         this.combo = 0;
         this.events.emit('ComboUpdated', { combo: 0 });
       }
+      this.breakPerfectChain();
       this.endCharge();
       return;
     }
@@ -220,6 +228,13 @@ export class PropSystem {
       this.events.emit('PerfectRewardGranted', { prop, reward });
     }
 
+    if (quality === HQ.Perfect) {
+      this.perfectChain++;
+      this.events.emit('PerfectChainUpdated', { chain: this.perfectChain });
+    } else {
+      this.breakPerfectChain();
+    }
+
     this.events.emit('CardHit', { prop, slot, quality, card: this.belt.slotAt(slot) ?? undefined });
 
     // 有效命中：加需求/改需求 回充丢锅能量 + 连击；丢锅自身不回充
@@ -230,6 +245,7 @@ export class PropSystem {
       else this.combo = 1;
       this.lastHit = this.clock;
       this.events.emit('ComboUpdated', { combo: this.combo });
+      this.applyComboReward(prop);
     }
 
     this.endCharge();
@@ -295,6 +311,29 @@ export class PropSystem {
   private cdForPhase(prop: PropType): number {
     const cd = PropsConfig[prop].cd!;
     return cd[this.phase];
+  }
+
+  /** 连击阶段奖励只返还当前出手道具的少量冷却，不改变任务风险数值。 */
+  private applyComboReward(prop: PropType): void {
+    const rewardIndex = this.cfg.combo.rewards.findIndex((reward) => reward.combo === this.combo);
+    if (rewardIndex < 0) return;
+    const reward = this.cfg.combo.rewards[rewardIndex];
+    const runtime = this.rt[prop];
+    const before = runtime.cdRemaining;
+    runtime.cdRemaining = Math.max(0, before - reward.cooldownReducedSec);
+    const actual = before - runtime.cdRemaining;
+    this.events.emit('ComboRewardGranted', {
+      combo: this.combo,
+      tier: Math.min(3, rewardIndex + 1) as 1 | 2 | 3,
+      label: reward.label,
+      cooldownReducedSec: actual,
+    });
+  }
+
+  private breakPerfectChain(): void {
+    if (this.perfectChain <= 0) return;
+    this.perfectChain = 0;
+    this.events.emit('PerfectChainUpdated', { chain: 0 });
   }
 
   private endCharge(): void {
