@@ -1,7 +1,7 @@
 # Cocos 表现层接入（M2 占位 → M3 关卡流）
 
 > 在 Cocos Creator 3.8.x 中搭场景，验证 core 规则层 + 关卡流（Session）能正确驱动画面。
-> GameRunner 负责流程组装；`PropDockView`、`ApprovalGaugeView`、`PropButtonView`、`TaskCardView`、`ResultDialogView` 已承接主要纯视图职责。
+> GameRunner 负责流程组装；`ApprovalGaugeView`、`PropButtonView`、`TaskCardView`、`ResultDialogView`、职业路线与配置校验模块已承接独立职责。
 
 ## 可复现视觉验收入口
 
@@ -61,14 +61,14 @@ Canvas
 4. **运行**（编辑器预览或微信小游戏构建）：
    - 进入"最高解锁关"（首次为第 1 关），当前反替代任务显示在顶部
    - 传送带 6 格刷新卡牌、认可度/分区/倒计时实时变化
-   - 长按加需求/改需求/甩锅 → 进入底部投掷滑轨 → 左右选择任务 → 金色准星表示 Perfect → 松手投出
+   - 轻点加需求/改需求/甩锅 → 自动快投推荐目标；按住拖甩 → 准星旁显示落点与预计收益 → 松手投出
    - 拍马屁是即时技能，点按后直接飞向 AI，不进入任务卡瞄准
    - 局结束 → 战报面板出现；通关显示下一关，失败只显示立即重试/复活/回到选关
    - 进度自动存档（微信 `wx.setStorageSync`，Web 预览走 `localStorage`）
 
 ## 注意事项（cc 层，需在编辑器实测）
 
-- GameRunner 的关卡流逻辑全部来自 `core/Session`（当前规则层共 132 项单测覆盖）；此处只做节点接线与渲染。
+- GameRunner 的关卡流逻辑全部来自 `core/Session`（当前规则层共 180+ 项单测覆盖）；此处只做节点接线与渲染。
 - 关卡/解锁/段位/战报数值若不一致，优先查 `assets/config/levels/*.json` 与 `core/profile.ts`，不在 cc 层调。
 - 占位渲染（文字+色块），美术资源接入后替换 `renderSlot`/`reportLabel` 的渲染即可，core 无需改动。
 
@@ -85,7 +85,7 @@ Canvas
 
 ## 排查：打不了 / 画面不动 / 按钮没反应
 
-几乎都是**编辑器侧节点问题**（core 逻辑在 132 个单测里正常），按顺序查：
+几乎都是**编辑器侧节点问题**（core 逻辑在 180+ 个单测里正常），按顺序查：
 
 1. **看 Console（浏览器预览按 F12，编辑器 Preview 看 Console）**
    - 有红色报错 → 把报错贴出来，多半是某节点没接（null）。

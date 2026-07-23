@@ -177,7 +177,7 @@ describe('关卡序列与解锁节奏', () => {
   });
 
   it('初始认可度：甜点关(L4)最低、第二小高峰(L9)较高', () => {
-    expect(LevelSequence[3].approvalInit).toBe(35); // L4 甜点最低
+    expect(LevelSequence[3].approvalInit).toBe(39); // L4 仍是喘息关，同时保留少量猎杀路线
     expect(LevelSequence[8].approvalInit).toBe(44); // L9 第二小高峰（调优后从47降到44）
     // L2/L3/L8 调优后降低
     expect(LevelSequence[1].approvalInit).toBe(40); // L2

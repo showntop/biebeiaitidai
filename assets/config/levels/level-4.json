@@ -3,13 +3,13 @@
   "title": "第4轮反击·喘息窗口",
   "durationSec": 55,
   "slots": 6,
-  "approvalInit": 35,
+  "approvalInit": 39,
   "whiteDistribution": {
     "early":  { "routine": 0.60, "report": 0.25, "key": 0.10, "proposal": 0.05, "urgent": 0.00 },
     "mid":    { "routine": 0.40, "report": 0.30, "key": 0.15, "proposal": 0.10, "urgent": 0.05 },
     "crisis": { "routine": 0.28, "report": 0.22, "key": 0.18, "proposal": 0.20, "urgent": 0.12 }
   },
-  "idleCardRatio": 0.20,
+  "idleCardRatio": 0.17,
   "boss": { "enabled": false, "minSpawnSec": 999 },
   "unlockedProps": ["add-demand", "change-demand"],
   "objective": { "kind": "no-miss", "label": "全程零失误" },

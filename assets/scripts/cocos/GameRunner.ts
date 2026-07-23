@@ -8,7 +8,7 @@ import { parseQaLaunchConfig } from '../core/QaLaunchConfig';
 import type { QaLaunchConfig } from '../core/QaLaunchConfig';
 import type { RunTelemetry } from '../core/Telemetry';
 import { onboardingBriefing, onboardingNudge, onboardingRetryHint } from '../core/Onboarding';
-import { AchievementHints, AchievementLabels, CosmeticLabels, RankLabels, bestStarsFor, buildReportText, rankProgress, rankProgressFromScore, totalStars } from '../core/profile';
+import { AchievementHints, AchievementLabels, CosmeticLabels, RankLabels, bestStarsFor, rankProgress, rankProgressFromScore, totalStars } from '../core/profile';
 import { highlightQuip } from '../core/systems/HighlightSystem';
 import { buildSharePayload, createDailyChallenge, encodeChallenge, localDateKey, parseChallengeQuery } from '../core/SocialChallenge';
 import type { ChallengeSpec } from '../core/SocialChallenge';
@@ -17,15 +17,15 @@ import type { RunReport } from '../core/RunReport';
 import { CardState as CS, HitQuality as HQ, PropType as PT } from '../core/types';
 import type { Card, HitQuality, PerfectRewardType, PropType } from '../core/types';
 import {
+  boundedThrowPeakY,
   findLockedCardSlot,
-  isHorizontalTargetGesture,
+  guidedThrowLeadPoint,
   isManualThrowGesture,
-  isThrowCancelGesture,
+  projectedThrowTargetX,
   throwPresentationStrength,
 } from '../core/ThrowGesture';
 import { FxLayer } from './FxLayer';
 import { ApprovalGaugeView } from './ui/ApprovalGaugeView';
-import { PropDockView } from './ui/PropDockView';
 import { PropButtonView } from './ui/PropButtonView';
 import { ResultDialogView, type ResultDialogButton } from './ui/ResultDialogView';
 import { TaskCardView } from './ui/TaskCardView';
@@ -39,6 +39,8 @@ import { SensoryFeedback } from './SensoryFeedback';
 import { ShareBridge } from './ShareBridge';
 import { RewardedAdBridge } from './RewardedAdBridge';
 import { RuntimeMonitor } from './RuntimeMonitor';
+import { CareerChapters, nextStarMilestone } from '../core/CareerRoute';
+import { AimPredictionView } from './ui/AimPredictionView';
 
 const { ccclass, property } = _decorator;
 
@@ -120,8 +122,6 @@ export class GameRunner extends Component {
   private subtitleNode: Node | null = null;
   private lowerHudNode: Node | null = null;
   /** 方案 3 的实体控制台底座与计时器铭牌。 */
-  private actionDockNode: Node | null = null;
-  private propDockView: PropDockView | null = null;
   private timerPlateNode: Node | null = null;
   private monitorLabelNode: Node | null = null;
   private monitorProcessLabelNode: Node | null = null;
@@ -159,13 +159,11 @@ export class GameRunner extends Component {
   private approvalGaugeView: ApprovalGaugeView | null = null;
   private aimingProp: PropType | null = null;
   private propInteractionState: PropInteractionState = 'idle';
-  private suppressSyntheticPropCancelUntil = 0;
   private aimingSlot = 0;
   private aimStart = new Vec3();
   private aimPoint = new Vec3();
   /** 目标选择轴与纸团手指位置解耦：纸团跟手，横向位移只推动这根虚拟选择轴。 */
   private aimSelectionX = 0;
-  private aimInitialSelectionX = 0;
   /** 触摸事件只更新目标点；真正的视觉跟随在 update 中每帧最多执行一次。 */
   private aimDesiredPoint = new Vec3();
   private aimSlotTargets: Vec3[] = [];
@@ -187,13 +185,18 @@ export class GameRunner extends Component {
   private aimGestureLast = new Vec3();
   private aimGestureLastMs = 0;
   private aimReleaseVelocityY = 0;
-  private aimCancelArmed = false;
+  private aimReleaseVelocityX = 0;
+  /** 只有先离开道具键、再拖回键上，才进入可见的“收回”状态。 */
+  private aimHasLeftSource = false;
+  private aimReturnCancel = false;
   private activeAimTouchId: number | null = null;
   private readonly sensory = new SensoryFeedback();
   private paperAimNode: Node | null = null;
   private paperAimShadowNode: Node | null = null;
   private aimEffectPreviewNode: Node | null = null;
   private aimDirectionNode: Node | null = null;
+  /** 准星旁直接写明将命中谁以及预计收益，避免玩家自行猜线和终点。 */
+  private aimPredictionView: AimPredictionView | null = null;
   private scanPos = 0;
   private reported = false; // 本局是否已结算展示（防止重复 finishLevel）
   /** 首次失败仍可复活时延迟 level_end，确保复活后的最终结果只结算一次。 */
@@ -234,8 +237,8 @@ export class GameRunner extends Component {
   private static readonly PAPER_TUNING: Readonly<Record<PropType, PaperTuning>> = {
     [PT.AddDemand]: {
       arcHeight: 125,
-      duration: 0.30,
-      spin: 380,
+      duration: 0.27,
+      spin: 110,
       startScale: new Vec3(1, 1, 1),
       midScale: new Vec3(0.92, 1.08, 1),
       endScale: new Vec3(0.72, 0.72, 1),
@@ -245,8 +248,8 @@ export class GameRunner extends Component {
     },
     [PT.ChangeDemand]: {
       arcHeight: 175,
-      duration: 0.38,
-      spin: 520,
+      duration: 0.32,
+      spin: 480,
       startScale: new Vec3(1.03, 0.97, 1),
       midScale: new Vec3(0.84, 1.16, 1),
       endScale: new Vec3(0.66, 0.66, 1),
@@ -256,8 +259,8 @@ export class GameRunner extends Component {
     },
     [PT.ThrowPot]: {
       arcHeight: 72,
-      duration: 0.24,
-      spin: 240,
+      duration: 0.34,
+      spin: 210,
       startScale: new Vec3(1.08, 1.08, 1),
       midScale: new Vec3(1.08, 0.92, 1),
       endScale: new Vec3(0.82, 0.82, 1),
@@ -318,7 +321,7 @@ export class GameRunner extends Component {
   private static readonly START_BLUE_DARK = UiTokens.environment.startBlueDark;
   private static readonly START_TEXT = UiTokens.environment.startText;
   private static readonly START_MUTED = UiTokens.environment.startMuted;
-  private static readonly TUTORIAL_DONE_KEY = 'biebeiaitidai.tutorial.done.v1';
+  private static readonly TUTORIAL_DONE_KEY = 'biebeiaitidai.tutorial.done.v2';
   private static readonly PERFECT_TIP_KEY = 'biebeiaitidai.perfect.tip.v1';
   private static readonly HIGH_RISK_TIP_KEY = 'biebeiaitidai.high-risk.tip.v1';
   private static readonly BOSS_TIP_KEY = 'biebeiaitidai.boss.tip.v1';
@@ -692,7 +695,7 @@ export class GameRunner extends Component {
       const slot = targetSlot >= 0 ? targetSlot : Math.max(0, Math.floor(this.slotNodes.length / 2));
       this.onPropDown(qa.scenario === 'blast' ? PT.ThrowPot : PT.AddDemand);
       const target = this.aimSlotTargets[slot] ?? this.targetPointForSlot(slot);
-      this.aimDesiredPoint.set(target.x, this.actionDockNode?.position.y ?? this.aimPoint.y, 0);
+      this.aimDesiredPoint.set(target.x, this.aimPoint.y, 0);
       this.propInteractionState = 'dragging';
       this.updateAimFrame(1 / 60, true);
       if (qa.scenario === 'perfect') {
@@ -1005,6 +1008,7 @@ export class GameRunner extends Component {
 
   private completeTutorial(): void {
     if (!this.shouldShowTutorial()) return;
+    this.telemetry.tutorialCompleted(this.tutorialStep);
     this.tutorialDone = true;
     sys.localStorage?.setItem(GameRunner.TUTORIAL_DONE_KEY, '1');
     this.eventTextUntilSec = 0;
@@ -1096,11 +1100,9 @@ export class GameRunner extends Component {
       const x = clampX(target.x);
       return { x, y, pointerX: target.x - x, pointerDown: false };
     }
-    if (this.tutorialStep >= 1 && this.actionDockNode?.active) {
-      const dockUt = this.actionDockNode.getComponent(UITransform);
-      const dockTop = this.actionDockNode.position.y + (dockUt?.height ?? 90) / 2;
+    if (this.tutorialStep >= 1 && this.aimingProp !== null) {
       const x = clampX(this.aimPoint.x || 0);
-      return { x, y: dockTop + h / 2 + 18, pointerX: this.aimPoint.x - x, pointerDown: true };
+      return { x, y: this.aimPoint.y + h / 2 + 54, pointerX: this.aimPoint.x - x, pointerDown: true };
     }
     const source = this.propSourcePoint(PT.AddDemand);
     const x = clampX(source.x);
@@ -1165,6 +1167,7 @@ export class GameRunner extends Component {
         automatic,
         soundEnabled: () => this.sensory.settings.soundEnabled,
         hapticsEnabled: () => this.sensory.settings.hapticsEnabled,
+        reducedMotion: () => this.sensory.settings.reducedMotion,
         toggleSound: () => {
           const next = !this.sensory.settings.soundEnabled;
           this.sensory.setSoundEnabled(next);
@@ -1174,6 +1177,9 @@ export class GameRunner extends Component {
           const next = !this.sensory.settings.hapticsEnabled;
           this.sensory.setHapticsEnabled(next);
           if (next) this.sensory.haptic('medium', 0);
+        },
+        toggleReducedMotion: () => {
+          this.sensory.setReducedMotion(!this.sensory.settings.reducedMotion);
         },
         resume: () => this.setPaused(false),
         retry: () => { this.clearPauseState(); this.onRetry(); },
@@ -1293,7 +1299,7 @@ export class GameRunner extends Component {
     titleLabel.overflow = Label.Overflow.NONE;
 
     const crisis = this.mkLabel(root, 'CrisisText', 0, cardCY + cardH * 0.072,
-      '长按纸团，对准卡片，把麻烦稳稳扔回去。', Math.min(34, Math.max(27, cardW * 0.036)), cardW * 0.78, cardH * 0.085);
+      '守住认可度：轻点快投，拖甩精准换目标。', Math.min(34, Math.max(27, cardW * 0.036)), cardW * 0.78, cardH * 0.085);
     this.styleStartLabel(crisis, GameRunner.START_MUTED, false);
 
     this.makeStartDoodles(root, vis, cardW, cardH, cardCY);
@@ -1326,6 +1332,9 @@ export class GameRunner extends Component {
     const rank = this.mkLabel(root, 'RankInfo', 34, cardCY - cardH * 0.455, '', Math.min(31, Math.max(24, cardW * 0.033)), cardW * 0.66, cardH * 0.07);
     this.styleStartLabel(rank, GameRunner.START_MUTED, false);
 
+    const reward = this.mkLabel(root, 'GrowthPreview', 0, cardCY - cardH * 0.515, '', Math.min(25, Math.max(19, cardW * 0.027)), cardW * 0.72, cardH * 0.055);
+    this.styleStartLabel(reward, GameRunner.START_BLUE_DARK, true);
+
     return root;
   }
 
@@ -1355,6 +1364,12 @@ export class GameRunner extends Component {
     const dailyRecord = this.session.profile.dailyRecords.find((record) => record.key === daily.keyHash.toString(36));
     const dailyLabel = this.levelSelectRoot.getChildByName('DailyChallengeButton')?.getChildByName('DailyChallengeButtonLabel')?.getComponent(Label);
     if (dailyLabel) dailyLabel.string = dailyRecord ? `今日最佳 ${dailyRecord.score}` : '今日挑战 · 有奖';
+    const growthPreview = this.levelSelectRoot.getChildByName('GrowthPreview')?.getComponent(Label);
+    if (growthPreview) {
+      const stars = totalStars(this.session.profile);
+      const milestone = nextStarMilestone(stars);
+      growthPreview.string = milestone ? `再拿 ${milestone.stars - stars}★ 解锁「${milestone.label}」` : '星级收藏已全部解锁';
+    }
   }
 
   private primaryStartText(): string {
@@ -1426,34 +1441,47 @@ export class GameRunner extends Component {
   }
 
   private populateCareerRoute(panel: Node, panelW: number, panelH: number): void {
-    const cols = 4;
-    const gapX = panelW * 0.205;
-    const gapY = panelH * 0.135;
-    const btnW = Math.min(92, panelW * 0.17);
-    const btnH = Math.min(72, panelH * 0.105);
-    for (let i = 0; i < this.session.levelCount; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const unlocked = this.session.isLevelUnlocked(i);
-      const stars = bestStarsFor(this.session.profile, i);
-      const text = unlocked ? `${i + 1}\n${stars > 0 ? '★'.repeat(stars) : '待挑战'}` : `${i + 1}\n未解锁`;
-      this.makeCareerAction(
-        panel,
-        `LevelRoute${i + 1}`,
-        (col - 1.5) * gapX,
-        panelH * 0.27 - row * gapY,
-        btnW,
-        btnH,
-        text,
-        () => { if (unlocked) this.onLevelSelected(i); },
-        !unlocked,
+    const gapX = panelW * 0.17;
+    const btnW = Math.min(80, panelW * 0.135);
+    const btnH = Math.min(58, panelH * 0.083);
+    CareerChapters.forEach((chapter, chapterIndex) => {
+      const rowY = panelH * 0.275 - chapterIndex * panelH * 0.19;
+      const heading = this.mkLabel(panel, `Chapter${chapterIndex + 1}`, -panelW * 0.20, rowY + panelH * 0.064,
+        `${chapter.title} · ${chapter.subtitle}`, Math.min(20, panelW * 0.036), panelW * 0.56, 30);
+      this.styleStartLabel(
+        heading,
+        chapterIndex <= Math.floor(this.session.profile.highestUnlockedLevel / 5) ? GameRunner.START_TEXT : GameRunner.START_MUTED,
+        true,
       );
-    }
+      for (let i = chapter.startLevel; i <= chapter.endLevel; i++) {
+        const col = i - chapter.startLevel;
+        const unlocked = this.session.isLevelUnlocked(i);
+        const stars = bestStarsFor(this.session.profile, i);
+        const current = i === this.session.profile.highestUnlockedLevel;
+        const boss = i === chapter.bossLevel;
+        const state = stars > 0 ? '★'.repeat(stars) : current ? '当前' : boss ? 'BOSS' : '待挑战';
+        const text = unlocked ? `${current ? '▶ ' : ''}${i + 1}\n${state}` : `${i + 1}\n锁定`;
+        this.makeCareerAction(
+          panel,
+          `LevelRoute${i + 1}`,
+          (col - 2) * gapX,
+          rowY,
+          btnW,
+          btnH,
+          text,
+          () => { if (unlocked) this.onLevelSelected(i); },
+          !unlocked,
+        );
+      }
+    });
     const hook = getLevel(this.session.profile.highestUnlockedLevel).hook
       ?? getLevel(this.session.profile.highestUnlockedLevel).challengeHint
       ?? '新的任务正在排队';
+    const stars = totalStars(this.session.profile);
+    const milestone = nextStarMilestone(stars);
+    const reward = milestone ? `下个收藏 · ${milestone.stars}★「${milestone.label}」` : '星级收藏全部解锁';
     const footer = this.mkLabel(panel, 'RouteHook', 0, -panelH * 0.43,
-      `当前目标 · 第${this.session.profile.highestUnlockedLevel + 1}关 · ${hook}`, Math.min(24, panelW * 0.045), panelW * 0.82, 54);
+      `当前 · 第${this.session.profile.highestUnlockedLevel + 1}关 · ${hook}\n${reward}`, Math.min(21, panelW * 0.040), panelW * 0.84, 64);
     this.styleStartLabel(footer, GameRunner.START_MUTED, false);
   }
 
@@ -1480,8 +1508,12 @@ export class GameRunner extends Component {
       const hint = this.mkLabel(row, 'Hint', -panelW * 0.08, -panelH * 0.019, AchievementHints[id], Math.min(19, panelW * 0.036), panelW * 0.52, 25);
       this.styleStartLabel(hint, GameRunner.START_MUTED, false);
     });
+    const stars = totalStars(this.session.profile);
+    const milestone = nextStarMilestone(stars);
+    const collection = this.session.profile.cosmetics.map((id) => CosmeticLabels[id]).join(' / ');
     const footer = this.mkLabel(panel, 'CosmeticCount', 0, -panelH * 0.43,
-      `已收藏 ${this.session.profile.cosmetics.length}/4 款工位外观 · 成就只奖励展示，不加战斗数值`, Math.min(21, panelW * 0.039), panelW * 0.82, 46);
+      `收藏 · ${collection}${milestone ? `\n再拿 ${milestone.stars - stars}★ 解锁「${milestone.label}」` : '\n星级收藏已全部解锁'}`,
+      Math.min(20, panelW * 0.037), panelW * 0.84, 58);
     this.styleStartLabel(footer, GameRunner.START_MUTED, false);
   }
 
@@ -1538,7 +1570,6 @@ export class GameRunner extends Component {
     if (this.pauseButtonNode) this.pauseButtonNode.active = v && !this.paused;
     if (this.subtitleNode) this.subtitleNode.active = v;
     if (this.lowerHudNode) this.lowerHudNode.active = v;
-    if (this.actionDockNode) this.actionDockNode.active = v;
     if (this.timerPlateNode) this.timerPlateNode.active = v;
     if (this.monitorLabelNode) this.monitorLabelNode.active = v;
     const deskBand = this.node.getChildByName('DeskBand');
@@ -1626,15 +1657,17 @@ export class GameRunner extends Component {
     dotG.circle(0, 0, 10);
     dotG.fill();
     dot.addComponent(UIOpacity).opacity = 230;
-    tween(dot)
-      .repeatForever(
-        tween()
-          .to(0.72, { scale: new Vec3(1.26, 1.26, 1) }, { easing: 'sineInOut' })
-          .to(0.72, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' }),
-      )
-      .start();
+    if (!this.sensory.settings.reducedMotion) {
+      tween(dot)
+        .repeatForever(
+          tween()
+            .to(0.72, { scale: new Vec3(1.26, 1.26, 1) }, { easing: 'sineInOut' })
+            .to(0.72, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' }),
+        )
+        .start();
+    }
 
-    const labelNode = this.mkLabel(node, 'AlertText', 28, 0, 'AI显示器 · 生存实验', Math.min(29, Math.max(22, cardW * 0.031)), pillW - 86, pillH - 4);
+    const labelNode = this.mkLabel(node, 'AlertText', 28, 0, '岗位保卫战 · 20轮挑战', Math.min(29, Math.max(22, cardW * 0.031)), pillW - 86, pillH - 4);
     const label = labelNode.getComponent(Label);
     if (label) {
       label.fontFamily = 'PingFang SC';
@@ -1857,9 +1890,9 @@ export class GameRunner extends Component {
     const gap = cardW * 0.035;
     const y = cardCY - cardH * 0.123;
     const data: Array<[string, string]> = [
-      ['hold', '1 长按蓄力'],
-      ['target', '2 对准目标'],
-      ['throw', '3 松手投出'],
+      ['hold', '1 轻点快投'],
+      ['target', '2 拖动选卡'],
+      ['throw', '3 松手甩出'],
     ];
     data.forEach(([icon, text], i) => {
       this.drawStartStepCard(steps, i, (i - 1) * (stepW + gap), y, stepW, stepH, text, icon);
@@ -1959,8 +1992,12 @@ export class GameRunner extends Component {
     if (!canRevive) this.finalizePendingTelemetry();
     this.session.finishLevel(report);
     const progression = this.session.lastProgression;
-    const newAchievementLabels = (progression?.newAchievements ?? []).map((id) => AchievementLabels[id]);
-    const newCosmeticLabels = (progression?.newCosmetics ?? []).map((id) => CosmeticLabels[id]);
+    const newAchievementLabels = (progression?.newAchievements ?? [])
+      .map((id) => AchievementLabels[id])
+      .filter((label): label is string => Boolean(label));
+    const newCosmeticLabels = (progression?.newCosmetics ?? [])
+      .map((id) => CosmeticLabels[id])
+      .filter((label): label is string => Boolean(label));
     const currentDaily = dailyKey ? this.session.profile.dailyRecords.find((record) => record.key === dailyKey) : undefined;
     const dailyRewardLine = progression?.daily && currentDaily
       ? progression.daily.firstAttempt
@@ -1976,7 +2013,6 @@ export class GameRunner extends Component {
     const pw = Math.min(vis.width * resultLayout.widthRatio, resultLayout.maxWidth);
     const ph = Math.min(vis.height * resultLayout.heightRatio, resultLayout.maxHeight);
     const won = report.result !== 'lose';
-    const reportMeme = buildReportText(this.session.profile, report, idx);
     const objectiveLine = report.objectiveLabel
       ? `${report.objectiveMet ? '目标达成 ✓' : '目标未达'} · ${report.objectiveLabel}`
       : '';
@@ -1987,11 +2023,16 @@ export class GameRunner extends Component {
     const primaryAccolade = accolades[0] ?? '';
     const secondaryAccolade = accolades.slice(1).join(' · ');
     const failureCoach = this.game.getFailureCoach();
+    const learningLine = report.perfectHits > 0
+      ? `本局 ${report.perfectHits} 次 Perfect · 精准投掷正在变稳`
+      : report.missedThrows === 0
+        ? `全程零失误 · 有效命中 ${report.effectiveHits} 次`
+        : `有效命中 ${report.effectiveHits} 次 · 下局先减少空投`;
     const reviewTitle = won
       ? this.compactResultText(primaryAccolade || objectiveLine || (report.result === 'win-hunt' ? '主动反杀 · AI 被你劝退了' : '生存成功 · 今天的岗位守住了'), 30)
       : this.compactResultText(`失败复盘 · ${failureCoach.title}`, 30);
     const reviewBody = won
-      ? this.compactResultText([secondaryAccolade, primaryAccolade ? objectiveLine : '', reportMeme].filter(Boolean).join(' · '), 54)
+      ? this.compactResultText(secondaryAccolade || (primaryAccolade ? objectiveLine : '') || learningLine, 48)
       : this.compactResultText([achievementLine, cosmeticLine, failureCoach.advice].filter(Boolean).join(' · '), 54);
     const rank = this.session.rankLabel;
     const day = this.session.daysEmployed;
@@ -2224,7 +2265,7 @@ export class GameRunner extends Component {
       // 同一次手势优先由按钮闭环处理。微信小游戏里节点触摸可能不会继续冒泡到
       // input.TOUCH_END；全局监听只作为手指拖出按钮后的兜底。状态机会过滤重复派发。
       btn.on(Node.EventType.TOUCH_START, (event: EventTouch) => this.onPropDown(type, event));
-      btn.on(Node.EventType.TOUCH_END, (event: EventTouch) => this.onPropUp(type, event));
+      btn.on(Node.EventType.TOUCH_END, (event: EventTouch) => this.onPropUp(type, event, true));
       btn.on(Node.EventType.TOUCH_CANCEL, (event: EventTouch) => this.onPropCancel(type, event));
     });
   }
@@ -2258,7 +2299,7 @@ export class GameRunner extends Component {
       this.scheduleOnce(() => this.punchButton(prop, false), UiTokens.motion.releaseSec);
       return;
     }
-    if (this.game.beginCharge(prop)) {
+    if (this.game.beginCharge(prop, true)) {
       this.sensory.play('pickup');
       this.aimStart = this.propSourcePoint(prop);
       const recommendation = this.game.getTargetRecommendation(prop);
@@ -2274,13 +2315,12 @@ export class GameRunner extends Component {
       this.aimGestureStart.set(pointer);
       this.aimGestureLast.set(pointer);
       this.aimGestureLastMs = Date.now();
+      this.aimReleaseVelocityX = 0;
       this.aimReleaseVelocityY = 0;
-      this.aimCancelArmed = false;
-      this.suppressSyntheticPropCancelUntil = Date.now() + UiTokens.feedback.syntheticCancelMs;
-      { const vis = view.getVisibleSize(); this.layoutPropButtons(vis.width, vis.height); }
+      this.aimHasLeftSource = false;
+      this.aimReturnCancel = false;
       const recommendedPoint = this.targetPointForSlot(this.aimingSlot);
       this.aimSelectionX = recommendedPoint.x;
-      this.aimInitialSelectionX = recommendedPoint.x;
       // 起手纸团留在手指下，不再为了推荐目标横向瞬移。
       this.aimDesiredPoint.set(pointer.x, pointer.y, 0);
       this.updateAimFrame(1 / 60);
@@ -2291,10 +2331,9 @@ export class GameRunner extends Component {
     }
     this.punchButton(prop, true);
   }
-  private onPropUp(prop: PropType, event?: EventTouch | EventMouse): void {
+  private onPropUp(prop: PropType, event?: EventTouch | EventMouse, trustedNodeEnd = false): void {
     if (this.propInteractionState !== 'arming' && this.propInteractionState !== 'dragging') return;
-    if (event && !this.activeAimPointerMatches(event)) return;
-    this.suppressSyntheticPropCancelUntil = 0;
+    if (!trustedNodeEnd && event && !this.activeAimPointerMatches(event)) return;
     if (prop === PT.KissUp) return;
     this.finishPaperThrow(prop, event);
     this.punchButton(prop, false);
@@ -2303,10 +2342,8 @@ export class GameRunner extends Component {
     if (this.propInteractionState === 'launching' || this.propInteractionState === 'idle') return;
     if (event && !this.activeAimPointerMatches(event)) return;
     if (this.aimingProp === prop) {
-      // 操作轨重排时部分平台会给起手按钮派发 TOUCH_CANCEL；真实取消统一由全局输入处理。
-      if (this.actionDockNode?.active) return;
-      if (prop !== PT.KissUp) this.game.cancel(prop);
-      this.clearPaperAim(true);
+      // 手指移出按钮时 Cocos 会合法派发 TOUCH_CANCEL，投掷仍由全局 END 闭环。
+      // 隐藏/暂停会在生命周期回调中真正清理，这里不抢先取消手势。
       this.punchButton(prop, false);
       return;
     }
@@ -2316,18 +2353,21 @@ export class GameRunner extends Component {
 
   private finishPaperThrow(prop: PropType, event?: EventTouch | EventMouse): void {
     if (this.aimingProp !== prop) return;
-    if (event) {
-      const releasePoint = this.sampleAimGesture(event);
-      this.aimCancelArmed = isThrowCancelGesture(releasePoint.y - this.aimGestureStart.y);
-    }
-    if (this.aimCancelArmed) {
+    if (event) this.updateReturnCancelState(prop, this.sampleAimGesture(event));
+    if (this.aimReturnCancel) {
       this.cancelPaperThrow(prop, '已收回道具');
       return;
     }
-    const lockedSlot = this.resolvedAimSlot(prop);
+    let lockedSlot = this.resolvedAimSlot(prop);
     if (lockedSlot < 0) {
-      this.cancelPaperThrow(prop, '目标已离场，道具未消耗');
-      return;
+      const fallback = this.game.getTargetRecommendation(prop)?.slot ?? this.closestValidAimSlot(prop, this.aimSelectionX);
+      if (fallback < 0) {
+        this.telemetry.releaseNoop(prop, 'no-valid-target');
+        this.cancelPaperThrow(prop, '当前没有可用目标，道具未消耗');
+        return;
+      }
+      lockedSlot = fallback;
+      this.lockAimCardAtSlot(prop, lockedSlot);
     }
     this.aimingSlot = lockedSlot;
     this.updateAimFrame(1 / 60, true);
@@ -2339,14 +2379,37 @@ export class GameRunner extends Component {
     const lockedCardOffset = this.aimLockedCardOffset;
     this.telemetry.released(prop);
     this.propInteractionState = 'launching';
-    this.animatePaperThrow(prop, slot, quality, throwStrength, () => {
+    const resolveArrivalSlot = (): number => {
       const arrivalAnchorSlot = prop === PT.ChangeDemand || prop === PT.ThrowPot
         ? findLockedCardSlot(this.game.conveyor.cards, lockedCardId)
         : slot;
-      const arrivalSlot = arrivalAnchorSlot < 0 ? -1 : arrivalAnchorSlot - lockedCardOffset;
-      if (arrivalSlot < 0 || arrivalSlot >= this.game.conveyor.cards.length) this.game.cancel(prop);
-      else this.game.releaseAtSlot(prop, arrivalSlot, quality);
-    });
+      return arrivalAnchorSlot < 0 ? -1 : arrivalAnchorSlot - lockedCardOffset;
+    };
+    this.animatePaperThrow(
+      prop,
+      slot,
+      quality,
+      throwStrength,
+      this.aimManualTargeting,
+      new Vec3(this.aimReleaseVelocityX, this.aimReleaseVelocityY, 0),
+      () => {
+        const liveSlot = resolveArrivalSlot();
+        return liveSlot >= 0 && liveSlot < this.game.conveyor.cards.length
+          ? this.targetPointForSlot(liveSlot)
+          : this.targetPointForSlot(slot);
+      },
+      () => {
+        const arrivalSlot = resolveArrivalSlot();
+        if (arrivalSlot < 0 || arrivalSlot >= this.game.conveyor.cards.length) {
+          this.telemetry.releaseNoop(prop, 'target-left-belt');
+          this.game.cancel(prop);
+          return this.targetPointForSlot(slot);
+        }
+        const arrivalPoint = this.targetPointForSlot(arrivalSlot);
+        this.game.releaseAtSlot(prop, arrivalSlot, quality);
+        return arrivalPoint;
+      },
+    );
     this.clearPaperAim(false);
     this.punchButton(prop, false);
   }
@@ -2371,14 +2434,8 @@ export class GameRunner extends Component {
     if (!this.activeAimPointerMatches(event)) return;
     const prop = this.aimingProp;
     if (prop === null) return;
-    if (this.actionDockNode?.active && Date.now() < this.suppressSyntheticPropCancelUntil) {
-      // 进入道具操作态重排底部 HUD 时，Cocos 可能立刻派发一次全局 TOUCH_CANCEL。
-      // 这不是玩家取消操作，忽略它，避免按住按钮后马上显示“取消”。
-      return;
-    }
-    this.suppressSyntheticPropCancelUntil = 0;
-    if (prop !== PT.KissUp) this.game.cancel(prop);
-    this.clearPaperAim(true);
+    // 手指移出按钮或捕获转移时会收到合成 CANCEL；投掷仍由对应 END 闭环。
+    // 应用失焦/暂停另有显式清理，这里不让一次伪取消吃掉松手。
     this.punchButton(prop, false);
   }
 
@@ -2407,40 +2464,62 @@ export class GameRunner extends Component {
     const raw = this.sampleAimGesture(event);
     const dx = raw.x - this.aimGestureStart.x;
     const dy = raw.y - this.aimGestureStart.y;
-    this.aimCancelArmed = isThrowCancelGesture(dy);
     if (this.propInteractionState === 'arming' && isManualThrowGesture(dx, dy)) {
       this.propInteractionState = 'dragging';
       this.telemetry.dragStarted();
-      this.suppressSyntheticPropCancelUntil = 0;
+      this.telemetry.manualThrowStarted(this.aimingProp);
+      this.aimManualTargeting = true;
       this.advanceTutorial(2, UiTokens.tutorial.releaseHint);
     }
-    // 只有明确的横向扫动才改目标；纯向上甩保持推荐/已选目标不漂移。
-    if (!this.aimManualTargeting && isHorizontalTargetGesture(dx, dy)) {
-      this.aimManualTargeting = true;
-    }
     if (this.aimManualTargeting) {
-      // 选卡和纸团使用同一套 root-local 绝对横坐标，避免“手在左边、准星在右边”。
-      this.aimSelectionX = raw.x * UiTokens.aim.horizontalSelectionGain;
+      const targetY = this.aimSlotTargets[0]?.y ?? this.targetPointForSlot(0).y;
+      this.aimSelectionX = projectedThrowTargetX(
+        this.aimGestureStart.x,
+        this.aimGestureStart.y,
+        raw.x,
+        raw.y,
+        targetY,
+      );
     }
+    this.updateReturnCancelState(this.aimingProp, raw);
     // 纸团始终跟随真实手指；目标选择由 aimSelectionX 独立控制。
     this.queueAimRawPoint(raw);
-    if (this.aimCancelArmed) this.setEventText('松手取消 · 不消耗道具', 0.4, 9);
   }
 
   private sampleAimGesture(event: EventTouch | EventMouse): Vec3 {
     const raw = this.pointFromPointer(event);
     const now = Date.now();
     const dt = (now - this.aimGestureLastMs) / 1000;
+    const dx = raw.x - this.aimGestureLast.x;
     const dy = raw.y - this.aimGestureLast.y;
-    if (this.aimGestureLastMs > 0 && dt > 0.004 && Math.abs(dy) > 0.5) {
-      const velocity = dy / Math.min(dt, 0.08);
-      this.aimReleaseVelocityY += (velocity - this.aimReleaseVelocityY) * UiTokens.aim.releaseVelocitySmoothing;
+    if (this.aimGestureLastMs > 0 && dt > 0.004 && Math.hypot(dx, dy) > 0.5) {
+      const sampleDt = Math.min(dt, 0.08);
+      const velocityX = dx / sampleDt;
+      const velocityY = dy / sampleDt;
+      this.aimReleaseVelocityX += (velocityX - this.aimReleaseVelocityX) * UiTokens.aim.releaseVelocitySmoothing;
+      this.aimReleaseVelocityY += (velocityY - this.aimReleaseVelocityY) * UiTokens.aim.releaseVelocitySmoothing;
     }
     if (Math.hypot(raw.x - this.aimGestureLast.x, dy) > 0.5) {
       this.aimGestureLast.set(raw);
       this.aimGestureLastMs = now;
     }
     return raw;
+  }
+
+  private updateReturnCancelState(prop: PropType, raw: Vec3): void {
+    if (this.propInteractionState !== 'dragging') return;
+    const source = this.propSourcePoint(prop);
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const ut = this.propButtonNodes[idx]?.getComponent(UITransform);
+    const base = Math.max(ut?.width ?? 76, ut?.height ?? 76);
+    const distance = Math.hypot(raw.x - source.x, raw.y - source.y);
+    if (distance >= Math.max(64, base * 0.72)) this.aimHasLeftSource = true;
+    const returning = this.aimHasLeftSource && distance <= Math.max(42, base * 0.48);
+    if (returning === this.aimReturnCancel) return;
+    this.aimReturnCancel = returning;
+    this.punchButton(prop, returning);
+    if (returning) this.setEventText('松手收回 · 不消耗道具', 0.8, 9);
+    else this.setEventText(this.aimRecommendationText(prop), 0.65, 7);
   }
 
   private cancelPaperThrow(prop: PropType, message: string): void {
@@ -2487,8 +2566,8 @@ export class GameRunner extends Component {
   private aimRecommendationText(prop: PropType): string {
     const recommendation = this.game.getTargetRecommendation(prop);
     return recommendation
-      ? `推荐 ${recommendation.slot + 1} 号位 · ${recommendation.label}`
-      : UiTokens.tutorial.dockHint;
+      ? `轻点投向 ${recommendation.slot + 1} 号卡 · 拖向其他卡可改选`
+      : '拖向任务卡，松手投出';
   }
 
   private pointFromPointer(event: EventTouch | EventMouse): Vec3 {
@@ -2534,6 +2613,31 @@ export class GameRunner extends Component {
         bestDist = dx;
       }
     }
+    return best;
+  }
+
+  /** 手势只能吸附到当前真正可作用的卡片，避免“准星亮了但松手无效”。 */
+  private closestValidAimSlot(prop: PropType, x: number): number {
+    let best = -1;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < this.slotNodes.length; i++) {
+      if (!this.isAimTargetValid(prop, i)) continue;
+      const target = this.aimSlotTargets[i] ?? this.targetPointForSlot(i);
+      const dist = Math.abs(x - target.x);
+      if (dist < bestDist) {
+        best = i;
+        bestDist = dist;
+      }
+    }
+    const current = this.aimingSlot;
+    if (best < 0 || best === current || !this.isAimTargetValid(prop, current)) return best;
+    const currentPoint = this.aimSlotTargets[current] ?? this.targetPointForSlot(current);
+    const bestPoint = this.aimSlotTargets[best] ?? this.targetPointForSlot(best);
+    const direction = Math.sign(bestPoint.x - currentPoint.x);
+    const gap = Math.abs(bestPoint.x - currentPoint.x);
+    const switchThreshold = (currentPoint.x + bestPoint.x) * 0.5 + direction * gap * 0.10;
+    if (direction > 0 && x < switchThreshold) return current;
+    if (direction < 0 && x > switchThreshold) return current;
     return best;
   }
 
@@ -2608,26 +2712,14 @@ export class GameRunner extends Component {
     target.setPosition(this.targetPointForSlot(this.aimingSlot));
     this.paintAimTarget(prop, false, true);
 
-    // 方向提示只画一次，拖动时仅旋转/平移；它和最终锁定槽共用同一个目标。
+    // 完整弹道固定在 root-local 坐标，每帧从手指纸团画到真实卡片。
     const direction = new Node('PropAimDirection');
     direction.layer = 1 << 25;
-    direction.addComponent(UITransform).setContentSize(112, 28);
-    const directionG = direction.addComponent(Graphics);
-    directionG.strokeColor = new Color(base.r, base.g, base.b, 205);
-    directionG.fillColor = new Color(base.r, base.g, base.b, 220);
-    directionG.lineWidth = 4;
-    directionG.lineCap = Graphics.LineCap.ROUND;
-    directionG.moveTo(42, 0);
-    directionG.lineTo(91, 0);
-    directionG.stroke();
-    directionG.moveTo(91, 0);
-    directionG.lineTo(78, 8);
-    directionG.lineTo(80, 0);
-    directionG.lineTo(78, -8);
-    directionG.close();
-    directionG.fill();
+    direction.addComponent(UITransform).setContentSize(1, 1);
+    direction.addComponent(Graphics);
     direction.addComponent(UIOpacity).opacity = 180;
     this.node.addChild(direction);
+    direction.setPosition(0, 0, 0);
     direction.setSiblingIndex(Math.max(0, target.getSiblingIndex() - 1));
     this.aimDirectionNode = direction;
 
@@ -2639,6 +2731,9 @@ export class GameRunner extends Component {
     effectPreview.setSiblingIndex(Math.max(0, target.getSiblingIndex() - 1));
     this.aimEffectPreviewNode = effectPreview;
     this.paintAimEffectPreview(prop, this.aimingSlot, true);
+
+    this.aimPredictionView = new AimPredictionView(this.node, 1 << 25);
+    this.updateAimPrediction(prop, this.aimingSlot, true);
 
     const shadow = new Node('PropDragShadow');
     shadow.layer = 1 << 25;
@@ -2671,18 +2766,10 @@ export class GameRunner extends Component {
     let maxX = vis.width / 2 - UiTokens.aim.clampInset;
     let minY = safeBottomY + Math.max(UiTokens.aim.minFreeY, vis.height * UiTokens.aim.minFreeYRatio);
     let maxY = safeBottomY + Math.max(UiTokens.aim.minMaxFreeY, vis.height * UiTokens.aim.maxFreeYRatio);
-    if (this.actionDockNode?.active) {
-      const dockUt = this.actionDockNode.getComponent(UITransform);
-      const dockW = dockUt?.contentSize.width ?? 0;
-      const dockX = this.actionDockNode.position.x;
-      if (dockW > 0) {
-        minX = dockX - dockW / 2 + UiTokens.aim.dockClampInset;
-        maxX = dockX + dockW / 2 - UiTokens.aim.dockClampInset;
-      }
-    }
+    const fingerLift = this.propInteractionState === 'dragging' && !this.aimReturnCancel ? 28 : 0;
     this.aimDesiredPoint.set(
       Math.max(minX, Math.min(maxX, raw.x)),
-      Math.max(minY, Math.min(maxY, raw.y)),
+      Math.max(minY, Math.min(maxY, raw.y + fingerLift)),
       0,
     );
   }
@@ -2698,14 +2785,14 @@ export class GameRunner extends Component {
     const instantVelocityX = (this.aimPoint.x - prevX) / Math.max(dt, 1 / 120);
     this.aimVelocityX += (instantVelocityX - this.aimVelocityX) * (force ? 1 : UiTokens.aim.velocitySmoothing);
     const identitySlot = this.resolvedAimSlot(this.aimingProp);
-    const nextSlot = this.aimManualTargeting
-      ? this.slotFromAimX(this.aimSelectionX)
+    const manualSlot = this.aimManualTargeting
+      ? this.closestValidAimSlot(this.aimingProp, this.aimSelectionX)
+      : -1;
+    const nextSlot = this.aimManualTargeting && manualSlot >= 0
+      ? manualSlot
       : identitySlot >= 0 ? identitySlot : this.aimingSlot;
     const slotChanged = nextSlot !== this.aimRenderedSlot;
-    const identityMissing = (this.aimingProp === PT.ChangeDemand || this.aimingProp === PT.ThrowPot)
-      && this.aimLockedCardId !== null
-      && identitySlot < 0;
-    const targetValid = !identityMissing && this.isAimTargetValid(this.aimingProp, nextSlot);
+    const targetValid = this.isAimTargetValid(this.aimingProp, nextSlot);
     const validityChanged = targetValid !== this.aimTargetValid;
     const recommendationSlot = this.game.getTargetRecommendation(this.aimingProp)?.slot ?? -1;
     const recommendationChanged = recommendationSlot !== this.aimRecommendationSlot;
@@ -2724,11 +2811,13 @@ export class GameRunner extends Component {
       const target = this.targetPointForSlot(visualTargetSlot);
       this.aimTargetNode?.setPosition(target);
       this.paintAimEffectPreview(this.aimingProp, nextSlot, targetValid);
+      this.updateAimPrediction(this.aimingProp, nextSlot, targetValid);
       this.aimLockSec = 0;
       if (this.aimPerfectReady) {
         this.aimPerfectReady = false;
       }
       if (previousSlot >= 0) this.lightAimFeedback('tick');
+      if (previousSlot >= 0) this.telemetry.targetChanged(this.aimingProp, previousSlot, nextSlot);
     }
     if (!slotChanged && this.aimTargetNode?.isValid) {
       this.aimTargetNode.setPosition(this.targetPointForSlot(visualTargetSlot));
@@ -2745,7 +2834,10 @@ export class GameRunner extends Component {
     if (perfectReady !== this.aimPerfectReady || validityChanged || slotChanged || recommendationChanged) {
       this.aimPerfectReady = perfectReady;
       this.paintAimTarget(this.aimingProp, perfectReady, targetValid);
-      if (validityChanged || recommendationChanged) this.paintAimEffectPreview(this.aimingProp, nextSlot, targetValid);
+      if (validityChanged || recommendationChanged) {
+        this.paintAimEffectPreview(this.aimingProp, nextSlot, targetValid);
+        this.updateAimPrediction(this.aimingProp, nextSlot, targetValid);
+      }
       if (perfectReady) {
         this.lightAimFeedback('lock');
         if (!this.perfectTipShown) {
@@ -2786,32 +2878,56 @@ export class GameRunner extends Component {
     }
     if (this.aimDirectionNode?.isValid) {
       const targetPoint = this.targetPointForSlot(visualTargetSlot);
-      this.aimDirectionNode.setPosition(this.aimPoint);
-      this.aimDirectionNode.angle = Math.atan2(
-        targetPoint.y - this.aimPoint.y,
-        targetPoint.x - this.aimPoint.x,
-      ) * 180 / Math.PI;
-      this.aimDirectionNode.active = !this.aimCancelArmed;
+      if (this.aimReturnCancel) this.aimDirectionNode.getComponent(Graphics)?.clear();
+      else this.paintAimTrajectory(this.aimingProp, this.aimPoint, targetPoint, targetValid);
+    }
+    if (this.aimEffectPreviewNode?.isValid) this.aimEffectPreviewNode.active = !this.aimReturnCancel;
+    if (this.aimPredictionView) {
+      this.aimPredictionView.setActive(!this.aimReturnCancel);
+      this.positionAimPrediction(visualTargetSlot);
     }
     this.aimVisualTime += dt;
     if (this.aimTargetNode?.isValid) {
+      const targetOpacity = this.aimTargetNode.getComponent(UIOpacity);
+      if (targetOpacity) targetOpacity.opacity = this.aimReturnCancel ? 64 : 220;
       this.aimTargetKick = Math.max(0, this.aimTargetKick - dt);
       const kick = this.aimTargetKick > 0 ? this.aimTargetKick / UiTokens.aim.targetKick : 0;
-      const pulse = 1 + Math.sin(this.aimVisualTime * UiTokens.aim.targetPulseHz * Math.PI * 2) * 0.035 + kick * 0.16;
+      const pulse = this.sensory.settings.reducedMotion
+        ? 1 + kick * 0.08
+        : 1 + Math.sin(this.aimVisualTime * UiTokens.aim.targetPulseHz * Math.PI * 2) * 0.035 + kick * 0.16;
       this.aimTargetNode.setScale(pulse, pulse, 1);
     }
-    const strength = Math.min(1, Math.hypot(
-      this.aimPoint.x - this.aimStart.x,
-      Math.max(0, this.aimPoint.y - this.aimStart.y) * 1.15,
-    ) / Math.max(1, view.getVisibleSize().width * 0.26));
-    this.propDockView?.updateInteraction(
-      this.aimingSlot,
-      strength,
-      Math.min(1, Math.abs(this.aimVelocityX) / UiTokens.aim.velocityCap),
-      this.aimPerfectReady,
-      targetValid,
-      this.aimCancelArmed,
+  }
+
+  private paintAimTrajectory(prop: PropType, start: Vec3, end: Vec3, targetValid: boolean): void {
+    const g = this.aimDirectionNode?.getComponent(Graphics);
+    if (!g) return;
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = targetValid ? (GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue) : UiTokens.color.muted;
+    const desiredLift = this.paperTuning(prop).arcHeight * 0.18;
+    const guidedLead = guidedThrowLeadPoint(
+      start,
+      end,
+      { x: this.aimReleaseVelocityX, y: this.aimReleaseVelocityY },
+      this.aimManualTargeting,
     );
+    const control = this.aimManualTargeting
+      ? this.clampThrowPoint(guidedLead)
+      : new Vec3(
+        (start.x + end.x) * 0.5,
+        boundedThrowPeakY(start.y, end.y, this.throwViewportTopY(), desiredLift),
+        0,
+      );
+    g.clear();
+    g.fillColor = new Color(base.r, base.g, base.b, targetValid ? 205 : 110);
+    for (let i = 1; i <= 9; i++) {
+      const t = i / 10;
+      const inv = 1 - t;
+      const x = inv * inv * start.x + 2 * inv * t * control.x + t * t * end.x;
+      const y = inv * inv * start.y + 2 * inv * t * control.y + t * t * end.y;
+      g.circle(x, y, 2.5 + t * 1.7);
+      g.fill();
+    }
   }
 
   private aimAlignmentRatio(slot: number): number {
@@ -2846,8 +2962,7 @@ export class GameRunner extends Component {
     if (!g) return;
     const idx = prop ? GameRunner.PROP_TYPES.indexOf(prop) : -1;
     const base = GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue;
-    const recommended = prop !== null && this.game.getTargetRecommendation(prop)?.slot === this.aimingSlot;
-    const focus = !targetValid ? UiTokens.color.muted : perfectReady || recommended ? UiTokens.color.gold : UiTokens.color.blue;
+    const focus = !targetValid ? UiTokens.color.muted : perfectReady ? UiTokens.color.gold : base;
     g.clear();
     g.fillColor = new Color(focus.r, focus.g, focus.b, perfectReady ? 64 : 30);
     g.circle(0, 0, UiTokens.aim.targetInnerRadius);
@@ -2910,6 +3025,51 @@ export class GameRunner extends Component {
     }
   }
 
+  private updateAimPrediction(prop: PropType, slot: number, targetValid: boolean): void {
+    const prediction = this.aimPredictionView;
+    if (!prediction) return;
+    const idx = GameRunner.PROP_TYPES.indexOf(prop);
+    const base = targetValid ? (GameRunner.PROP_COLORS[idx] ?? UiTokens.color.blue) : UiTokens.color.muted;
+    const position = this.aimPredictionPosition(slot);
+    prediction.update(this.aimPredictionText(prop, slot, targetValid), base, targetValid, position.x, position.y);
+  }
+
+  private positionAimPrediction(slot: number): void {
+    if (!this.aimPredictionView) return;
+    const position = this.aimPredictionPosition(slot);
+    this.aimPredictionView.node.setPosition(position.x, position.y, 0);
+  }
+
+  private aimPredictionPosition(slot: number): { x: number; y: number } {
+    const vis = view.getVisibleSize();
+    const target = this.targetPointForSlot(slot);
+    const width = this.aimPredictionView?.width ?? 236;
+    const height = this.aimPredictionView?.height ?? 40;
+    const x = Math.max(-vis.width / 2 + width / 2 + 18, Math.min(vis.width / 2 - width / 2 - 18, target.x));
+    const targetH = this.slotNodes[slot]?.getComponent(UITransform)?.height ?? 72;
+    const preferredY = target.y + targetH / 2 + 34;
+    const y = Math.min(this.throwViewportTopY() - height / 2 - 18, preferredY);
+    return { x, y };
+  }
+
+  private aimPredictionText(prop: PropType, slot: number, targetValid: boolean): string {
+    if (prop === PT.AddDemand) return '推荐落点 · 队列缓冲 +1 格';
+    if (!targetValid) return '无效目标 · 松手不消耗';
+    if (prop === PT.ChangeDemand) {
+      const card = this.game.conveyor.slotAt(slot);
+      if (!card) return '空位 · 松手不消耗';
+      if ((card.guard ?? 0) > 0) return `命中精英盾 · 风险先降 ${Math.min(2, card.weight)}`;
+      return `命中此卡 · 返工抵达 -${card.weight}`;
+    }
+    if (prop === PT.ThrowPot) {
+      const cards = this.game.conveyor.cards.slice(Math.max(0, slot - 1), Math.min(this.game.conveyor.cards.length, slot + 2));
+      const affected = cards.filter(Boolean).length;
+      const prevented = cards.reduce((sum, card) => sum + (card?.state === CS.ActiveWhite ? card.weight : 0), 0);
+      return `范围清场 ${affected} 张 · 挡住 ${prevented} 风险`;
+    }
+    return '命中 AI · 暂停任务队列';
+  }
+
   private lightAimFeedback(kind: 'tick' | 'lock'): void {
     this.sensory.play(kind === 'lock' ? 'target-lock' : 'target-tick');
     this.sensory.haptic(kind === 'lock' ? 'medium' : 'light', UiTokens.aim.hapticMinIntervalMs);
@@ -2921,10 +3081,11 @@ export class GameRunner extends Component {
   }
 
   private clearPaperAim(destroyPaper: boolean): void {
-    this.suppressSyntheticPropCancelUntil = 0;
     this.aimingProp = null;
     this.aimEffectPreviewNode?.destroy();
     this.aimEffectPreviewNode = null;
+    this.aimPredictionView?.destroy();
+    this.aimPredictionView = null;
     this.aimDirectionNode?.destroy();
     this.aimDirectionNode = null;
     this.aimTargetNode?.destroy();
@@ -2945,12 +3106,13 @@ export class GameRunner extends Component {
     this.aimRecommendationSlot = -1;
     this.aimManualTargeting = false;
     this.aimSelectionX = 0;
-    this.aimInitialSelectionX = 0;
     this.aimLockedCardId = null;
     this.aimLockedCardOffset = 0;
     this.aimGestureLastMs = 0;
+    this.aimReleaseVelocityX = 0;
     this.aimReleaseVelocityY = 0;
-    this.aimCancelArmed = false;
+    this.aimHasLeftSource = false;
+    this.aimReturnCancel = false;
     this.activeAimTouchId = null;
     if (this.propInteractionState !== 'launching') this.propInteractionState = 'idle';
     if (this.propButtons) {
@@ -2959,13 +3121,30 @@ export class GameRunner extends Component {
     }
   }
 
-  private animatePaperThrow(prop: PropType, slot: number, quality: HitQuality, strength: number, onArrive: () => void): void {
+  private animatePaperThrow(
+    prop: PropType,
+    slot: number,
+    quality: HitQuality,
+    strength: number,
+    manualThrow: boolean,
+    releaseVelocity: Vec3,
+    resolveTargetPoint: () => Vec3,
+    onArrive: () => Vec3 | void,
+  ): void {
     const paper = this.paperAimNode?.isValid ? this.paperAimNode : this.makePaperWadNode(prop, 'PaperWadThrow');
     const tuning = this.paperTuning(prop);
     const outcome = this.paperOutcome(prop, slot);
     const start = this.aimPoint.clone();
     const end = this.targetPointForSlot(slot);
-    const peak = new Vec3((start.x + end.x) * 0.5, Math.max(start.y, end.y) + tuning.arcHeight * (1 + strength * 0.34), 0);
+    const desiredLift = tuning.arcHeight * 0.18;
+    const guidedLead = guidedThrowLeadPoint(start, end, releaseVelocity, manualThrow);
+    const leadPoint = manualThrow
+      ? this.clampThrowPoint(guidedLead)
+      : new Vec3(
+        (start.x + end.x) * 0.5,
+        boundedThrowPeakY(start.y, end.y, this.throwViewportTopY(), desiredLift),
+        0,
+      );
     if (!paper.parent) this.node.addChild(paper);
     paper.setPosition(start);
     paper.setScale(tuning.startScale);
@@ -2973,23 +3152,52 @@ export class GameRunner extends Component {
     op.opacity = 255;
     this.emitLaunchBurst(start, prop, strength);
     this.releaseAimFeedback(prop, strength);
-    const flightDuration = tuning.duration * (1 - strength * 0.36);
-    const outDuration = flightDuration * (prop === PT.ThrowPot ? 0.42 : 0.48);
+    const flightDuration = tuning.duration * (manualThrow ? 1 - strength * 0.30 : 0.72);
+    const outDuration = flightDuration * (manualThrow ? 0.32 : prop === PT.ThrowPot ? 0.42 : 0.48);
     const inDuration = Math.max(0.08, flightDuration - outDuration);
     const launchScale = new Vec3(tuning.startScale.x * (1.16 + strength * 0.32), tuning.startScale.y * (0.76 - strength * 0.14), 1);
-    const spin = tuning.spin * (1 + strength * 0.72);
+    const spin = tuning.spin * (manualThrow ? 0.78 + strength * 0.48 : 0.26);
     tween(paper)
       .to(UiTokens.feedback.releaseSquashSec, { scale: launchScale }, { easing: 'quadOut' })
-      .to(outDuration, { position: peak, angle: spin * 0.52, scale: tuning.midScale }, { easing: 'quadOut' })
-      .to(inDuration, { position: end, angle: spin, scale: tuning.endScale }, { easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn' })
+      .to(outDuration, { position: leadPoint, angle: spin * 0.32, scale: tuning.midScale }, { easing: 'quadOut' })
       .call(() => {
-        onArrive();
-        this.propInteractionState = 'idle';
-        this.paperImpact(end, prop, outcome, strength);
-        this.paperOutcomeText(end, prop, outcome, quality, strength);
-        this.settlePaperWad(paper, op, prop, outcome);
+        const guidedEnd = resolveTargetPoint();
+        tween(paper)
+          .to(inDuration, { position: guidedEnd, angle: spin, scale: tuning.endScale }, {
+            easing: prop === PT.ThrowPot ? 'sineIn' : 'quadIn',
+          })
+          .call(() => {
+            const impactPoint = onArrive() ?? guidedEnd;
+            // 传送带在飞行期间可能移动；落点和结算始终追踪同一张卡。
+            paper.setPosition(impactPoint);
+            this.propInteractionState = 'idle';
+            this.paperImpact(impactPoint, prop, outcome, strength);
+            this.paperOutcomeText(impactPoint, prop, outcome, quality, strength);
+            this.settlePaperWad(paper, op, prop, outcome);
+          })
+          .start();
       })
       .start();
+  }
+
+  private throwViewportTopY(): number {
+    const vis = view.getVisibleSize();
+    const safe = sys.getSafeAreaRect(false);
+    return safe.y + safe.height - vis.height / 2;
+  }
+
+  private clampThrowPoint(point: { x: number; y: number }): Vec3 {
+    const vis = view.getVisibleSize();
+    const safe = sys.getSafeAreaRect(false);
+    const left = safe.x - vis.width / 2 + 28;
+    const right = safe.x + safe.width - vis.width / 2 - 28;
+    const bottom = safe.y - vis.height / 2 + 28;
+    const top = this.throwViewportTopY() - 28;
+    return new Vec3(
+      Math.max(left, Math.min(right, point.x)),
+      Math.max(bottom, Math.min(top, point.y)),
+      0,
+    );
   }
 
   /** 松手瞬间的局部发射反馈：短环 + 速度线，只创建一次，不参与拖动帧更新。 */
@@ -3404,10 +3612,10 @@ export class GameRunner extends Component {
     if (this.gameTitleNode) {
       const tl = this.gameTitleNode.getComponent(Label);
       if (tl) {
-        tl.string = '别让AI替代你';
-        tl.fontSize = Math.min(44, Math.max(30, view.getVisibleSize().width * 0.070));
+        tl.string = `本关目标 · ${this.game.level.def.objective?.label ?? '守住岗位'}`;
+        tl.fontSize = Math.min(32, Math.max(24, view.getVisibleSize().width * 0.050));
         tl.lineHeight = tl.fontSize + 6;
-        tl.color = GameRunner.START_TEXT;
+        tl.color = GameRunner.START_MUTED;
         tl.isBold = true;
       }
     }
@@ -3432,7 +3640,7 @@ export class GameRunner extends Component {
       const timerColor = urgent ? new Color(220, 72, 66, 255) : GameRunner.START_TEXT;
       if (!tl.color.equals(timerColor)) tl.color = timerColor;
       if (!tl.isBold) tl.isBold = true;
-      const pulse = urgent ? 1 + Math.sin(snap.elapsed * 8) * 0.035 : 1;
+      const pulse = urgent && !this.sensory.settings.reducedMotion ? 1 + Math.sin(snap.elapsed * 8) * 0.035 : 1;
       this.gameTimerNode.setScale(pulse, pulse, 1);
       this.timerPlateNode?.setScale(pulse, pulse, 1);
     }
@@ -4159,10 +4367,12 @@ export class GameRunner extends Component {
     this.gameTitleNode.getComponent(UITransform)!.setContentSize(Math.min(visSize.width * 0.76, 520), 54);
     this.gameTitleNode.setPosition(0, titleY, 0);
     const titleLabel = this.gameTitleNode.getComponent(Label)!;
-    titleLabel.string = '别让AI替代你';
-    titleLabel.fontSize = Math.min(44, Math.max(30, visSize.width * 0.070));
+    // 美术资源可能在选关页异步加载完成；此时 game 尚未创建，标题必须从当前关配置兜底读取。
+    const activeLevelDef = this.game?.level.def ?? getLevel(this.session.currentIndex);
+    titleLabel.string = `本关目标 · ${activeLevelDef.objective?.label ?? '守住岗位'}`;
+    titleLabel.fontSize = Math.min(32, Math.max(24, visSize.width * 0.050));
     titleLabel.lineHeight = titleLabel.fontSize + 6;
-    titleLabel.color = GameRunner.START_TEXT;
+    titleLabel.color = GameRunner.START_MUTED;
     titleLabel.isBold = true;
 
     const hudY = titleY - Math.max(70, visSize.height * 0.082);
@@ -4578,7 +4788,6 @@ export class GameRunner extends Component {
     });
     this.deskItemNodes.forEach((node) => { if (node?.isValid) node.active = playing; });
     if (this.deskDecorNode) this.deskDecorNode.active = false;
-    if (this.actionDockNode) this.actionDockNode.active = playing && this.aimingProp !== null;
     this.layoutPauseButton(hudY, pillH);
 
     if (!this.pressureAtmosphereNode) {
@@ -4796,36 +5005,14 @@ export class GameRunner extends Component {
     const btnH = Math.min(propLayout.maxButtonHeight, Math.max(propLayout.minButtonHeight, btnW * propLayout.buttonHeightRatio));
     const startX = -usedW / 2 + btnW / 2;
     const y = safeBottomY + btnH / 2 + Math.max(propLayout.minBottomSafe, viewHeight * propLayout.bottomSafeRatio);
-    const aimingIndex = this.aimingProp ? GameRunner.PROP_TYPES.indexOf(this.aimingProp) : -1;
-    const choosing = aimingIndex >= 0;
     this.propButtons.setPosition(0, y, 0);
-
-    if (!this.propDockView) this.propDockView = new PropDockView();
-    this.actionDockNode = this.propDockView.layout({
-      parent: this.node,
-      layer: 1 << 25,
-      propButtons: this.propButtons,
-      targetCount: this.slotNodes.length,
-      viewWidth,
-      viewHeight,
-      horizontalPadding,
-      usedW,
-      btnW,
-      btnH,
-      gap,
-      startX,
-      buttonY: y,
-      choosing,
-      aimingIndex,
-      playing: this.uiState === 'playing',
-    }).node;
 
     this.ensurePropButtonBackgrounds();
     this.propButtonNodes.forEach((btn: Node, i: number) => {
       const x = startX + i * (btnW + gap);
       btn.active = true;
       const buttonOpacity = btn.getComponent(UIOpacity) ?? btn.addComponent(UIOpacity);
-      buttonOpacity.opacity = choosing ? (i === aimingIndex ? 255 : 82) : 255;
+      buttonOpacity.opacity = 255;
       let ut = btn.getComponent(UITransform);
       if (!ut) ut = btn.addComponent(UITransform);
       ut.setContentSize(btnW, btnH);
@@ -4850,7 +5037,7 @@ export class GameRunner extends Component {
       if (bg) {
         bg.active = true;
         const bgOpacity = bg.getComponent(UIOpacity) ?? bg.addComponent(UIOpacity);
-        bgOpacity.opacity = choosing ? (i === aimingIndex ? 255 : 82) : 255;
+        bgOpacity.opacity = 255;
         bg.getComponent(UITransform)!.setContentSize(btnW, btnH);
         bg.setPosition(x, 0, 0);
       }

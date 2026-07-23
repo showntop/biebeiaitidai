@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  boundedThrowPeakY,
   findLockedCardSlot,
-  isHorizontalTargetGesture,
+  guidedThrowLeadPoint,
   isManualThrowGesture,
-  isThrowCancelGesture,
+  projectedThrowTargetX,
   throwPresentationStrength,
 } from '../assets/scripts/core/ThrowGesture';
 
@@ -13,17 +14,25 @@ describe('投掷手势', () => {
     expect(isManualThrowGesture(18, 1)).toBe(true);
   });
 
-  it('向上甩的横向漂移不抢目标，明确横扫才进入选位', () => {
-    expect(isHorizontalTargetGesture(22, 80)).toBe(false);
-    expect(isHorizontalTargetGesture(30, 20)).toBe(true);
-    expect(isHorizontalTargetGesture(-30, 20)).toBe(true);
-    expect(isHorizontalTargetGesture(17, 0)).toBe(false);
+  it('按拖动朝向投影到任务横排，轻微上移不会无限放大', () => {
+    expect(projectedThrowTargetX(-100, -400, 0, -200, 200)).toBe(140);
+    expect(projectedThrowTargetX(-100, -400, 40, -395, 200)).toBe(40);
+    expect(projectedThrowTargetX(-100, -400, -100, -100, 200)).toBe(-100);
   });
 
-  it('向下回拉取消，普通松手和向上甩都不会取消', () => {
-    expect(isThrowCancelGesture(-53)).toBe(false);
-    expect(isThrowCancelGesture(-54)).toBe(true);
-    expect(isThrowCancelGesture(120)).toBe(false);
+  it('投掷最高点不越过屏顶安全边界', () => {
+    expect(boundedThrowPeakY(-400, 260, 360, 175)).toBe(332);
+    expect(boundedThrowPeakY(-400, 120, 360, 32)).toBe(152);
+    expect(boundedThrowPeakY(-400, 350, 360, 80)).toBe(350);
+  });
+
+  it('引导投掷前段保留玩家的甩出方向，慢速时则稳定朝目标', () => {
+    const flick = guidedThrowLeadPoint({ x: 0, y: 0 }, { x: 200, y: 400 }, { x: -600, y: 900 }, true);
+    expect(flick.x).toBeLessThan(0);
+    expect(flick.y).toBeGreaterThan(0);
+    const tap = guidedThrowLeadPoint({ x: 0, y: 0 }, { x: 200, y: 400 }, { x: 0, y: 0 }, false);
+    expect(tap.x).toBeGreaterThan(0);
+    expect(tap.y).toBeGreaterThan(0);
   });
 
   it('甩速只映射到 0~1 演出强度', () => {

@@ -10,8 +10,10 @@ export interface PauseMenuOptions {
   automatic: boolean;
   soundEnabled: () => boolean;
   hapticsEnabled: () => boolean;
+  reducedMotion: () => boolean;
   toggleSound: () => void;
   toggleHaptics: () => void;
+  toggleReducedMotion: () => void;
   resume: () => void;
   retry: () => void;
   returnHome: () => void;
@@ -66,11 +68,14 @@ export class PauseMenuView {
     subtitle.string = options.automatic ? '回到游戏后，点继续再开工' : '倒计时和任务队列都已停住';
 
     const toggleY = h * 0.075;
-    const toggleW = (w - 66) / 2;
-    const sound = this.toggle(panel, 'PauseSound', -toggleW / 2 - 8, toggleY, toggleW, 52, '音效', options.soundEnabled, options.toggleSound);
-    const haptics = this.toggle(panel, 'PauseHaptics', toggleW / 2 + 8, toggleY, toggleW, 52, '震动', options.hapticsEnabled, options.toggleHaptics);
+    const toggleW = (w - 78) / 3;
+    const toggleStep = toggleW + 8;
+    const sound = this.toggle(panel, 'PauseSound', -toggleStep, toggleY, toggleW, 52, '音效', options.soundEnabled, options.toggleSound);
+    const haptics = this.toggle(panel, 'PauseHaptics', 0, toggleY, toggleW, 52, '震动', options.hapticsEnabled, options.toggleHaptics);
+    const motion = this.toggle(panel, 'PauseMotion', toggleStep, toggleY, toggleW, 52, '动态效果', () => !options.reducedMotion(), options.toggleReducedMotion);
     sound.setSiblingIndex(panel.children.length - 1);
     haptics.setSiblingIndex(panel.children.length - 1);
+    motion.setSiblingIndex(panel.children.length - 1);
 
     this.button(panel, 'PauseResume', 0, -h * 0.095, w - 54, 64, '继续游戏', 'primary', options.resume);
     const smallW = (w - 70) / 2;

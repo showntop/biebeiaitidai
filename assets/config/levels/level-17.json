@@ -7,7 +7,7 @@
   "whiteDistribution": {
     "early":  { "routine": 0.44, "report": 0.28, "key": 0.17, "proposal": 0.11, "urgent": 0.00 },
     "mid":    { "routine": 0.23, "report": 0.24, "key": 0.24, "proposal": 0.22, "urgent": 0.07 },
-    "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.14 }
+    "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.13 }
   },
   "idleCardRatio": 0.09,
   "taskModifiers": {

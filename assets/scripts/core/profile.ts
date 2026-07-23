@@ -7,6 +7,7 @@
 import { LevelSequence } from './config';
 import type { GameResult } from './types';
 import type { RunReport } from './RunReport';
+import { StarMilestones } from './CareerRoute';
 
 /** §3.2 段位档（加权分分档，权重向"猎杀次数"倾斜）。 */
 export const Rank = {
@@ -145,7 +146,18 @@ export function applyRunResult(profile: PlayerProfile, levelIndex: number, repor
   if (report.stars === 3 && !profile.star3Levels.includes(levelIndex)) {
     profile.star3Levels.push(levelIndex);
   }
+  awardStarMilestones(profile);
   return profile;
+}
+
+/** 总星里程碑兑现为纯展示收藏，不改变战斗数值。 */
+function awardStarMilestones(profile: PlayerProfile): void {
+  const stars = totalStars(profile);
+  for (const milestone of StarMilestones) {
+    if (stars >= milestone.stars && !profile.cosmetics.includes(milestone.cosmetic)) {
+      profile.cosmetics.push(milestone.cosmetic);
+    }
+  }
 }
 
 function clampStars(value: unknown): number {

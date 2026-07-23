@@ -72,7 +72,7 @@ export class ResultDialogView {
     scrim.getComponent(UITransform)!.setContentSize(model.viewWidth, model.viewHeight);
     const sg = scrim.getComponent(Graphics)!;
     sg.clear();
-    sg.fillColor = new Color(78, 68, 56, 86);
+    sg.fillColor = new Color(64, 54, 45, 154);
     sg.rect(-model.viewWidth / 2, -model.viewHeight / 2, model.viewWidth, model.viewHeight);
     sg.fill();
     scrim.setPosition(0, 0, 0);

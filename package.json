@@ -4,11 +4,13 @@
   "private": true,
   "description": "《别让AI替代你》核心规则层（纯TS，零Cocos依赖）+ 数据驱动配置 + 规则测试",
   "scripts": {
+    "lint": "node scripts/lint-project.mjs",
     "test": "vitest run --exclude 'tests/sim.*.test.ts'",
     "test:watch": "vitest",
     "sim": "vitest run tests/sim.bot.test.ts",
     "sim:levels": "vitest run tests/sim.levels.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "quality": "npm run lint && npm run typecheck && npm test && npm run sim:levels"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

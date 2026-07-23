@@ -74,6 +74,7 @@ export class SensoryFeedback {
   private context: AudioContextLike | null = null;
   private soundEnabled = true;
   private hapticsEnabled = true;
+  private reducedMotion = false;
   private lastCueAt = new Map<FeedbackCue, number>();
   private lastHapticAt = 0;
 
@@ -135,8 +136,8 @@ export class SensoryFeedback {
     try { nav?.vibrate?.(duration); } catch { /* 能力降级 */ }
   }
 
-  get settings(): { soundEnabled: boolean; hapticsEnabled: boolean } {
-    return { soundEnabled: this.soundEnabled, hapticsEnabled: this.hapticsEnabled };
+  get settings(): { soundEnabled: boolean; hapticsEnabled: boolean; reducedMotion: boolean } {
+    return { soundEnabled: this.soundEnabled, hapticsEnabled: this.hapticsEnabled, reducedMotion: this.reducedMotion };
   }
 
   setSoundEnabled(enabled: boolean): void {
@@ -146,6 +147,11 @@ export class SensoryFeedback {
 
   setHapticsEnabled(enabled: boolean): void {
     this.hapticsEnabled = enabled;
+    this.saveSettings();
+  }
+
+  setReducedMotion(enabled: boolean): void {
+    this.reducedMotion = enabled;
     this.saveSettings();
   }
 
@@ -202,9 +208,10 @@ export class SensoryFeedback {
     try {
       const raw = sys.localStorage?.getItem(SETTINGS_KEY);
       if (!raw) return;
-      const value = JSON.parse(raw) as { soundEnabled?: unknown; hapticsEnabled?: unknown };
+      const value = JSON.parse(raw) as { soundEnabled?: unknown; hapticsEnabled?: unknown; reducedMotion?: unknown };
       if (typeof value.soundEnabled === 'boolean') this.soundEnabled = value.soundEnabled;
       if (typeof value.hapticsEnabled === 'boolean') this.hapticsEnabled = value.hapticsEnabled;
+      if (typeof value.reducedMotion === 'boolean') this.reducedMotion = value.reducedMotion;
     } catch {
       // 损坏设置回退默认开启。
     }
@@ -219,6 +226,7 @@ export class SensoryFeedback {
       settings: () => this.settings,
       setSoundEnabled: (enabled: boolean) => this.setSoundEnabled(enabled),
       setHapticsEnabled: (enabled: boolean) => this.setHapticsEnabled(enabled),
+      setReducedMotion: (enabled: boolean) => this.setReducedMotion(enabled),
       preview: (cue: FeedbackCue) => { this.unlock(); this.play(cue); },
     };
     (globalThis as unknown as { __BRAATN_FEEDBACK__: typeof api }).__BRAATN_FEEDBACK__ = api;

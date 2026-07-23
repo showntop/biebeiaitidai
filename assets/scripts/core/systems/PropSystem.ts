@@ -31,6 +31,8 @@ interface PropRuntime {
 export class PropSystem {
   private rt: Record<PropType, PropRuntime>;
   private charging: PropType | null = null;
+  /** 触摸直选期间由表现层决定目标，旧扫描器不得自动脱手。 */
+  private manualTargeting = false;
   private scan = 0; // 蓄力扫描进度 [0..1]
   private combo = 0;
   private perfectChain = 0;
@@ -83,7 +85,7 @@ export class PropSystem {
         this.scan = 1;
         // §4.3-3 扫满：当前(最远)挡位是有效目标则保持等松手；空挡/无效才自动脱手
         const far = this.slots - 1;
-        if (!this.targetValid(this.charging, far)) {
+        if (!this.manualTargeting && !this.targetValid(this.charging, far)) {
           this.resolve(this.charging, far, HQ.Normal);
         }
       }
@@ -91,10 +93,11 @@ export class PropSystem {
   }
 
   /** 开始蓄力（加需求/改需求/丢锅）。拍马屁用 useKissUp。不可用时返回 false。 */
-  beginCharge(prop: PropType): boolean {
+  beginCharge(prop: PropType, manualTargeting = false): boolean {
     if (prop === PT.KissUp) return false;
     if (!this.canUse(prop)) return false;
     this.charging = prop;
+    this.manualTargeting = manualTargeting;
     this.scan = 0;
     return true;
   }
@@ -338,6 +341,7 @@ export class PropSystem {
 
   private endCharge(): void {
     this.charging = null;
+    this.manualTargeting = false;
     this.scan = 0;
   }
 }

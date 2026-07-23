@@ -3,13 +3,13 @@
   "title": "第19轮反击·喘息窗口",
   "durationSec": 55,
   "slots": 6,
-  "approvalInit": 36,
+  "approvalInit": 50,
   "whiteDistribution": {
     "early":  { "routine": 0.52, "report": 0.28, "key": 0.13, "proposal": 0.07, "urgent": 0.00 },
     "mid":    { "routine": 0.33, "report": 0.27, "key": 0.18, "proposal": 0.14, "urgent": 0.08 },
     "crisis": { "routine": 0.22, "report": 0.20, "key": 0.21, "proposal": 0.24, "urgent": 0.13 }
   },
-  "idleCardRatio": 0.16,
+  "idleCardRatio": 0.08,
   "taskModifiers": {
     "eliteRatio": { "early": 0.00, "mid": 0.04, "crisis": 0.08 },
     "linkRatio": { "early": 0.03, "mid": 0.08, "crisis": 0.12 },

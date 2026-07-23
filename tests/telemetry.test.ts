@@ -76,6 +76,9 @@ describe('RunTelemetry', () => {
     telemetry.startLevel(2, 7);
     telemetry.released('change-demand');
     telemetry.released('throw-pot');
+    telemetry.manualThrowStarted('change-demand');
+    telemetry.targetChanged('change-demand', 2, 3);
+    telemetry.releaseNoop('throw-pot', 'target-left-belt');
     telemetry.validHit('change-demand', 'normal');
     telemetry.invalidTarget('throw-pot', 'empty');
     telemetry.gestureCanceled('add-demand');
@@ -92,6 +95,9 @@ describe('RunTelemetry', () => {
       releases: 2,
       invalidTargets: 1,
       cancels: 1,
+      targetSwitches: 1,
+      manualThrows: 1,
+      releaseNoops: 1,
       hitRate: 0.5,
       cancelRate: 0.3333,
       changeDemandUses: 1,
@@ -105,6 +111,27 @@ describe('RunTelemetry', () => {
     });
     expect(sink.events.find((e) => e.name === 'fail_reason')?.payload.reason).toBe('boss-inspection');
     expect(sink.events.find((e) => e.name === 'retry')).toMatchObject({ runId: 's2-1', levelIndex: 2 });
+  });
+
+  it('记录首个手动投掷、目标切换、无效松手与教学理解耗时', () => {
+    let now = 500;
+    const sink = new MemoryTelemetrySink();
+    const telemetry = new RunTelemetry(sink, {
+      sessionId: 'gesture', platform: 'test', deviceTier: 'mid', appVersion: '0.1.0',
+    }, () => now);
+    telemetry.startLevel(0, 5);
+    now += 900;
+    telemetry.manualThrowStarted('change-demand');
+    telemetry.manualThrowStarted('change-demand');
+    telemetry.targetChanged('change-demand', 1, 2);
+    telemetry.releaseNoop('change-demand', 'no-valid-target');
+    now += 100;
+    telemetry.tutorialCompleted(2);
+
+    expect(sink.events.filter((event) => event.name === 'first_manual_throw')).toHaveLength(1);
+    expect(sink.events.find((event) => event.name === 'target_changed')?.payload).toMatchObject({ fromSlot: 1, toSlot: 2 });
+    expect(sink.events.find((event) => event.name === 'release_noop')?.payload.reason).toBe('no-valid-target');
+    expect(sink.events.find((event) => event.name === 'tutorial_completed')?.payload).toMatchObject({ step: 2, sinceLevelStartMs: 1000 });
   });
 
   it('新一局会重置首次事件和聚合统计', () => {

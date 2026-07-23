@@ -95,6 +95,17 @@ describe('PropSystem · 加需求（插队键，随手可用）', () => {
   });
 });
 
+describe('PropSystem · 触摸直选', () => {
+  it('扫描到无效远端后仍保持蓄力，直到玩家明确松手或取消', () => {
+    const { prop } = setup([mk('urgent', 'active-white', 10)]);
+    expect(prop.beginCharge(PT.ChangeDemand, true)).toBe(true);
+    prop.tick(2, 'mid');
+    expect(prop.chargingProp).toBe(PT.ChangeDemand);
+    prop.cancel(PT.ChangeDemand);
+    expect(prop.chargingProp).toBeNull();
+  });
+});
+
 describe('PropSystem · Perfect 可变奖励（§4.3）', () => {
   it('在挡位中心窗口松手＝Perfect 命中', () => {
     const { bus, prop } = setup([mk('urgent', 'active-white', 10)]);

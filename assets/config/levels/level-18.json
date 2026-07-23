@@ -1,25 +1,25 @@
 {
   "id": "level-18",
   "title": "第18轮反击·需求雪崩",
-  "durationSec": 65,
+  "durationSec": 60,
   "slots": 6,
-  "approvalInit": 40,
+  "approvalInit": 38,
   "whiteDistribution": {
     "early":  { "routine": 0.42, "report": 0.28, "key": 0.18, "proposal": 0.12, "urgent": 0.00 },
     "mid":    { "routine": 0.21, "report": 0.23, "key": 0.25, "proposal": 0.23, "urgent": 0.08 },
     "crisis": { "routine": 0.15, "report": 0.18, "key": 0.25, "proposal": 0.30, "urgent": 0.12 }
   },
-  "idleCardRatio": 0.12,
+  "idleCardRatio": 0.14,
   "taskModifiers": {
-    "eliteRatio": { "early": 0.00, "mid": 0.09, "crisis": 0.17 },
-    "linkRatio": { "early": 0.04, "mid": 0.12, "crisis": 0.18 },
+    "eliteRatio": { "early": 0.00, "mid": 0.07, "crisis": 0.13 },
+    "linkRatio": { "early": 0.04, "mid": 0.10, "crisis": 0.15 },
     "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
   },
   "boss": {
     "enabled": true,
     "minSpawnSec": 18,
     "scheduleSec": [18, 36, 53],
-    "patternLabel": "全场加盾 · 三连深查3张 · 18/36/53秒",
+    "patternLabel": "重点加盾 · 三连深查3张 · 18/36/53秒",
     "inspectionLimit": 3,
     "arrivalEffect": "fortify-all"
   },

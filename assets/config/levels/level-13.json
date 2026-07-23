@@ -1,15 +1,15 @@
 {
   "id": "level-13",
   "title": "第13轮反击·返工连锁",
-  "durationSec": 65,
+  "durationSec": 60,
   "slots": 6,
-  "approvalInit": 40,
+  "approvalInit": 44,
   "whiteDistribution": {
     "early":  { "routine": 0.42, "report": 0.28, "key": 0.18, "proposal": 0.12, "urgent": 0.00 },
     "mid":    { "routine": 0.22, "report": 0.23, "key": 0.25, "proposal": 0.22, "urgent": 0.08 },
     "crisis": { "routine": 0.16, "report": 0.18, "key": 0.25, "proposal": 0.29, "urgent": 0.12 }
   },
-  "idleCardRatio": 0.14,
+  "idleCardRatio": 0.10,
   "taskModifiers": {
     "eliteRatio": { "early": 0.00, "mid": 0.03, "crisis": 0.07 },
     "linkRatio": { "early": 0.04, "mid": 0.10, "crisis": 0.14 },

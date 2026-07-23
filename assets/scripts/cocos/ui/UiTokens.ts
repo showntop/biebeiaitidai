@@ -254,11 +254,11 @@ export const UiTokens = Object.freeze({
     settleFadeSec: 0.14,
   }),
   tutorial: Object.freeze({
-    holdHint: '轻点快投推荐目标，或按住选择',
-    dragHint: '左右换目标 · 松手投出 · 上甩更爽',
-    releaseHint: '松手投出 · 向下拉回取消',
-    dockHint: '轻点快投 · 左右选位 · 上甩更爽',
-    hitHint: '命中！认可度变化会飞向进度条',
+    holdHint: '先轻点“改需求” · 自动快投推荐白卡',
+    dragHint: '按住再拖动 · 纸团跟手，准星就是落点',
+    releaseHint: '松手甩出 · 拖回按钮可收回',
+    dockHint: '轻点快投 · 按住拖甩精准换目标',
+    hitHint: '命中！卡片已返工，抵达后认可度会下降',
   }),
   type: Object.freeze({
     display: 48,

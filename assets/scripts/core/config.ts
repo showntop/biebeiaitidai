@@ -30,6 +30,7 @@ import level18Json from '../../config/levels/level-18.json';
 import level19Json from '../../config/levels/level-19.json';
 import level20Json from '../../config/levels/level-20.json';
 import type { CardCategory, PropType, GamePhase, ApprovalZone, PerfectRewardType } from './types';
+import { assertProjectConfig } from './ConfigValidation';
 
 export interface CardDef {
   weight: number;
@@ -211,6 +212,13 @@ export const LevelSequence: LevelDef[] = [
   level19Json as unknown as LevelDef,
   level20Json as unknown as LevelDef,
 ];
+
+assertProjectConfig({
+  cards: CardsConfig,
+  props: PropsConfig,
+  balance: BalanceConfig,
+  levels: LevelSequence,
+});
 
 /** §1.2 当前已解锁的道具（累积，关卡序列驱动）。 */
 export function unlockedPropsUpTo(levelIndex: number): PropType[] {

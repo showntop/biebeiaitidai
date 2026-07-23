@@ -3,19 +3,20 @@
   "title": "第10轮反击·AI接管倒计时",
   "durationSec": 60,
   "slots": 6,
-  "approvalInit": 45,
+  "approvalInit": 50,
   "whiteDistribution": {
     "early":  { "routine": 0.46, "report": 0.28, "key": 0.16, "proposal": 0.10, "urgent": 0.00 },
     "mid":    { "routine": 0.26, "report": 0.24, "key": 0.22, "proposal": 0.20, "urgent": 0.08 },
-    "crisis": { "routine": 0.18, "report": 0.20, "key": 0.22, "proposal": 0.27, "urgent": 0.16 }
+    "crisis": { "routine": 0.18, "report": 0.20, "key": 0.22, "proposal": 0.27, "urgent": 0.13 }
   },
-  "idleCardRatio": 0.12,
+  "idleCardRatio": 0.08,
   "boss": {
     "enabled": true,
     "minSpawnSec": 20,
     "scheduleSec": [24],
     "patternLabel": "重点抽查 · 最多2张 · 24秒",
-    "inspectionLimit": 2
+    "inspectionLimit": 2,
+    "arrivalEffect": "escalate-highest"
   },
   "objective": { "kind": "boss-safe", "label": "不让 Boss 临检生效" },
   "hook": "第一场 Boss 临检，读懂预警并极限拦截",

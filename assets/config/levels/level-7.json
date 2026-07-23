@@ -7,7 +7,7 @@
   "whiteDistribution": {
     "early":  { "routine": 0.48, "report": 0.30, "key": 0.15, "proposal": 0.07, "urgent": 0.00 },
     "mid":    { "routine": 0.28, "report": 0.25, "key": 0.22, "proposal": 0.18, "urgent": 0.07 },
-    "crisis": { "routine": 0.20, "report": 0.20, "key": 0.22, "proposal": 0.26, "urgent": 0.14 }
+    "crisis": { "routine": 0.20, "report": 0.20, "key": 0.22, "proposal": 0.26, "urgent": 0.12 }
   },
   "idleCardRatio": 0.12,
   "boss": { "enabled": false, "minSpawnSec": 999 },

@@ -40,7 +40,7 @@
 ## 本地发布门禁记录（2026-07-18）
 
 - `npm run typecheck`：通过。
-- `npm test`：132 项通过。
+- `npm test`：180+ 项通过。
 - `npm run sim:levels`：20 关双策略模拟通过。
 - Cocos Creator 3.8.8 `web-mobile`：构建完成。
 - Cocos Creator 3.8.8 `wechatgame`：构建完成。

@@ -243,8 +243,8 @@ export class Game {
   }
 
   /* ---------- 输入 API（Cocos 输入层调用） ---------- */
-  beginCharge(prop: PropType): boolean {
-    return this.prop.beginCharge(prop);
+  beginCharge(prop: PropType, manualTargeting = false): boolean {
+    return this.prop.beginCharge(prop, manualTargeting);
   }
   release(prop: PropType): boolean {
     return this.prop.release(prop);

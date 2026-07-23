@@ -3,23 +3,23 @@
   "title": "第20轮反击·最终接管危机",
   "durationSec": 60,
   "slots": 6,
-  "approvalInit": 42,
+  "approvalInit": 36,
   "whiteDistribution": {
     "early":  { "routine": 0.44, "report": 0.28, "key": 0.17, "proposal": 0.11, "urgent": 0.00 },
     "mid":    { "routine": 0.24, "report": 0.24, "key": 0.23, "proposal": 0.22, "urgent": 0.07 },
-    "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.14 }
+    "crisis": { "routine": 0.16, "report": 0.18, "key": 0.24, "proposal": 0.29, "urgent": 0.13 }
   },
-  "idleCardRatio": 0.10,
+  "idleCardRatio": 0.08,
   "taskModifiers": {
-    "eliteRatio": { "early": 0.02, "mid": 0.12, "crisis": 0.22 },
-    "linkRatio": { "early": 0.08, "mid": 0.18, "crisis": 0.25 },
+    "eliteRatio": { "early": 0.02, "mid": 0.11, "crisis": 0.20 },
+    "linkRatio": { "early": 0.08, "mid": 0.16, "crisis": 0.23 },
     "eliteMinWeight": 5, "eliteGuardReduction": 2, "linkBonus": 1, "maxElite": 2
   },
   "boss": {
     "enabled": true,
     "minSpawnSec": 16,
-    "scheduleSec": [17, 34, 50],
-    "patternLabel": "全场加盾 · 终局全量扫描 · 17/34/50秒",
+    "scheduleSec": [20, 40, 54],
+    "patternLabel": "全场加盾 · 终局全量扫描 · 20/40/54秒",
     "arrivalEffect": "fortify-all"
   },
   "unlockedProps": ["add-demand", "change-demand", "throw-pot", "kiss-up"],

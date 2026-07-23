@@ -3,13 +3,13 @@
   "title": "第14轮反击·喘息窗口",
   "durationSec": 55,
   "slots": 6,
-  "approvalInit": 36,
+  "approvalInit": 50,
   "whiteDistribution": {
     "early":  { "routine": 0.55, "report": 0.27, "key": 0.12, "proposal": 0.06, "urgent": 0.00 },
     "mid":    { "routine": 0.35, "report": 0.28, "key": 0.17, "proposal": 0.12, "urgent": 0.08 },
     "crisis": { "routine": 0.25, "report": 0.20, "key": 0.20, "proposal": 0.22, "urgent": 0.13 }
   },
-  "idleCardRatio": 0.18,
+  "idleCardRatio": 0.09,
   "taskModifiers": {
     "eliteRatio": { "early": 0.00, "mid": 0.08, "crisis": 0.16 },
     "linkRatio": { "early": 0.04, "mid": 0.08, "crisis": 0.14 },

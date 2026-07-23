@@ -32,6 +32,9 @@ const UI_2D = 1 << 25; // 33554432
 export class FxLayer {
   private unsubs: (() => void)[] = [];
   private lastComboMilestone = 0;
+  /** 命中/结算飘字是最高频短命节点，复用可显著减少低端机瞬时 GC。 */
+  private readonly textPool: Node[] = [];
+  private readonly activeTextNodes = new Set<Node>();
 
   /** root 初始位置：屏震每次先归位到此基准，避免多次震动叠加导致画面残留偏移。 */
   private readonly rootBase: Vec3;
@@ -66,6 +69,15 @@ export class FxLayer {
     this.unsubs = [];
     Tween.stopAllByTarget(this.root);
     if (this.approvalLabel?.isValid) Tween.stopAllByTarget(this.approvalLabel.node);
+    for (const node of this.activeTextNodes) {
+      Tween.stopAllByTarget(node);
+      const opacity = node.getComponent(UIOpacity);
+      if (opacity) Tween.stopAllByTarget(opacity);
+      if (node.isValid) node.destroy();
+    }
+    this.activeTextNodes.clear();
+    for (const node of this.textPool) if (node.isValid) node.destroy();
+    this.textPool.length = 0;
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -1238,11 +1250,8 @@ export class FxLayer {
 
   /** 浮动文字：从指定位置向上飘 50px 并淡出。 */
   private floatText(text: string, x: number, y: number, color: Color, duration: number, fontSize = 28): void {
-    const node = new Node('FxText');
-    node.layer = UI_2D;
-    const ut = node.addComponent(UITransform);
-    ut.setContentSize(300, 40);
-    const label = node.addComponent(Label);
+    const node = this.acquireTextNode();
+    const label = node.getComponent(Label)!;
     label.string = text;
     label.fontSize = fontSize;
     label.lineHeight = fontSize + 6;
@@ -1251,18 +1260,43 @@ export class FxLayer {
     label.verticalAlign = 1;
     node.setPosition(x, y, 0);
     this.root.addChild(node);
-
-    const op = node.addComponent(UIOpacity);
+    node.active = true;
+    this.activeTextNodes.add(node);
+    const op = node.getComponent(UIOpacity)!;
     op.opacity = 255;
     tween(op)
       .delay(duration * 0.4)
       .to(duration * 0.6, { opacity: 0 })
-      .call(() => { if (node.isValid) node.destroy(); })
+      .call(() => this.releaseTextNode(node))
       .start();
 
     tween(node)
       .by(duration, { position: new Vec3(0, 50, 0) })
       .start();
+  }
+
+  private acquireTextNode(): Node {
+    const node = this.textPool.pop() ?? new Node('FxText');
+    node.layer = UI_2D;
+    const ut = node.getComponent(UITransform) ?? node.addComponent(UITransform);
+    ut.setContentSize(300, 40);
+    node.getComponent(Label) ?? node.addComponent(Label);
+    node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+    node.setScale(1, 1, 1);
+    node.angle = 0;
+    return node;
+  }
+
+  private releaseTextNode(node: Node): void {
+    if (!node.isValid || !this.activeTextNodes.has(node)) return;
+    Tween.stopAllByTarget(node);
+    const opacity = node.getComponent(UIOpacity);
+    if (opacity) Tween.stopAllByTarget(opacity);
+    this.activeTextNodes.delete(node);
+    node.removeFromParent();
+    node.active = false;
+    if (this.textPool.length < 12) this.textPool.push(node);
+    else node.destroy();
   }
 
   /**

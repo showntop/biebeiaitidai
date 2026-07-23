@@ -11,6 +11,10 @@ export type TelemetryEventName =
   | 'first_release'
   | 'first_valid_hit'
   | 'first_perfect'
+  | 'first_manual_throw'
+  | 'target_changed'
+  | 'release_noop'
+  | 'tutorial_completed'
   | 'invalid_target'
   | 'gesture_cancel'
   | 'approval_zone_changed'
@@ -69,6 +73,9 @@ interface ActiveRun {
   perfects: number;
   invalidTargets: number;
   cancels: number;
+  targetSwitches: number;
+  manualThrows: number;
+  releaseNoops: number;
   firstHitMs: number | null;
   propUses: Record<PropType, number>;
 }
@@ -132,6 +139,9 @@ export class RunTelemetry {
       perfects: 0,
       invalidTargets: 0,
       cancels: 0,
+      targetSwitches: 0,
+      manualThrows: 0,
+      releaseNoops: 0,
       firstHitMs: null,
       propUses: {
         'add-demand': 0,
@@ -153,6 +163,31 @@ export class RunTelemetry {
 
   dragStarted(): void {
     this.emitFirst('first_drag', 'first-drag', { sinceLevelStartMs: this.sinceStartMs() });
+  }
+
+  manualThrowStarted(prop: PropType): void {
+    const run = this.activeRun;
+    if (!run) return;
+    run.manualThrows++;
+    this.emitFirst('first_manual_throw', 'first-manual-throw', { prop, sinceLevelStartMs: this.sinceStartMs() });
+  }
+
+  targetChanged(prop: PropType, fromSlot: number, toSlot: number): void {
+    const run = this.activeRun;
+    if (!run || fromSlot === toSlot) return;
+    run.targetSwitches++;
+    this.emit('target_changed', { prop, fromSlot, toSlot });
+  }
+
+  releaseNoop(prop: PropType, reason: string): void {
+    const run = this.activeRun;
+    if (!run) return;
+    run.releaseNoops++;
+    this.emit('release_noop', { prop, reason });
+  }
+
+  tutorialCompleted(step: number): void {
+    this.emitFirst('tutorial_completed', 'tutorial-completed', { step, sinceLevelStartMs: this.sinceStartMs() });
   }
 
   released(prop: PropType): void {
@@ -257,6 +292,9 @@ export class RunTelemetry {
       releases: run.releases,
       invalidTargets: run.invalidTargets,
       cancels: run.cancels,
+      targetSwitches: run.targetSwitches,
+      manualThrows: run.manualThrows,
+      releaseNoops: run.releaseNoops,
       hitRate: ratio(run.hits, run.releases),
       perfectRate: ratio(run.perfects, run.hits),
       cancelRate: ratio(run.cancels, releaseAttempts),
